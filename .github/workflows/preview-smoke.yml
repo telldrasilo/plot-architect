@@ -1,0 +1,69 @@
+name: Wrangler local preview smoke (no deployment)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  preview-smoke:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    env:
+      WRANGLER_SEND_METRICS: 'false'
+      CLOUDFLARE_CF_FETCH_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - name: Install exact project dependencies
+        run: npm ci --include=dev --no-audit --no-fund
+      - name: Verify Wrangler from project lockfile
+        run: |
+          test -f node_modules/wrangler/bin/wrangler.js
+          node node_modules/wrangler/bin/wrangler.js --version
+      - name: Build compiled Worker
+        run: npm run build
+      - name: Start isolated preview and smoke-test local D1
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/pa-preview.log"
+          npm run dev -- --port 8787 > "$log" 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+
+          ready=0
+          for i in $(seq 1 45); do
+            if curl -fsS --max-time 2 http://127.0.0.1:8787/api/health >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$preview_pid" 2>/dev/null; then break; fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "Local Wrangler preview did not become healthy"
+            tail -n 120 "$log"
+            exit 1
+          fi
+
+          code=$(curl -sS --max-time 8 -o "$RUNNER_TEMP/unauthorized.json" -w '%{http_code}' http://127.0.0.1:8787/api/projects)
+          if [ "$code" != 401 ]; then
+            echo "Expected local unauthorized API 401, received $code"
+            cat "$RUNNER_TEMP/unauthorized.json"
+            exit 1
+          fi
+
+          curl -fsS --max-time 8 -H 'Cookie: plot_qa_owner=1' http://127.0.0.1:8787/api/projects > "$RUNNER_TEMP/authorized.json"
+          node -e "const f=require('node:fs');const x=JSON.parse(f.readFileSync(process.argv[1],'utf8'));if(!Array.isArray(x.projects))process.exit(1)" "$RUNNER_TEMP/authorized.json"
+          echo "PASS: local Wrangler preview, local D1, QA cookie simulation and anonymous 401."
+          echo "NOTE: QA cookie simulates identity; this is NOT ChatGPT Sites private preview or hosted D1."
