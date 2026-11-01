@@ -102,3 +102,10 @@ jobs:
           JS
           echo "PASS: hosted v3 backend + approved UX Vite build and local preview."
           echo "NOT proof of ChatGPT Sites preview, actual native identity, or production D1."
+      - name: Preserve compiled CI candidate for inspection (not deployable)
+        uses: actions/upload-artifact@v4
+        with:
+          name: pa-hosted-v3-vite-compiled
+          path: site/dist/
+          retention-days: 7
+          if-no-files-found: error
