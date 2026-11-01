@@ -24,6 +24,9 @@ function graphiteHtml() {
 
 export default defineConfig({
   root: projectRoot,
+  // ChatGPT Sites local preview uses a fixed local hostname. Never use wildcard hosts.
+  server: { allowedHosts: ['terminal.local'] },
+  preview: { allowedHosts: ['terminal.local'] },
   plugins: [
     graphiteHtml(),
     sites(),

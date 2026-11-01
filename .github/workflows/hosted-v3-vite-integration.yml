@@ -41,7 +41,7 @@ jobs:
           0058de01b8b67c92d81cd1e36492b6940d728b7553848005d8e3e7ffdf608d7b  src/editor.js
           e00f37abb1e1b2d83195a52665df93491287293b0c9a75f78a6c20e807fb427c  public/index.html
           67a520c43959d475259c989e29524b7d605ab5f22453e6e2ad13626a256c020c  package-lock.json
-          581536f401c2a150f3fa929aac155b76cfd57d017c9d06485701a6df10cc1fac  sites-vite-compat/vite.config.mjs
+          d475cd6bb3e17192b50acefd3c882cdcdeb924ac92820792eb56c3d46bfe620a  sites-vite-compat/vite.config.mjs
           f5138a6c0d759b0d826e650b5fc2813212d156b9649210d8fd2811ab5177a991  src/sites-vite-entry.mjs
           HASHES
       - name: Isolated overlay of actual hosted v3 runtime
@@ -70,26 +70,30 @@ jobs:
         run: |
           set -euo pipefail
           log="$RUNNER_TEMP/hosted-v3-vite.log"
-          npm run dev -- --port 8793 > "$log" 2>&1 &
+          npm run dev -- --host 0.0.0.0 --port 4173 --strictPort > "$log" 2>&1 &
           pid=$!
           trap 'kill "$pid" 2>/dev/null || true' EXIT
           ready=0
           for i in $(seq 1 45); do
-            if curl -fsS --max-time 2 http://127.0.0.1:8793/api/health > "$RUNNER_TEMP/health.json"; then ready=1; break; fi
+            if curl -fsS --max-time 2 http://127.0.0.1:4173/api/health > "$RUNNER_TEMP/health.json"; then ready=1; break; fi
             if ! kill -0 "$pid" 2>/dev/null; then break; fi
             sleep 2
           done
           if [ "$ready" -ne 1 ]; then tail -n 120 "$log"; exit 1; fi
-          status=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8793/api/projects)
+          status=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:4173/api/projects)
           test "$status" = 401
-          curl -fsS --max-time 6 http://127.0.0.1:8793/ > "$RUNNER_TEMP/editor.html"
+          curl -fsS --max-time 6 http://127.0.0.1:4173/ > "$RUNNER_TEMP/editor.html"
           grep -qi 'Plot Architect' "$RUNNER_TEMP/editor.html"
+          # Match the hostname used by the private Sites preview browser.
+          curl -fsS --max-time 6 -H 'Host: terminal.local:4173' \
+            http://127.0.0.1:4173/ > "$RUNNER_TEMP/editor-terminal-local.html"
+          grep -qi 'Plot Architect' "$RUNNER_TEMP/editor-terminal-local.html"
           curl -fsS --max-time 6 -H 'content-type: application/json' \
             --data '{"jsonrpc":"2.0","id":1,"method":"server/discover"}' \
-            http://127.0.0.1:8793/mcp > "$RUNNER_TEMP/discovery.json"
+            http://127.0.0.1:4173/mcp > "$RUNNER_TEMP/discovery.json"
           curl -fsS --max-time 6 -H 'content-type: application/json' \
             --data '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
-            http://127.0.0.1:8793/mcp > "$RUNNER_TEMP/tools.json"
+            http://127.0.0.1:4173/mcp > "$RUNNER_TEMP/tools.json"
           node --input-type=module - "$RUNNER_TEMP/discovery.json" "$RUNNER_TEMP/tools.json" <<'JS'
           import fs from 'node:fs';
           import assert from 'node:assert/strict';
