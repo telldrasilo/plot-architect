@@ -1,5 +1,7 @@
 # PA-RELEASE-A — one-pass browser QA after official Vite mock sign-in
 
+**SUPERSEDED (2026-11-02):** Do not run the localhost mock sign-in from the Work browser's `terminal.local` host. Official Sites plugin deliberately rejects that host with 403. This work order is closed; proceed only with [PA_RELEASE_A_SAVE_CANDIDATE_ONLY.md](./PA_RELEASE_A_SAVE_CANDIDATE_ONLY.md) for a saved source candidate without deployment, subject to host-managed D1 binding verification.
+
 **Status:** READY FOR OWNER'S SEPARATE WORK SESSION. Not a source-version/save/deploy authorization.
 
 **Exact existing private Site:** `appgprj_6ae715d7cccc8191bc35fbcd5255d9ce`; published Site v3 unchanged.
