@@ -31,13 +31,13 @@ jobs:
           test -f node_modules/wrangler/bin/wrangler.js
           node node_modules/wrangler/bin/wrangler.js --version
       - name: Build compiled Worker
-        run: npm run build
+        run: npm run build:legacy
       - name: Start isolated preview and smoke-test local D1
         shell: bash
         run: |
           set -euo pipefail
           log="$RUNNER_TEMP/pa-preview.log"
-          npm run dev -- --port 8787 > "$log" 2>&1 &
+          npm run dev:legacy -- --port 8787 > "$log" 2>&1 &
           preview_pid=$!
           trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
 
