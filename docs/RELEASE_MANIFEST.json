@@ -1,0 +1,15 @@
+{
+  "project": "Plot Architect / Graphite",
+  "base": "Graphite v0.13.5-alpha (UX-016)",
+  "release_kind": "local_development_source_only",
+  "source_archive_sha256": "ba35ef7773728ecd687138c5ca06e959b46e69804b3d8a223fca5cab49cfbbdc",
+  "build_check": "PASS locally 2026-11-01",
+  "node_local_test": "46/46 PASS locally 2026-11-01",
+  "hosted_source_current": "NOT_VERIFIED_WITH_THIS_BASELINE",
+  "hosted_deploy": "NONE",
+  "real_d1": "BLOCKED_D1_NOT_VERIFIED",
+  "plugin_change": "NONE",
+  "source_root": "site/",
+  "browser_qa_root": "qa/browser/",
+  "no_secret_scan": "heuristic scan only; human review before publishing"
+}
