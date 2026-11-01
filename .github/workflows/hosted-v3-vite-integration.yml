@@ -1,0 +1,104 @@
+name: Hosted v3 + Vite integration QA (no deployment)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  hosted-v3-integration:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    env:
+      WRANGLER_SEND_METRICS: 'false'
+      CLOUDFLARE_CF_FETCH_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - name: Verify immutable hosted-v3 fixtures and approved UI overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            cd ..
+            cat <<'HASHES' | sha256sum -c -
+          8b5b30f480621df07bd5a236867cd30c11078efe43740d98f9d445906f6a4fd7  qa/hosted-v3/src/worker.mjs
+          5eca120cd95303c5cdf6dd232724a2cfddaf9d149d7bcd58c5fc70ed70c0d79d  qa/hosted-v3/src/mcp_server.mjs
+          a23c4847c9944bc872f2d7376a2a05be495b846b42b9f297c68e15b44cb641a6  qa/hosted-v3/src/graph_contract.mjs
+          57043937e689995ef5f796d9a78ecf52c3ef93d66db99a5041734aba17d70034  qa/hosted-v3/tests/mcp.test.mjs
+          HASHES
+          )
+          cat <<'HASHES' | sha256sum -c -
+          0058de01b8b67c92d81cd1e36492b6940d728b7553848005d8e3e7ffdf608d7b  src/editor.js
+          e00f37abb1e1b2d83195a52665df93491287293b0c9a75f78a6c20e807fb427c  public/index.html
+          67a520c43959d475259c989e29524b7d605ab5f22453e6e2ad13626a256c020c  package-lock.json
+          581536f401c2a150f3fa929aac155b76cfd57d017c9d06485701a6df10cc1fac  sites-vite-compat/vite.config.mjs
+          f5138a6c0d759b0d826e650b5fc2813212d156b9649210d8fd2811ab5177a991  src/sites-vite-entry.mjs
+          HASHES
+      - name: Isolated overlay of actual hosted v3 runtime
+        run: |
+          cp ../qa/hosted-v3/src/worker.mjs src/worker.mjs
+          cp ../qa/hosted-v3/src/mcp_server.mjs src/mcp_server.mjs
+          cp ../qa/hosted-v3/src/graph_contract.mjs src/graph_contract.mjs
+          cp ../qa/hosted-v3/tests/mcp.test.mjs tests/mcp.test.mjs
+      - name: Install exact dependencies
+        run: npm ci --include=dev --no-audit --no-fund
+      - name: Run unmodified hosted v3 REST/MCP/security tests
+        run: |
+          npm run check
+          node --test tests/backend.test.mjs tests/mcp.test.mjs tests/sites-security.test.mjs
+      - name: Build captured hosted runtime through Sites Vite
+        run: |
+          npm run build
+          test -f dist/server/index.js
+          test -f dist/server/wrangler.json
+          test -f dist/.openai/hosting.json
+          test -f dist/.openai/drizzle/meta/_journal.json
+          grep -q 'server/discover' dist/server/index.js
+          grep -q '2026-07-28' dist/server/index.js
+      - name: Exercise Vite preview and hosted MCP discovery (synthetic only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/hosted-v3-vite.log"
+          npm run dev -- --port 8793 > "$log" 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          ready=0
+          for i in $(seq 1 45); do
+            if curl -fsS --max-time 2 http://127.0.0.1:8793/api/health > "$RUNNER_TEMP/health.json"; then ready=1; break; fi
+            if ! kill -0 "$pid" 2>/dev/null; then break; fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then tail -n 120 "$log"; exit 1; fi
+          status=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8793/api/projects)
+          test "$status" = 401
+          curl -fsS --max-time 6 http://127.0.0.1:8793/ > "$RUNNER_TEMP/editor.html"
+          grep -qi 'Plot Architect' "$RUNNER_TEMP/editor.html"
+          curl -fsS --max-time 6 -H 'content-type: application/json' \
+            --data '{"jsonrpc":"2.0","id":1,"method":"server/discover"}' \
+            http://127.0.0.1:8793/mcp > "$RUNNER_TEMP/discovery.json"
+          curl -fsS --max-time 6 -H 'content-type: application/json' \
+            --data '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+            http://127.0.0.1:8793/mcp > "$RUNNER_TEMP/tools.json"
+          node --input-type=module - "$RUNNER_TEMP/discovery.json" "$RUNNER_TEMP/tools.json" <<'JS'
+          import fs from 'node:fs';
+          import assert from 'node:assert/strict';
+          const d=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const t=JSON.parse(fs.readFileSync(process.argv[3],'utf8'));
+          assert.deepEqual(d.result.supportedVersions,['2026-07-28']);
+          const names=t.result.tools.map(x=>x.name).sort();
+          assert.deepEqual(names,['apply_patch','get_changes','get_context','get_project','list_projects','preview_patch']);
+          console.log('PASS: hosted v3 MCP discovery protocol and six tools');
+          JS
+          echo "PASS: hosted v3 backend + approved UX Vite build and local preview."
+          echo "NOT proof of ChatGPT Sites preview, actual native identity, or production D1."
