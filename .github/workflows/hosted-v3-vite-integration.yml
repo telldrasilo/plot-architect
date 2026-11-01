@@ -41,7 +41,7 @@ jobs:
           0058de01b8b67c92d81cd1e36492b6940d728b7553848005d8e3e7ffdf608d7b  src/editor.js
           e00f37abb1e1b2d83195a52665df93491287293b0c9a75f78a6c20e807fb427c  public/index.html
           67a520c43959d475259c989e29524b7d605ab5f22453e6e2ad13626a256c020c  package-lock.json
-          581536f401c2a150f3fa929aac155b76cfd57d017c9d06485701a6df10cc1fac  sites-vite-compat/vite.config.mjs
+          d475cd6bb3e17192b50acefd3c882cdcdeb924ac92820792eb56c3d46bfe620a  sites-vite-compat/vite.config.mjs
           f5138a6c0d759b0d826e650b5fc2813212d156b9649210d8fd2811ab5177a991  src/sites-vite-entry.mjs
           HASHES
       - name: Isolated overlay of actual hosted v3 runtime
