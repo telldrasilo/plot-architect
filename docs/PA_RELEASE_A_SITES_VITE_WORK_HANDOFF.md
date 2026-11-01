@@ -1,5 +1,7 @@
 # PA-RELEASE-A — one-pass Sites Vite v3 candidate handoff
 
+**POST-WORK UPDATE — 2026-11-02:** The seven-file overlay and Vite preview succeeded, but Work stopped at `HOSTED_ACCESS_UNVERIFIED` because no local test sign-in was performed. Review [PA_RELEASE_A_PREVIEW_AUTH_QA.md](./PA_RELEASE_A_PREVIEW_AUTH_QA.md) before any further Work task. Official Vite mock login is supported in `vite dev` and verified in GitHub CI, but it **does not** verify real owner identity. Do not rerun the previous handoff verbatim; no source version was saved.
+
 **Status:** PREPARED, NOT EXECUTED. This document is **not** a deployment approval.
 **Target existing private Site:** `appgprj_6ae715d7cccc8191bc35fbcd5255d9ce`.
 **Only eligible baseline:** saved/deployed version **3**, source commit `f4ab5397ea2ac7e5b1c6804ae5a169acc7468089`, deployment `appgdep_6ae72bc3affc8191bb43ff3843cf616e`.

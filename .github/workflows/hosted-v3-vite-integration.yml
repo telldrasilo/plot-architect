@@ -65,6 +65,10 @@ jobs:
           test -f dist/.openai/drizzle/meta/_journal.json
           grep -q 'server/discover' dist/server/index.js
           grep -q '2026-07-28' dist/server/index.js
+      - name: Initialize isolated local D1 using existing migration
+        run: |
+          # --local is mandatory: never run this command against hosted D1.
+          node node_modules/wrangler/bin/wrangler.js d1 migrations apply DB --local --config wrangler.sites.jsonc
       - name: Exercise Vite preview and hosted MCP discovery (synthetic only)
         shell: bash
         run: |
@@ -88,6 +92,46 @@ jobs:
           curl -fsS --max-time 6 -H 'Host: terminal.local:4173' \
             http://127.0.0.1:4173/ > "$RUNNER_TEMP/editor-terminal-local.html"
           grep -qi 'Plot Architect' "$RUNNER_TEMP/editor-terminal-local.html"
+          # OpenAI sites-vite-plugin 0.2.0 provides mock sign-in ONLY in vite dev.
+          # A signed-out local preview is expected to report authenticated:false.
+          curl -fsS --max-time 6 http://127.0.0.1:4173/api/health > "$RUNNER_TEMP/health-anon.json"
+          node -e "const f=require('node:fs');const x=JSON.parse(f.readFileSync(process.argv[1],'utf8'));if(x.authenticated!==false)process.exit(1)" "$RUNNER_TEMP/health-anon.json"
+          curl -fsSL --max-time 10 -c "$RUNNER_TEMP/mock-siwc.cookies" -b "$RUNNER_TEMP/mock-siwc.cookies" \
+            'http://127.0.0.1:4173/signin-with-chatgpt?return_to=/' > /dev/null
+          curl -fsS --max-time 6 -b "$RUNNER_TEMP/mock-siwc.cookies" \
+            http://127.0.0.1:4173/api/health > "$RUNNER_TEMP/health-mock-signed-in.json"
+          node -e "const f=require('node:fs');const x=JSON.parse(f.readFileSync(process.argv[1],'utf8'));if(x.authenticated!==true||x.authMode!=='sites-native')process.exit(1)" "$RUNNER_TEMP/health-mock-signed-in.json"
+          echo "PASS: official Vite plugin mock sign-in enabled local auth without application changes."
+          echo "NOTE: local_seedy is NOT the owner's real ChatGPT identity."
+          # All writes below target ONLY GitHub runner's synthetic, dummy-ID local D1.
+          code=$(curl -sS --max-time 6 -o "$RUNNER_TEMP/qa-list.json" -w '%{http_code}' \
+            -b "$RUNNER_TEMP/mock-siwc.cookies" http://127.0.0.1:4173/api/projects)
+          test "$code" = 200
+          node -e "const f=require('node:fs');const x=JSON.parse(f.readFileSync(process.argv[1],'utf8'));if(!Array.isArray(x.projects)||x.projects.length!==0)process.exit(1)" "$RUNNER_TEMP/qa-list.json"
+          code=$(curl -sS --max-time 6 -o "$RUNNER_TEMP/qa-created.json" -w '%{http_code}' \
+            -b "$RUNNER_TEMP/mock-siwc.cookies" \
+            -H 'content-type: application/json' \
+            -d '{"name":"CI synthetic new graph only","graph":{"nodes":[],"edges":[],"fields":[],"lanes":[]}}' \
+            http://127.0.0.1:4173/api/projects)
+          test "$code" = 201
+          project_id=$(node -e "const f=require('node:fs');const x=JSON.parse(f.readFileSync(process.argv[1],'utf8'));if(x.revision!==0||!x.id)process.exit(1);console.log(x.id)" "$RUNNER_TEMP/qa-created.json")
+          curl -fsS --max-time 6 -b "$RUNNER_TEMP/mock-siwc.cookies" \
+            "http://127.0.0.1:4173/api/projects/$project_id" > "$RUNNER_TEMP/qa-readback.json"
+          node -e "const f=require('node:fs');const x=JSON.parse(f.readFileSync(process.argv[1],'utf8'));if(x.revision!==0||x.graph.nodes.length!==0)process.exit(1)" "$RUNNER_TEMP/qa-readback.json"
+          code=$(curl -sS --max-time 6 -o "$RUNNER_TEMP/qa-update.json" -w '%{http_code}' \
+            -b "$RUNNER_TEMP/mock-siwc.cookies" -H 'content-type: application/json' \
+            -X PUT -d '{"name":"CI synthetic revision","expectedRevision":0,"graph":{"nodes":[],"edges":[],"fields":[],"lanes":[],"editorialNotes":[{"id":"q1","text":"synthetic"}]}}' \
+            "http://127.0.0.1:4173/api/projects/$project_id")
+          test "$code" = 200
+          code=$(curl -sS --max-time 6 -o "$RUNNER_TEMP/qa-stale.json" -w '%{http_code}' \
+            -b "$RUNNER_TEMP/mock-siwc.cookies" -H 'content-type: application/json' \
+            -X PUT -d '{"name":"stale","expectedRevision":0,"graph":{"nodes":[],"edges":[],"fields":[],"lanes":[]}}' \
+            "http://127.0.0.1:4173/api/projects/$project_id")
+          test "$code" = 409
+          curl -fsS --max-time 6 -b "$RUNNER_TEMP/mock-siwc.cookies" \
+            "http://127.0.0.1:4173/api/projects/$project_id" > "$RUNNER_TEMP/qa-final.json"
+          node -e "const f=require('node:fs');const x=JSON.parse(f.readFileSync(process.argv[1],'utf8'));if(x.revision!==1||x.graph.editorialNotes?.[0]?.text!=='synthetic')process.exit(1)" "$RUNNER_TEMP/qa-final.json"
+          echo "PASS: isolated local D1 synthetic create, read, editorial note persist, 409, reload."
           curl -fsS --max-time 6 -H 'content-type: application/json' \
             --data '{"jsonrpc":"2.0","id":1,"method":"server/discover"}' \
             http://127.0.0.1:4173/mcp > "$RUNNER_TEMP/discovery.json"
