@@ -14,7 +14,11 @@ This repository packages the reproducible local Graphite editor and the Site/MCP
 - `docs/WORK_RELEASE_A.md`: draft Work handoff for compatible UI changes only.
 - `AGENTS.md`: binding instructions for agents touching this repository.
 
-## Local checks (Node 22+)
+## Local build modes (Node 22.13+)
+
+The default `site/npm run build` and `site/npm run dev` now use the verified Sites Vite adapter. `npm run build:legacy` and `npm run dev:legacy` retain the previous custom bundle and Wrangler QA loop for regression/rollback. The Vite adapter is **development-only** and has not been integrated into hosted Site v3. See `docs/PA_SITES_VITE_ADAPTER.md`.
+
+## Local checks (Node 22.13+)
 
 ```bash
 cd site
