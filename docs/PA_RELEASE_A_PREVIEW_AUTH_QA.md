@@ -1,5 +1,7 @@
 # PA-RELEASE-A — Vite preview auth gate: expected mock sign-in
 
+**HOST RESTRICTION VERIFIED (2026-11-02):** Official `@openai/sites-vite-plugin` 0.2.0 mock sign-in permits only `localhost`, `127.0.0.1`, or `::1` on a loopback socket; it intentionally returns 403 for `terminal.local`. The GitHub loopback mock-auth test remains valid, but private Work browser auth cannot be validated that way. Diagnostic PR #15 closed without merge. For the next step use [PA_RELEASE_A_SAVE_CANDIDATE_ONLY.md](./PA_RELEASE_A_SAVE_CANDIDATE_ONLY.md); do not weaken the sign-in security boundary.
+
 **Status:** Verified locally in GitHub CI; existing Site remains deployed at v3. No Site change, Work run, production D1 write or plugin update in this QA task.
 
 ## Observed Work stop
