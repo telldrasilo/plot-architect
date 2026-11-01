@@ -27,8 +27,8 @@ export default defineConfig({
   plugins: [
     graphiteHtml(),
     sites(),
-    cloudflare({ configPath: './wrangler.sites.jsonc', viteEnvironment: { name: 'worker' } }),
+    cloudflare({ configPath: './wrangler.sites.jsonc', viteEnvironment: { name: 'server' } }),
   ],
-  environments: { worker: { build: { sourcemap: false } } },
+  environments: { server: { build: { sourcemap: false } } },
   build: { outDir: 'dist', emptyOutDir: true },
 });
