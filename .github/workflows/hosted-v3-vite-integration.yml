@@ -70,26 +70,30 @@ jobs:
         run: |
           set -euo pipefail
           log="$RUNNER_TEMP/hosted-v3-vite.log"
-          npm run dev -- --port 8793 > "$log" 2>&1 &
+          npm run dev -- --host 0.0.0.0 --port 4173 --strictPort > "$log" 2>&1 &
           pid=$!
           trap 'kill "$pid" 2>/dev/null || true' EXIT
           ready=0
           for i in $(seq 1 45); do
-            if curl -fsS --max-time 2 http://127.0.0.1:8793/api/health > "$RUNNER_TEMP/health.json"; then ready=1; break; fi
+            if curl -fsS --max-time 2 http://127.0.0.1:4173/api/health > "$RUNNER_TEMP/health.json"; then ready=1; break; fi
             if ! kill -0 "$pid" 2>/dev/null; then break; fi
             sleep 2
           done
           if [ "$ready" -ne 1 ]; then tail -n 120 "$log"; exit 1; fi
-          status=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8793/api/projects)
+          status=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:4173/api/projects)
           test "$status" = 401
-          curl -fsS --max-time 6 http://127.0.0.1:8793/ > "$RUNNER_TEMP/editor.html"
+          curl -fsS --max-time 6 http://127.0.0.1:4173/ > "$RUNNER_TEMP/editor.html"
           grep -qi 'Plot Architect' "$RUNNER_TEMP/editor.html"
+          # Match the hostname used by the private Sites preview browser.
+          curl -fsS --max-time 6 -H 'Host: terminal.local:4173' \
+            http://127.0.0.1:4173/ > "$RUNNER_TEMP/editor-terminal-local.html"
+          grep -qi 'Plot Architect' "$RUNNER_TEMP/editor-terminal-local.html"
           curl -fsS --max-time 6 -H 'content-type: application/json' \
             --data '{"jsonrpc":"2.0","id":1,"method":"server/discover"}' \
-            http://127.0.0.1:8793/mcp > "$RUNNER_TEMP/discovery.json"
+            http://127.0.0.1:4173/mcp > "$RUNNER_TEMP/discovery.json"
           curl -fsS --max-time 6 -H 'content-type: application/json' \
             --data '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
-            http://127.0.0.1:8793/mcp > "$RUNNER_TEMP/tools.json"
+            http://127.0.0.1:4173/mcp > "$RUNNER_TEMP/tools.json"
           node --input-type=module - "$RUNNER_TEMP/discovery.json" "$RUNNER_TEMP/tools.json" <<'JS'
           import fs from 'node:fs';
           import assert from 'node:assert/strict';
