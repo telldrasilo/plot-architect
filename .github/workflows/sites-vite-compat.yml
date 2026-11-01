@@ -1,0 +1,39 @@
+name: Official Sites Vite compatibility (no deployment)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  vite-compat:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site/sites-vite-compat
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - name: Install isolated experimental dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build using official Sites and Cloudflare Vite plugins
+        run: npm run build
+      - name: Validate build metadata without deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f ../dist/.openai/hosting.json
+          test -f ../dist/.openai/drizzle/meta/_journal.json
+          find ../dist -maxdepth 4 -type f | sort | head -n 45
+          node -e "const x=require('../dist/.openai/hosting.json'); if(x.d1!=='DB'||!x.project_id)process.exit(1)"
+      - name: Export experimental lockfile for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: sites-vite-compat-lockfile
+          path: site/sites-vite-compat/package-lock.json
+          retention-days: 7
