@@ -1,5 +1,16 @@
 # PA-RELEASE-A — preview environment recovery after Work STOP
 
+## Final status: PREVIEW_ENV_BLOCKED (2026-11-02)
+
+The permitted Work retry did **not** restart preview. The available `sites-preview` interface supports only `start/stop/status/daemon`; it exposes no container exec or preview-side package installation. Absence of `/site` in the editor environment proves nothing about the separate preview container. Therefore the prior instructions to inspect `/site/node_modules` and run `npm ci` inside preview are **inapplicable** in this environment. Do not reissue that task.
+
+**Independent verification without Work:** [GitHub Actions local Wrangler smoke](https://github.com/telldrasilo/plot-architect/actions/runs/41353026387) PASS using `npm ci --include=dev`, pinned Wrangler, local D1 migration, local preview, anonymous 401, simulated QA owner read. This tests a clean GitHub runner, **not the Sites preview mount, real owner identity or hosted D1**.
+
+**Current action:** STOP further Work preview retries. Escalate to OpenAI Sites support with the existing two Work STOP reports, Site ID, version/deployment, exact MODULE_NOT_FOUND, `sites-preview` command limitation, and local GitHub CI proof. Do not install a global Wrangler, move packages to dependencies, vendor node_modules, change more than the two reviewed UI files or bypass the private preview gate without separate owner-reviewed policy change. The Site remains v3; no candidate source version saved, no deployment or plugin/D1 change.
+
+---
+
+
 **Status:** blocked at private preview; NOT a code regression. Do not publish or save a candidate until preview gates pass.
 
 ## Evidence (2026-11-02)

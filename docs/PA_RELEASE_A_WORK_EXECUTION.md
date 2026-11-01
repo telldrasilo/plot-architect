@@ -1,5 +1,7 @@
 # PA-RELEASE-A — Work routing after exact Site v3 capture
 
+**Current status (2026-11-02): PREVIEW_ENV_BLOCKED — no more Work retries authorized.** The retry instruction in this file is superseded by the final status in [PA_RELEASE_A_PREVIEW_RECOVERY.md](./PA_RELEASE_A_PREVIEW_RECOVERY.md). Local Wrangler GitHub Actions smoke passed; ChatGPT Sites preview remains inaccessible. Escalate the platform issue rather than launching another Work task.
+
 **SUPERSEDED:** the earlier broad architecture-reconciliation assignment is no longer the active Work task. Do **not** independently analyze or reconcile the project.
 
 The current bounded Work task is in [PA_RELEASE_A_HOSTED_V3_EXACT_PATCH.md](./PA_RELEASE_A_HOSTED_V3_EXACT_PATCH.md). Exact prepared candidate files + SHA256 manifest are in Library:
