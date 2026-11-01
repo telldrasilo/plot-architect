@@ -1,0 +1,25 @@
+# Generated outputs / credentials (root + subtrees)
+**/node_modules/
+**/dist/
+**/.wrangler/
+**/.sites-runtime/
+**/.env
+**/.env.*
+!**/.env.example
+**/.dev.vars
+**/.dev.vars.*
+**/outputs/
+**/__pycache__/
+**/.pytest_cache/
+**/.playwright/
+**/playwright-report/
+**/test-results/
+*.log
+*.pem
+*.key
+*.p12
+*.pfx
+*_project_export.json
+*.sqlite
+*.sqlite3
+*.db
