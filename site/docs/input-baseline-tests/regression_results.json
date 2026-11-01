@@ -1,0 +1,46 @@
+{
+  "passed": 8,
+  "total": 8,
+  "tests": [
+    {
+      "test": "selected node reveals true edge without mutation",
+      "status": "PASS",
+      "detail": "['e1', 'e2', 'e3', 'e4', 'e5']"
+    },
+    {
+      "test": "field drag carries child nodes; undo atomic",
+      "status": "PASS",
+      "detail": "1"
+    },
+    {
+      "test": "all edges mode preserves graph",
+      "status": "PASS",
+      "detail": "5"
+    },
+    {
+      "test": "new field modal saves and shows field",
+      "status": "PASS",
+      "detail": "3"
+    },
+    {
+      "test": "same-browser persistence survives app initialization",
+      "status": "PASS",
+      "detail": "3"
+    },
+    {
+      "test": "second project is empty and independent",
+      "status": "PASS",
+      "detail": "0"
+    },
+    {
+      "test": "previous project retains graph after switch",
+      "status": "PASS",
+      "detail": "6"
+    },
+    {
+      "test": "no uncaught script errors",
+      "status": "PASS",
+      "detail": "None"
+    }
+  ]
+}
