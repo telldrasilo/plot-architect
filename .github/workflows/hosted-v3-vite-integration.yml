@@ -119,9 +119,9 @@ jobs:
           node --input-type=module - "$RUNNER_TEMP/terminal-signin.headers" <<'JS'
           import fs from 'node:fs';
           const h=fs.readFileSync(process.argv[2],'utf8');
-          const line=h.split(/\\r?\\n/).find(x=>/^location:/i.test(x));
+          const line=h.split('\n').map(x=>x.trim()).find(x=>x.toLowerCase().startsWith('location:'));
           if(line){
-            const target=line.replace(/^location:\\s*/i,'').trim();
+            const target=line.slice(line.indexOf(':')+1).trim();
             const url=new URL(target,'http://terminal.local:4173/');
             if(url.origin!=='http://terminal.local:4173')throw new Error('Mock sign-in redirect escapes preview origin: '+url.origin);
             console.log('terminal.local sign-in redirect stays same-origin:',url.pathname);
