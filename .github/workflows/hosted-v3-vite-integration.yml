@@ -88,6 +88,17 @@ jobs:
           curl -fsS --max-time 6 -H 'Host: terminal.local:4173' \
             http://127.0.0.1:4173/ > "$RUNNER_TEMP/editor-terminal-local.html"
           grep -qi 'Plot Architect' "$RUNNER_TEMP/editor-terminal-local.html"
+          # OpenAI sites-vite-plugin 0.2.0 provides mock sign-in ONLY in vite dev.
+          # A signed-out local preview is expected to report authenticated:false.
+          curl -fsS --max-time 6 http://127.0.0.1:4173/api/health > "$RUNNER_TEMP/health-anon.json"
+          node -e "const f=require('node:fs');const x=JSON.parse(f.readFileSync(process.argv[1],'utf8'));if(x.authenticated!==false)process.exit(1)" "$RUNNER_TEMP/health-anon.json"
+          curl -fsSL --max-time 10 -c "$RUNNER_TEMP/mock-siwc.cookies" -b "$RUNNER_TEMP/mock-siwc.cookies" \
+            'http://127.0.0.1:4173/signin-with-chatgpt?return_to=/' > /dev/null
+          curl -fsS --max-time 6 -b "$RUNNER_TEMP/mock-siwc.cookies" \
+            http://127.0.0.1:4173/api/health > "$RUNNER_TEMP/health-mock-signed-in.json"
+          node -e "const f=require('node:fs');const x=JSON.parse(f.readFileSync(process.argv[1],'utf8'));if(x.authenticated!==true||x.authMode!=='sites-native')process.exit(1)" "$RUNNER_TEMP/health-mock-signed-in.json"
+          echo "PASS: official Vite plugin mock sign-in enabled local auth without application changes."
+          echo "NOTE: local_seedy is NOT the owner's real ChatGPT identity."
           curl -fsS --max-time 6 -H 'content-type: application/json' \
             --data '{"jsonrpc":"2.0","id":1,"method":"server/discover"}' \
             http://127.0.0.1:4173/mcp > "$RUNNER_TEMP/discovery.json"
