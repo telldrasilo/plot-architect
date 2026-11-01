@@ -8,9 +8,11 @@ REST API, authorization and MCP implementation are imported from `../src`
 without editing production logic. The only new runtime code is the Worker
 entry adapter `../src/sites-vite-entry.mjs`.
 
-The checked-in `../package-lock.json`, old `../scripts/build.mjs` and
-`../scripts/preview.mjs` are deliberately untouched. This experiment uses
-its own package manifest. Dependencies are pinned in this directory's own `package-lock.json`. CI now
+The root `../package.json` now also uses the same Vite adapter as its default
+build/dev commands, with its own pinned root lockfile. The old
+`../scripts/build.mjs` and `../scripts/preview.mjs` remain available as
+`build:legacy` and `dev:legacy`. This isolated package remains an
+independent compatibility/QA fixture. Dependencies are pinned in this directory's own `package-lock.json`. CI now
 uses `npm ci` and verifies `dist/server/index.js`, Sites metadata and
 migrations, plus a local `vite preview` HTTP smoke for Graphite and `401`.
 This is proof of the **local repository source** only, not captured hosted v3.
