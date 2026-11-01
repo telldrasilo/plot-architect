@@ -1,5 +1,7 @@
 # PA-RELEASE-A — one-pass Sites Vite v3 candidate handoff
 
+**RELEASE ROUTE UPDATE (2026-11-02):** Prior preview and mock-login tasks are complete/blocked by a deliberate upstream host restriction. Do not rerun this handoff. To save a candidate without deployment use [PA_RELEASE_A_SAVE_CANDIDATE_ONLY.md](./PA_RELEASE_A_SAVE_CANDIDATE_ONLY.md) with explicit host D1 binding verification.
+
 **POST-WORK UPDATE — 2026-11-02:** The seven-file overlay and Vite preview succeeded, but Work stopped at `HOSTED_ACCESS_UNVERIFIED` because no local test sign-in was performed. Review [PA_RELEASE_A_PREVIEW_AUTH_QA.md](./PA_RELEASE_A_PREVIEW_AUTH_QA.md) before any further Work task. Official Vite mock login is supported in `vite dev` and verified in GitHub CI, but it **does not** verify real owner identity. Do not rerun the previous handoff verbatim; no source version was saved.
 
 **Status:** PREPARED, NOT EXECUTED. This document is **not** a deployment approval.
