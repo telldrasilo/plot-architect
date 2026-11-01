@@ -103,6 +103,39 @@ jobs:
           node -e "const f=require('node:fs');const x=JSON.parse(f.readFileSync(process.argv[1],'utf8'));if(x.authenticated!==true||x.authMode!=='sites-native')process.exit(1)" "$RUNNER_TEMP/health-mock-signed-in.json"
           echo "PASS: official Vite plugin mock sign-in enabled local auth without application changes."
           echo "NOTE: local_seedy is NOT the owner's real ChatGPT identity."
+          # Reproduce the exact virtual preview hostname, not only 127.0.0.1.
+          # --resolve pins the destination to this isolated runner; it does not use a remote Site.
+          terminal_url='http://terminal.local:4173'
+          terminal_args=(--noproxy '*' --resolve 'terminal.local:4173:127.0.0.1' --max-time 8)
+          anonymous_status=$(curl "${terminal_args[@]}" -sS -o "$RUNNER_TEMP/terminal-anon.json" -w '%{http_code}' "$terminal_url/api/projects")
+          test "$anonymous_status" = 401
+          signin_status=$(curl "${terminal_args[@]}" -sS -D "$RUNNER_TEMP/terminal-signin.headers" \
+            -o "$RUNNER_TEMP/terminal-signin.body" -w '%{http_code}' \
+            -c "$RUNNER_TEMP/terminal-mock.cookies" \
+            "$terminal_url/signin-with-chatgpt?return_to=/")
+          echo "terminal.local mock sign-in HTTP: $signin_status"
+          case "$signin_status" in 200|302|303|307|308) ;; *) echo "Mock sign-in returned unexpected HTTP status"; exit 1;; esac
+          # Check the redirect target WITHOUT printing Set-Cookie headers.
+          node --input-type=module - "$RUNNER_TEMP/terminal-signin.headers" <<'JS'
+          import fs from 'node:fs';
+          const h=fs.readFileSync(process.argv[2],'utf8');
+          const line=h.split(/\\r?\\n/).find(x=>/^location:/i.test(x));
+          if(line){
+            const target=line.replace(/^location:\\s*/i,'').trim();
+            const url=new URL(target,'http://terminal.local:4173/');
+            if(url.origin!=='http://terminal.local:4173')throw new Error('Mock sign-in redirect escapes preview origin: '+url.origin);
+            console.log('terminal.local sign-in redirect stays same-origin:',url.pathname);
+          }
+          JS
+          curl "${terminal_args[@]}" -fsS -b "$RUNNER_TEMP/terminal-mock.cookies" \
+            "$terminal_url/api/health" > "$RUNNER_TEMP/terminal-after-login.json"
+          node -e "const x=JSON.parse(require('node:fs').readFileSync(process.argv[1],'utf8'));if(x.authenticated!==true)process.exit(1)" "$RUNNER_TEMP/terminal-after-login.json"
+          authenticated_status=$(curl "${terminal_args[@]}" -sS \
+            -b "$RUNNER_TEMP/terminal-mock.cookies" -o "$RUNNER_TEMP/terminal-projects.json" \
+            -w '%{http_code}' "$terminal_url/api/projects")
+          test "$authenticated_status" = 200
+          echo "PASS: terminal.local mock login, same-origin redirect, session cookie and authenticated API."
+          echo "NOTE: curl does not establish browser-automation URL policy compatibility."
           # All writes below target ONLY GitHub runner's synthetic, dummy-ID local D1.
           code=$(curl -sS --max-time 6 -o "$RUNNER_TEMP/qa-list.json" -w '%{http_code}' \
             -b "$RUNNER_TEMP/mock-siwc.cookies" http://127.0.0.1:4173/api/projects)
