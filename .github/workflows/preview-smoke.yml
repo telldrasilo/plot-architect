@@ -67,3 +67,29 @@ jobs:
           node -e "const f=require('node:fs');const x=JSON.parse(f.readFileSync(process.argv[1],'utf8'));if(!Array.isArray(x.projects))process.exit(1)" "$RUNNER_TEMP/authorized.json"
           echo "PASS: local Wrangler preview, local D1, QA cookie simulation and anonymous 401."
           echo "NOTE: QA cookie simulates identity; this is NOT ChatGPT Sites private preview or hosted D1."
+      - name: Smoke-test the new default Vite dev command
+        shell: bash
+        run: |
+          set -euo pipefail
+          logfile="$RUNNER_TEMP/pa-default-vite-dev.log"
+          npm run dev -- --port 8789 > "$logfile" 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          ready=0
+          for i in $(seq 1 35); do
+            if curl -fsS --max-time 2 http://127.0.0.1:8789/api/health > "$RUNNER_TEMP/pa-vite-health.json"; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$pid" 2>/dev/null; then break; fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            tail -n 120 "$logfile"
+            exit 1
+          fi
+          status=$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:8789/api/projects)
+          test "$status" = 401
+          curl -fsS --max-time 5 http://127.0.0.1:8789/ > "$RUNNER_TEMP/vite-home.html"
+          grep -qi "Plot Architect" "$RUNNER_TEMP/vite-home.html"
+          echo "PASS: default Vite dev, Graphite UI and anonymous 401 (simulated local D1 only)."
