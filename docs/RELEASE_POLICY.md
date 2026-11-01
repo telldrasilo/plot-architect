@@ -3,7 +3,7 @@
 ## Version evidence
 
 **Local:** v0.13.5-alpha / UX-016, reproducible ZIP in ChatGPT Library at `/Планировщик сюжета/Development/01_Current/PA_LOCAL_V0135_20261101/`.  
-**Hosted:** existing owner-only Site and six-tool PA-MCP-01, actual current production source not compared with this local snapshot.  
+**Hosted:** authoritative capture of saved/deployed Site v3 (source `f4ab5397ea2ac7e5b1c6804ae5a169acc7468089`), 43/43 source SHA-256 verified, in Library `libfile_6c90d4394e2081919441b279325657cb`. Exact UI-only Release A patch prepared in `docs/PA_RELEASE_A_HOSTED_V3_EXACT_PATCH.md`; not deployed.  
 **Backend:** P1/P2 v2 schema code and SQLite tests are only a spike; actual D1 gate remains `BLOCKED_D1_NOT_VERIFIED`.
 
 ## Release tracks
