@@ -1,5 +1,8 @@
 # PA-RELEASE-A: exact two-file hosted v3 overlay
 
+**PREVIEW BLOCKER UPDATE 2026-11-02:** Work confirmed baseline 43/43, replacement 2/2, unchanged 41/41, and 18/18 local tests. Private preview stopped before healthy because `/site/node_modules/wrangler/bin/wrangler.js` was absent from the preview container. No saved candidate or deployment. For the next limited Work run, read [`PA_RELEASE_A_PREVIEW_RECOVERY.md`](./PA_RELEASE_A_PREVIEW_RECOVERY.md); do not re-run the broad integration task.
+
+
 STATUS: PREDEPLOY CANDIDATE ONLY. No authorization to publish or mutate D1.
 
 Hosted Site version: 3; source f4ab5397ea2ac7e5b1c6804ae5a169acc7468089; deployment appgdep_6ae72bc3affc8191bb43ff3843cf616e.
