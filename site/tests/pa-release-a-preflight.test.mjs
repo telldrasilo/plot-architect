@@ -46,3 +46,6 @@ test('Release A: single-event rewrite cannot start while remote-connected',()=>{
   const near=editor.slice(start,start+380);
   assert.match(near,/if\(remote\.connected\)return/,'connected Site must block local-only event rewrite');
 });
+
+// Include the first-connect safety regression in the CI preflight suite.
+import './release-a-empty-bootstrap.test.mjs';
