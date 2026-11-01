@@ -1,0 +1,70 @@
+{
+  "date": "2026-11-01",
+  "site_id": "appgprj_6ae715d7cccc8191bc35fbcd5255d9ce",
+  "runtime_tests": {
+    "passed": 8,
+    "failed": 0
+  },
+  "browser_environment": "Sites local preview / Wrangler local D1 / synthetic local QA identity",
+  "browser_checks": {
+    "two_independent_projects": "PASS",
+    "node_edit_autosave": "PASS",
+    "field_title_and_comment": "PASS",
+    "real_page_reload": "PASS",
+    "last_active_server_project_restored": "PASS",
+    "group_move_and_atomic_undo": "PASS",
+    "focus": "PASS",
+    "minimap": "PASS",
+    "canonical_export_6_nodes_5_edges": "PASS",
+    "legacy_v09_additive_import": "PASS",
+    "aggregate_bridge_function_preserved": "SOURCE_PRESERVED_NOT_EXERCISED",
+    "interrupted_sync_manual_reconciliation": "NOT_FULLY_EXERCISED"
+  },
+  "hosted_d1": "NOT_DEPLOYED_NOT_VERIFIED",
+  "hosted_auth": "NOT_DEPLOYED_NOT_VERIFIED",
+  "publication_gate": "BLOCKED_PREPUBLICATION_HOSTED_VALIDATION",
+  "source_changes": [
+    "Worker ESM single-file build with inline HTML",
+    "DB migration packaging with drizzle journal",
+    "Sites-native identity candidate; no shared secret",
+    "automatic API connection; restore last active Site project",
+    "local QA harness excluded from deploy bundle"
+  ],
+  "local_d1": {
+    "tables": [
+      "plot_projects",
+      "plot_revisions"
+    ],
+    "indexes": [
+      "idx_projects_updated",
+      "idx_revisions_project"
+    ],
+    "migration_ledger": [
+      {
+        "id": 1,
+        "name": "0001_initial.sql",
+        "applied_at": "2026-11-01 10:36:32"
+      }
+    ],
+    "active_projects": [
+      {
+        "name": "Импортированный сюжет",
+        "server_revision": 0,
+        "nodes": 6
+      },
+      {
+        "name": "Кризис наследования",
+        "server_revision": 5,
+        "nodes": 6
+      },
+      {
+        "name": "Второй проект · QA",
+        "server_revision": 1,
+        "nodes": 1
+      }
+    ],
+    "revision_records": 12
+  },
+  "migration_sha256": "1462afec0515d4db4a09a6dec58783d0a8df357375fc66916810c0e9edd3b54c",
+  "input_zip_sha256": "6a8f368794b24c9929f19b40f1f70824ebbf711a46b133e47578966c8c7fb2b4"
+}

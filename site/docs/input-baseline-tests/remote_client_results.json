@@ -1,0 +1,33 @@
+{
+  "tests": [
+    {
+      "name": "first Site connection creates project",
+      "status": "PASS",
+      "detail": "['faux-1']"
+    },
+    {
+      "name": "graph edit autosaves to D1 API",
+      "status": "PASS",
+      "detail": "{'id': 'faux-1', 'revision': 1, 'nodes': 7}"
+    },
+    {
+      "name": "conflict halts remote overwrite but preserves local copy",
+      "status": "PASS",
+      "detail": "! Сохранено локально · ошибка Site"
+    },
+    {
+      "name": "final no page errors",
+      "status": "PASS",
+      "detail": "True"
+    }
+  ],
+  "passed": 4,
+  "total": 4,
+  "writes": [
+    {
+      "id": "faux-1",
+      "revision": 1,
+      "nodes": 7
+    }
+  ]
+}

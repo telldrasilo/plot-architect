@@ -1,0 +1,6 @@
+{
+ "name":"plot-architect-local-qa",
+ "main":"scripts/preview-worker.mjs",
+ "compatibility_date":"2026-05-15",
+ "d1_databases":[{"binding":"DB","database_name":"plot-local-qa","database_id":"00000000-0000-0000-0000-000000000001","migrations_dir":"drizzle"}]
+}

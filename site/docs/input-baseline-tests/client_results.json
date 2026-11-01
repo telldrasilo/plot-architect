@@ -1,0 +1,46 @@
+{
+  "tests": [
+    {
+      "name": "UI bootstrap without errors",
+      "status": "PASS",
+      "detail": "True"
+    },
+    {
+      "name": "project picker opens",
+      "status": "PASS",
+      "detail": "True"
+    },
+    {
+      "name": "new project",
+      "status": "PASS",
+      "detail": "{'activeId': 'local-mvxoq8tr-l5r3ncp', 'projects': [{'id': 'local-mvxoq8tr-l5r3ncp', 'name': 'Война за престол', 'revision': 0, 'updatedAt': 1793528781615}, {'id': 'local-mvxoq8lz-"
+    },
+    {
+      "name": "new node persists in project state",
+      "status": "PASS",
+      "detail": "Сбор военного совета"
+    },
+    {
+      "name": "switching projects does not mix nodes",
+      "status": "PASS",
+      "detail": "2"
+    },
+    {
+      "name": "legacy graph import contract",
+      "status": "PASS",
+      "detail": "1"
+    },
+    {
+      "name": "camera preserves graph revision",
+      "status": "PASS",
+      "detail": "1"
+    },
+    {
+      "name": "final no uncaught errors",
+      "status": "PASS",
+      "detail": "True"
+    }
+  ],
+  "passed": 8,
+  "total": 8
+}

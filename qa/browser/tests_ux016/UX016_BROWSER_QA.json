@@ -1,0 +1,118 @@
+{
+  "passed": 28,
+  "checks": [
+    {
+      "name": "compact mode active",
+      "passed": true
+    },
+    {
+      "name": "compact draggable labels visible",
+      "passed": true
+    },
+    {
+      "name": "compact label has hit box",
+      "passed": true
+    },
+    {
+      "name": "compact drag moves underlying world node",
+      "passed": true
+    },
+    {
+      "name": "compact drag does not zoom",
+      "passed": true
+    },
+    {
+      "name": "one commit per compact drag",
+      "passed": true
+    },
+    {
+      "name": "compact drag supports Undo",
+      "passed": true
+    },
+    {
+      "name": "group member n2 moved",
+      "passed": true
+    },
+    {
+      "name": "group member n3 moved",
+      "passed": true
+    },
+    {
+      "name": "group selection remains after drag",
+      "passed": true
+    },
+    {
+      "name": "group Undo n2",
+      "passed": true
+    },
+    {
+      "name": "group Undo n3",
+      "passed": true
+    },
+    {
+      "name": "far map active",
+      "passed": true
+    },
+    {
+      "name": "map markers visible and hittable",
+      "passed": true
+    },
+    {
+      "name": "far marker drag updates world coordinates",
+      "passed": true
+    },
+    {
+      "name": "far marker drag does not jump/zoom",
+      "passed": true
+    },
+    {
+      "name": "edges remain valid",
+      "passed": true
+    },
+    {
+      "name": "map drag Undo",
+      "passed": true
+    },
+    {
+      "name": "far marker click still zooms",
+      "passed": true
+    },
+    {
+      "name": "Space+drag overview item pans canvas",
+      "passed": true
+    },
+    {
+      "name": "Space+drag does not move nodes",
+      "passed": true
+    },
+    {
+      "name": "semantic field tag-loss confirmation appears after drag",
+      "passed": true
+    },
+    {
+      "name": "cancel tag-transfer restores original coordinates",
+      "passed": true
+    },
+    {
+      "name": "second tag-loss confirmation appears",
+      "passed": true
+    },
+    {
+      "name": "safe transfer applies dragged position",
+      "passed": true
+    },
+    {
+      "name": "safe transfer preserves semantic tag when confirmed",
+      "passed": true
+    },
+    {
+      "name": "safe tag-transfer and geometry revert together",
+      "passed": true
+    },
+    {
+      "name": "no JS errors: []",
+      "passed": true
+    }
+  ],
+  "errors": []
+}
