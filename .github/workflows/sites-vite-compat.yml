@@ -1,0 +1,64 @@
+name: Official Sites Vite compatibility (no deployment)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  vite-compat:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site/sites-vite-compat
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - name: Install isolated experimental dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Build using official Sites and Cloudflare Vite plugins
+        run: npm run build
+      - name: Validate build metadata without deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f ../dist/server/index.js
+          test -f ../dist/server/wrangler.json
+          test -f ../dist/.openai/hosting.json
+          test -f ../dist/.openai/drizzle/meta/_journal.json
+          find ../dist -maxdepth 4 -type f | sort | head -n 45
+          node -e "const x=require('../dist/.openai/hosting.json'); if(x.d1!=='DB'||!x.project_id)process.exit(1)"
+      - name: Smoke test Vite preview without deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/sites-vite-preview.log"
+          npm run preview -- --port 8788 > "$log" 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          ready=0
+          for i in $(seq 1 35); do
+            if curl --silent --fail --max-time 2 http://127.0.0.1:8788/api/health > "$RUNNER_TEMP/pa-health.json"; then ready=1; break; fi
+            if ! kill -0 "$pid" 2>/dev/null; then break; fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then tail -n 140 "$log"; exit 1; fi
+          node -e "const fs=require('node:fs');const x=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));if(!x.ok || !x.requiresAuthorization)process.exit(1)" "$RUNNER_TEMP/pa-health.json"
+          status=$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:8788/api/projects)
+          test "$status" = 401
+          curl -sS --fail --max-time 5 http://127.0.0.1:8788/ > "$RUNNER_TEMP/pa-index.html"
+          grep -qi "Plot Architect" "$RUNNER_TEMP/pa-index.html"
+          echo "PASS: Vite preview serves Graphite UI, DB binding health and anonymous 401."
+          echo "Not a Sites-hosted preview, not real owner identity/D1."
+
+      - name: Export experimental lockfile for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: sites-vite-compat-lockfile
+          path: site/sites-vite-compat/package-lock.json
+          retention-days: 7

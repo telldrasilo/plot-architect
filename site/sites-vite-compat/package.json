@@ -1,0 +1,17 @@
+{
+  "name": "plot-architect-sites-vite-compat",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "cd .. && ./sites-vite-compat/node_modules/.bin/vite build --config sites-vite-compat/vite.config.mjs",
+    "dev": "cd .. && ./sites-vite-compat/node_modules/.bin/vite dev --config sites-vite-compat/vite.config.mjs --host 127.0.0.1",
+    "preview": "cd .. && ./sites-vite-compat/node_modules/.bin/vite preview --config sites-vite-compat/vite.config.mjs --host 127.0.0.1"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.66.0",
+    "@openai/sites-vite-plugin": "0.2.0",
+    "vite": "8.0.16",
+    "wrangler": "4.92.0"
+  }
+}
