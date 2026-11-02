@@ -32,7 +32,7 @@ jobs:
           test -f ../dist/.openai/hosting.json
           test -f ../dist/.openai/drizzle/meta/_journal.json
           find ../dist -maxdepth 4 -type f | sort | head -n 45
-          node -e "const x=require('../dist/.openai/hosting.json'); if(x.d1!=='DB'||!x.project_id)process.exit(1)"
+          node -e "const x=require('../dist/.openai/hosting.json'); if(x.d1!=='DB'||Object.hasOwn(x,'project_id'))process.exit(1)"
       - name: Smoke test Vite preview without deployment
         shell: bash
         run: |

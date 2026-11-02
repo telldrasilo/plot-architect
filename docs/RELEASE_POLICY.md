@@ -1,6 +1,6 @@
 # Plot Architect — release policy (only for hosted releases)
 
-This policy is **not** a prerequisite for brainstorming, local UX changes, or ordinary code PRs. The GitHub `main` branch is a development source; a running ChatGPT Site is an independent deployed state. Use native GitHub and OpenAI Sites mechanisms, not custom infrastructure.
+This policy is **not** a prerequisite for brainstorming, local UX changes, or ordinary code PRs. The GitHub `main` branch is a development source; a running ChatGPT Site is an independent deployed state. Use native GitHub and OpenAI Sites mechanisms, not custom infrastructure. A separately approved **fresh private Site** uses [PA_NEW_SITE_BOOTSTRAP.md](PA_NEW_SITE_BOOTSTRAP.md) for initial provisioning; the ordinary release procedure below applies to later updates.
 
 **Last evidenced private deployment:** v4, deployment `appgdep_6ae8284035b48191a6603d203cd6def5` (`succeeded`), existing owner-only Site. Evidence and partial acceptance: [PA_RELEASE_A_V4_RELEASE_RESULT.md](PA_RELEASE_A_V4_RELEASE_RESULT.md). Query Sites for the **current** deployment when performing a new release; this pointer is not a live monitor.
 
