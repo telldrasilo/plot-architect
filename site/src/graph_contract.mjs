@@ -38,6 +38,19 @@ export function validateGraph(raw){
     if(n.manualFieldIds.some(x=>!fids.has(x)))error('Отсутствующее поле в ручных тегах');
   }
   for(const e of g.edges){if(!str(e.id,80)||!ids.has(e.from)||!ids.has(e.to)||e.from===e.to||!str(e.type,40))error('Некорректная связь');}
+  // UX-014 editorial overlays remain separate from canonical nodes and edges.
+  // The field is optional for older graphs; no D1 schema change is required.
+  if(g.eventRewrites!==undefined){
+    if(!Array.isArray(g.eventRewrites)||g.eventRewrites.length>g.nodes.length)error('Некорректные черновики переработки');
+    const seen=new Set();
+    for(const draft of g.eventRewrites){
+      if(!isObj(draft)||!str(draft.nodeId,80)||!ids.has(draft.nodeId)||seen.has(draft.nodeId)
+        ||!str(draft.taskText,20000)||typeof draft.offerVariants!=='boolean'
+        ||draft.status!=='pending'||!Number.isSafeInteger(draft.baseRevision)||draft.baseRevision<0)
+        error('Некорректный черновик переработки');
+      seen.add(draft.nodeId);
+    }
+  }
   for(const f of g.fields){
     if(!str(f.id,80)||!str(f.title,300)||!str(f.comment,10000)||![f.x,f.y,f.width,f.height].every(num)||f.width<100||f.height<80||!['auto','manual','mixed'].includes(f.assignmentMode))error('Некорректное поле');
     if(f.parent!==null&&!ids.has(f.parent))error('Неверный родитель поля');
