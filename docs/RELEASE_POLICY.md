@@ -1,5 +1,11 @@
 # Plot Architect — Work-budget release policy
 
+## Active Site release — 2026-11-02
+
+**v4 is now live privately** on the existing Site: version `appgprj_6ae715d7cccc8191bc35fbcd5255d9ce~appgver_9fab684372648191b91af6756baf76b5`, succeeded deployment `appgdep_6ae8284035b48191a6603d203cd6def5`. The previous v3 deployment is historical, not active. Owner-only access, production `authenticated:true`, D1 logical binding `DB` with two tables, and six registered MCP tools were confirmed. UI browser QA, an application-layer anonymous 401 and live MCP JSON-RPC roundtrip are **not yet verified**. No manual production D1 write or migration was performed. Reference: [PA_RELEASE_A_V4_RELEASE_RESULT.md](./PA_RELEASE_A_V4_RELEASE_RESULT.md).
+
+Statements below describing v4 as unpublished are historical; do not use the save-only or deployment instructions again.
+
 ## Version evidence
 
 **Local:** v0.13.5-alpha / UX-016, reproducible ZIP in ChatGPT Library at `/Планировщик сюжета/Development/01_Current/PA_LOCAL_V0135_20261101/`.  

@@ -1,5 +1,8 @@
 # PA-RELEASE-A — native deploy of saved v4 (no imaginary preflight)
 
+**COMPLETED — 2026-11-02:** v4 is privately deployed. Deployment: `appgdep_6ae8284035b48191a6603d203cd6def5`. This instruction is historical. See [PA_RELEASE_A_V4_RELEASE_RESULT.md](./PA_RELEASE_A_V4_RELEASE_RESULT.md) for actual results. Do not deploy v4 again.
+
+
 **Status:** READY FOR ONE OWNER-AUTHORIZED PRIVATE SITES DEPLOY; NOT YET EXECUTED.
 **Scope:** Existing Site `appgprj_6ae715d7cccc8191bc35fbcd5255d9ce`, saved version `appgprj_6ae715d7cccc8191bc35fbcd5255d9ce~appgver_9fab684372648191b91af6756baf76b5`. Live fallback is v3 deployment `appgdep_6ae72bc3affc8191bb43ff3843cf616e`.
 **Previous Work stop:** `DEPLOY_D1_UNSAFE` was triggered *solely by the absence* of a Sites D1 internal binding/migration preflight report, not by an observed mismatch or migration request. The old `docs/PA_RELEASE_A_V4_PREDEPLOY_GATE.md` demanded a product capability that is not exposed. It is **superseded by this task for this specific deployment**.
