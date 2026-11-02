@@ -1,5 +1,7 @@
 # PA-RELEASE-A — save one private Site candidate, no deployment
 
+**COMPLETED 2026-11-02:** Sites version **4** saved (ID `appgprj_6ae715d7cccc8191bc35fbcd5255d9ce~appgver_9fab684372648191b91af6756baf76b5`), without deployment; v3 remains live. Do not run this save-only instruction again. **Next route: [PA_RELEASE_A_V4_PREDEPLOY_GATE.md](./PA_RELEASE_A_V4_PREDEPLOY_GATE.md).** D1 binding mapping at deployment remains unverified.
+
 **Status:** READY FOR EXPLICIT OWNER-STARTED WORK. This is NOT permission to deploy.
 **Target existing Site ONLY:** `appgprj_6ae715d7cccc8191bc35fbcd5255d9ce`.
 **Source baseline:** saved and deployed v3; source commit `f4ab5397ea2ac7e5b1c6804ae5a169acc7468089`, deployment `appgdep_6ae72bc3affc8191bb43ff3843cf616e`.
