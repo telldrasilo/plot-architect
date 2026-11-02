@@ -1,5 +1,7 @@
 # PA-RELEASE-A — official private deployment of saved v4
 
+**SUPERSEDED FOR CURRENT OWNER-APPROVED V4 RELEASE:** This historical gate required a D1 internal preflight plan that Sites does not expose, leading to `DEPLOY_D1_UNSAFE` even though no actual mismatch was observed. Do not rerun it. Use [PA_RELEASE_A_NATIVE_DEPLOY_V4.md](./PA_RELEASE_A_NATIVE_DEPLOY_V4.md) for one native deployment with concrete binding/audience checks. Existing D1 data risk remains; no Wrangler bypass.
+
 **Current release state (2026-11-02):** v4 saved, **NOT YET DEPLOYED**. Owner has explicitly requested **private publication of this version on the existing Site**. Deployment may proceed only through native Sites with the finite preflight below. Do not ask for a redundant approval if those conditions are satisfied; stop if they are not.
 
 **Existing Site:** `appgprj_6ae715d7cccc8191bc35fbcd5255d9ce`  
