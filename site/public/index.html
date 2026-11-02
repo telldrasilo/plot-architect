@@ -358,7 +358,6 @@ const efby=id=>state.editorialFields.find(f=>f.id===id);
 const gnby=id=>state.gapNotes.find(n=>n.id===id);
 const rewriteBy=id=>(state.eventRewrites||[]).find(d=>d.nodeId===id);
 function beginEventRewrite(id){
- if(remote.connected)return note('Переработка события доступна только в локальном редакторе; hosted-контракт ещё не обновлён');
  if(!nby(id)||rewriteBy(id))return;
  commit(()=>{state.eventRewrites.push({nodeId:id,baseRevision:state.revision,taskText:'',offerVariants:true,status:'pending'})},'Режим переработки включён · исходное событие сохранено');
  selected={type:'node',id};render();
@@ -886,7 +885,7 @@ function renderSingleEventRewriteInspector(el,n,d){
  const tip='Исходное событие\nТо же место на графе · исходные связи сохранены';
  el.innerHTML=`<div class="inspect-head"><button type="button" class="ux014-header-title rewrite-heading-tip" id="rewrite-heading" data-tip="${esc(tip)}" aria-label="Переработка события. Исходное событие; то же место на графе, исходные связи сохранены" aria-describedby="hover-help">Переработка события <span aria-hidden="true" class="ux014-info">ⓘ</span></button><span class="inspect-top-tools"><button id="pin-inspect" title="${inspectorPinned?'Вернуть окно к событию':'Закрепить окно справа'}">${inspectorPinned?'↗ Рядом':'▣ Справа'}</button><button id="close-inspect" title="Закрыть">×</button></span></div>
  <div class="ux014-original"><strong class="ux014-original-title">${esc(n.title)}</strong><p class="ux014-original-description">${esc(n.description||'Описание отсутствует')}</p></div>
- <div class="field"><label for="ux014-task">Что изменить?</label><textarea id="ux014-task" class="ux014-task" placeholder="Опишите задачу для ChatGPT">${esc(d.taskText)}</textarea></div>
+ <div class="field"><label for="ux014-task">Что изменить?</label><textarea id="ux014-task" class="ux014-task" maxlength="20000" placeholder="Опишите задачу для ChatGPT">${esc(d.taskText)}</textarea></div>
  <div class="field"><label class="check-row"><input id="ux014-offer" type="checkbox" ${d.offerVariants?'checked':''}>Предлагать три варианта</label></div>
  <p class="ux014-quiet-note">Исходное содержание не изменяется. Подготовка и применение вариантов появятся после P5/P6.</p>
  <button class="ux014-generate" type="button" disabled title="Генерация вариантов пока не подключена">Подготовить ${d.offerVariants?'3 варианта':'1 вариант'}</button>
@@ -898,9 +897,9 @@ function renderSingleEventRewriteInspector(el,n,d){
  const editor=$('ux014-task');let editing=false;
  editor.onfocus=()=>{editing=false};
  editor.oninput=e=>{
-  const draft=rewriteBy(n.id);if(!draft||remote.connected)return;
+  const draft=rewriteBy(n.id);if(!draft)return;
   if(!editing){history.push(JSON.stringify(persistentGraph()));if(history.length>60)history.shift();state.revision++;editing=true}
-  draft.taskText=e.target.value;save(false);
+  draft.taskText=e.target.value;save();
   const card=document.querySelector(`[data-node="${n.id}"] .node-note`);
   if(card)card.textContent=draft.taskText||'Что изменить?';
   memoRender=null;renderEdges();
