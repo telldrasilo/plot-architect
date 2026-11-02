@@ -20,6 +20,7 @@ const operationSchema={oneOf:[
 ]};
 const tools=[
  {name:'list_projects',title:'Список сюжетных проектов',description:'Получить список проектов и серверные ревизии. Только чтение; не придумывать проекты по памяти.',inputSchema:{...shape,properties:{}},annotations:{readOnlyHint:true,openWorldHint:false}},
+ {name:'create_project',title:'Создать пустой сюжетный проект',description:'Создать новый пустой проект по прямой просьбе владельца. Возвращает ID и ревизию 0. Повторный вызов создаст ещё один проект; не используйте для открытия существующего.',inputSchema:{...shape,properties:{name:{type:'string',minLength:1,maxLength:160}},required:['name']},annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false}},
  {name:'get_project',title:'Прочитать сюжетный проект',description:'Прочитать текущую ревизию, заголовки и структуру. Включить detail=full только для небольшого графа.',inputSchema:{...shape,properties:{project_id:{type:'string',minLength:1,maxLength:80},detail:{enum:['summary','full']}},required:['project_id']},annotations:{readOnlyHint:true,openWorldHint:false}},
  {name:'get_context',title:'Получить фрагмент сюжета',description:'Найти конкретные события по фразе или ID и связанные события на расстоянии до 1 стрелки; для больших историй вместо полного графа.',inputSchema:{...shape,properties:{project_id:{type:'string',minLength:1,maxLength:80},query:{type:'string',maxLength:150},node_ids:{type:'array',items:{type:'string',maxLength:80},maxItems:30},neighbors:{type:'boolean'}},required:['project_id']},annotations:{readOnlyHint:true,openWorldHint:false}},
  {name:'get_changes',title:'Изменения проекта после ревизии',description:'Сопоставить актуальный граф с конкретной ранее сохранённой ревизией; показать изменённые идентификаторы нод, полей и связей.',inputSchema:{...shape,properties:{project_id:{type:'string',minLength:1,maxLength:80},since_revision:{type:'integer',minimum:0}},required:['project_id','since_revision']},annotations:{readOnlyHint:true,openWorldHint:false}},
@@ -30,6 +31,7 @@ for(const tool of tools){
  const properties={};
  switch(tool.name){
   case 'list_projects': properties.projects={type:'array',items:{type:'object'}};break;
+  case 'create_project':properties.project_id={type:'string'};properties.name={type:'string'};properties.revision={const:0};properties.created={const:true};break;
   case 'get_project':properties.project_id={type:'string'};properties.revision={type:'integer'};break;
   case 'get_context':properties.project_id={type:'string'};properties.nodes={type:'array',items:{type:'object'}};break;
   case 'get_changes':properties.project_id={type:'string'};properties.from_revision={type:'integer'};properties.to_revision={type:'integer'};break;
@@ -38,6 +40,8 @@ for(const tool of tools){
  }
  tool.outputSchema={type:'object',properties,required:Object.keys(properties)};
 }
+// Match the editor's blankGraph() project template; no plot events, links or fields.
+const blankGraph=()=>({version:1,revision:0,nextNode:1,nextEdge:1,nextField:1,nextLine:2,view:null,nodes:[],edges:[],fields:[],lanes:[{id:'l1',title:'Основная линия',color:'#b8a16e',y:200}]});
 const goodId=s=>typeof s==='string'&&/^[A-Za-z0-9-]{1,80}$/.test(s);
 const mcpIsObj=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
 const safeText=(v,n)=>typeof v==='string'&&v.trim().length>0&&v.length<=n;
@@ -121,6 +125,12 @@ async function callTool(name,args,request,env,internalApi){
  if(!request.headers.get('oai-authenticated-user-id')?.trim())throw Object.assign(new Error('Доступ только владельцу'),{status:401});
  if(!env.DB)throw Object.assign(new Error('Хранилище недоступно'),{status:503});
  if(name==='list_projects'){validateArgs(args,[]);const r=await rest(request,internalApi,'GET','/api/projects');return {projects:r.projects||[]}}
+ if(name==='create_project'){
+  validateArgs(args,['name']);
+  if(Object.keys(args).some(k=>k!=='name')||!safeText(args.name,160))throw new Error('Название проекта должно содержать от 1 до 160 символов');
+  const created=await rest(request,internalApi,'POST','/api/projects',{name:args.name.trim(),graph:blankGraph()});
+  return {project_id:created.id,name:created.name,revision:created.revision,created:true};
+ }
  validateArgs(args,['project_id']);
  if(name==='get_project'){
   if(args.detail!==undefined&&!['summary','full'].includes(args.detail))throw new Error('Неверный detail');
