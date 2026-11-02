@@ -5,6 +5,19 @@
 - `main` is the reviewed **local development** baseline; it does not assert what is running on ChatGPT Sites.
 - Treat files in `site/docs/` as historical inputs where they conflict with these current guards and `docs/RELEASE_POLICY.md`.
 
+## Platform-native-first (mandatory)
+
+- **Read the current official platform documentation before designing a workflow.** For ChatGPT Sites use its built-in **Save version**, **Deploy version**, project-level D1/R2 bindings, private sharing, and native identity; for build use the official Sites/Vite tooling; for development use GitHub PR + CI. Do **not** invent a second release, authentication, database-provisioning, or preview system.
+- Prefer the smallest supported operation on the **existing** Site/version. Reuse saved artifacts, existing native bindings, and previous verified CI evidence. Do not reproduce whole builds, historical audits, or Work sessions merely to satisfy locally invented procedures.
+- Keep project-specific checks only when they protect a **concrete** risk: owner-only audience, the same existing D1 binding and no unintended migration, six MCP tools, authentication, and data compatibility. Never treat invisible hosting internals as a requirement that official product controls do not expose; use documented settings and the native deployment preflight, and stop only on an actual mismatch, warning, or unsupported behavior.
+- Do not fake login headers, disable Sites access checks, widen the official mock sign-in host allowlist, create alternative servers/sites, or deploy using raw Cloudflare Wrangler. The development mock login is **not** a production owner-auth check.
+- Separate **predeployment** checks from **postdeployment** acceptance: real hosted identity and browser behavior must be checked on the live private deployment. Official Sites warns that publishing may apply database changes before going live and code rollback does not restore the database.
+
+Official references:
+- https://learn.chatgpt.com/docs/sites/managing-a-site
+- https://help.openai.com/en/articles/20001339-creating-and-using-chatgpt-sites
+- https://github.com/openai/sites/tree/main/packages/sites-vite-plugin
+
 ## Do not do without separate explicit release authorization
 - Do not deploy, publish or modify the hosted Site, its access policy, real D1, REST/MCP routes or plugin connection.
 - Do not create a second Site or independent duplicate plugin.
