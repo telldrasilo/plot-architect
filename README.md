@@ -9,13 +9,13 @@ This repository packages the reproducible local Graphite editor and the Site/MCP
 
 **Do not reinvent a workflow already provided by the platform.** Use GitHub PR/CI for code, official OpenAI Sites/Vite tooling for build, and ChatGPT Sites' built-in **Save version → Deploy version** for releases of the existing Site. Reuse hosted D1, MCP, native owner identity, sharing and saved versions. Do not create a parallel hosting/preview/auth/deployment stack or require undocumented internal platform invariants. Keep only concrete release checks, especially unintended D1 migrations or binding replacement. See `AGENTS.md` and `docs/RELEASE_POLICY.md`.
 
-As of 2026-11-02 a saved **v4** Sites candidate exists while **v3** remains live; its owner-only private deployment is user-authorized **subject to native preflight**. See `docs/PA_RELEASE_A_V4_PREDEPLOY_GATE.md` before asking Sites to deploy that exact saved version.
+**Actual hosted baseline:** private v4 is deployed. For the next patch follow **`docs/RELEASE_POLICY.md` → «Постоянный сценарий выпуска обычного патча»**, not the historical Release A save/deploy handoffs. The v4 release evidence is in `docs/PA_RELEASE_A_V4_RELEASE_RESULT.md`.
 
 ## Layout
 
 - `site/`: local development code (`src/`, `public/`, `db/`, `drizzle/`, test and build scripts).
 - `qa/browser/`: preserved local browser regression tests.
-- `docs/RELEASE_POLICY.md`: staging, Site/MCP separation, Work budget, D1 restrictions.
+- `docs/RELEASE_POLICY.md`: **one canonical patch-release scenario**, Site/MCP separation, Work budget and D1 safety.
 - `docs/RELEASE_MANIFEST.json`: frozen baseline and test evidence.
 - `docs/WORK_RELEASE_A.md`: draft Work handoff for compatible UI changes only.
 - `AGENTS.md`: binding instructions for agents touching this repository.
@@ -39,4 +39,4 @@ npm run build
 
 No GitHub Actions job has deployment credentials or deploy permissions. The CI workflow is test-only.
 
-For releases: keep each UI patch in a pull request; merge into `main` only after review and checks. The first Site deployment must explicitly compare against the real current hosted source; do not assume this code is its baseline.
+For releases: use the single canonical routine in `docs/RELEASE_POLICY.md`: GitHub branch → PR → CI → merge; review the narrow patch against the live Site; native Sites Save version → owner-approved Deploy version → targeted post-deploy acceptance. Never treat this local repo as an exact hosted source mirror.
