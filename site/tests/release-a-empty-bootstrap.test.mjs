@@ -18,8 +18,11 @@ test('Release A: no inherited local plot is posted to an empty Site',()=>{
   assert.doesNotMatch(boot,/graph:persistentGraph\(\)/);
 });
 
-test('Release A: connected Site cannot enter local-only event rewrite mode',()=>{
+test('UX-014: connected Site can stage a non-destructive rewrite on the original node',()=>{
   const start=editor.indexOf('function beginEventRewrite(id){');
   assert.ok(start>0);
-  assert.match(editor.slice(start,start+350),/if\(remote\.connected\)return/);
+  const code=editor.slice(start,start+400);
+  assert.doesNotMatch(code,/if\(remote\.connected\)return/);
+  assert.match(code,/state\.eventRewrites\.push\(\{nodeId:id/);
+  assert.match(code,/status:'pending'/);
 });
