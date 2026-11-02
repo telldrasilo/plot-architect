@@ -5,6 +5,12 @@
 
 This repository packages the reproducible local Graphite editor and the Site/MCP candidate code for review and testing. It must **not** be deployed verbatim to the existing production Site: the live source, owner-only access, MCP bindings and D1 must first be inspected and reconciled.
 
+## Platform-native-first rule
+
+**Do not reinvent a workflow already provided by the platform.** Use GitHub PR/CI for code, official OpenAI Sites/Vite tooling for build, and ChatGPT Sites' built-in **Save version → Deploy version** for releases of the existing Site. Reuse hosted D1, MCP, native owner identity, sharing and saved versions. Do not create a parallel hosting/preview/auth/deployment stack or require undocumented internal platform invariants. Keep only concrete release checks, especially unintended D1 migrations or binding replacement. See `AGENTS.md` and `docs/RELEASE_POLICY.md`.
+
+As of 2026-11-02 a saved **v4** Sites candidate exists while **v3** remains live; its owner-only private deployment is user-authorized **subject to native preflight**. See `docs/PA_RELEASE_A_V4_PREDEPLOY_GATE.md` before asking Sites to deploy that exact saved version.
+
 ## Layout
 
 - `site/`: local development code (`src/`, `public/`, `db/`, `drizzle/`, test and build scripts).
