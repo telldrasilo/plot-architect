@@ -124,8 +124,9 @@ def main():
         assert page.evaluate("() => __graphite.getEventRewrites()[0].taskText") == "Local draft must survive 409"
 
         page.reload()
-        page.wait_for_function("window.__graphite && __graphite.getRemote().connected")
-        assert page.evaluate("() => __graphite.getRemote().blocked === true")
+        # connectSite marks itself connected before openProject finishes reading
+        # the pending local backup. Wait for recovery rather than that early flag.
+        page.wait_for_function("() => window.__graphite && __graphite.getRemote().connected && __graphite.getRemote().blocked")
         page.evaluate("() => __graphite.selectNode('n1')")
         assert page.locator("#ux014-task").input_value() == "Local draft must survive 409"
         assert not errors, errors
