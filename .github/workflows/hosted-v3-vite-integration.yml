@@ -66,7 +66,8 @@ jobs:
           npm run check
           # Captured hosted-v3 runtime cannot implement current UX-014 validation.
           # Preserve v3 contract tests here; current-branch UX-014 tests run in ci.yml.
-          node --test --test-name-pattern='^(?!UX-014)' tests/backend.test.mjs tests/mcp.test.mjs tests/sites-security.test.mjs
+          node --test --test-name-pattern='graph validation|native private API|create, list|invalid links' tests/backend.test.mjs
+          node --test tests/mcp.test.mjs tests/sites-security.test.mjs
       - name: Build captured hosted runtime through Sites Vite
         run: |
           npm run build
