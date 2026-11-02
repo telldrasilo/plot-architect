@@ -22,6 +22,8 @@ Sources:
 - https://learn.chatgpt.com/docs/sites/managing-a-site
 - https://help.openai.com/en/articles/20001339-creating-and-using-chatgpt-sites
 
+**Release A follow-up (2026-11-02):** Work stopped `DEPLOY_D1_UNSAFE` without calling Deploy because a self-imposed internal D1 preflight plan is unavailable in official Sites. No mismatch or migration warning was reported. This is **not** evidence that v4 is deployed, nor proof that the dummy Cloudflare UUID is ignored. Owner still authorizes one private native deployment of saved v4 with concrete audience/`DB` checks and stop on any actual replacement/migration warning. See `docs/PA_RELEASE_A_NATIVE_DEPLOY_V4.md`; it supersedes the former impossible preflight requirement for this release. Publishing can mutate real D1 and code rollback does not revert it.
+
 ## Release tracks
 
 | Track | Allowed change | Work/Sites stage | Plugin step |
