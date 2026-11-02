@@ -7,7 +7,30 @@ const build=db=>async (method,params={},owner=true,route='/mcp')=>{const headers
 const called=(invoke,name,args,owner=true)=>invoke('tools/call',{name,arguments:args},owner);
 const unbox=resp=>{if(resp.body?.isError)return {error:JSON.parse(resp.body.content[0].text)};return resp.body?.structuredContent||resp.body};
 const make=async (db,graph=base())=>{const r=await worker.fetch(new Request('https://plot.local/api/projects',{method:'POST',headers:{'Content-Type':'application/json','oai-authenticated-user-id':'owner'},body:JSON.stringify({name:'Тест',graph})}),{DB:db});assert.equal(r.status,201);return (await r.json()).id};
-test('MCP initialize, tools/list (six tools), no data disclosure without owner identity',async()=>{const db=mockD1(),run=build(db);let r=await run('initialize',{},false);assert.equal(r.body.serverInfo.name,'Plot Architect');r=await run('tools/list',{},false);assert.deepEqual(r.body.tools.map(x=>x.name),['list_projects','get_project','get_context','get_changes','preview_patch','apply_patch']);assert.ok(r.body.tools.every(x=>x.inputSchema));await make(db);r=await called(run,'list_projects',{},false);assert.equal(unbox(r).error.error,'AUTH_REQUIRED');assert.equal((await called(run,'list_projects',{})).status,200)});
+test('MCP initialize, tools/list (seven tools), no data disclosure without owner identity',async()=>{const db=mockD1(),run=build(db);let r=await run('initialize',{},false);assert.equal(r.body.serverInfo.name,'Plot Architect');r=await run('tools/list',{},false);assert.deepEqual(r.body.tools.map(x=>x.name),['list_projects','create_project','get_project','get_context','get_changes','preview_patch','apply_patch']);assert.ok(r.body.tools.every(x=>x.inputSchema));await make(db);r=await called(run,'list_projects',{},false);assert.equal(unbox(r).error.error,'AUTH_REQUIRED');assert.equal((await called(run,'list_projects',{})).status,200)});
+test('create_project makes an empty persisted Site project compatible with the editor',async()=>{
+ const db=mockD1(),run=build(db),name='  Противостояние Святого  ';
+ const made=unbox(await called(run,'create_project',{name}));
+ assert.equal(made.created,true);assert.equal(made.name,'Противостояние Святого');assert.equal(made.revision,0);assert.match(made.project_id,/^[\w-]+$/);
+ const list=unbox(await called(run,'list_projects',{}));assert.equal(list.projects.length,1);assert.equal(list.projects[0].id,made.project_id);
+ const project=unbox(await called(run,'get_project',{project_id:made.project_id,detail:'full'}));
+ assert.equal(project.revision,0);assert.equal(project.name,made.name);
+ assert.deepEqual(project.graph.nodes,[]);assert.deepEqual(project.graph.edges,[]);assert.deepEqual(project.graph.fields,[]);
+ assert.deepEqual(project.graph.lanes,[{id:'l1',title:'Основная линия',color:'#b8a16e',y:200}]);
+ assert.equal(project.graph.view,null);assert.equal(project.graph.nextNode,1);assert.equal(project.graph.nextLine,2);
+ const history=await worker.fetch(new Request('https://plot.local/api/projects/'+made.project_id+'/revisions',{headers:{'oai-authenticated-user-id':'owner'}}),{DB:db});
+ assert.deepEqual((await history.json()).revisions.map(x=>x.revision),[0]);
+});
+test('create_project refuses unauthenticated and invalid names without writing',async()=>{
+ const db=mockD1(),run=build(db);
+ assert.equal(unbox(await called(run,'create_project',{name:'Тайный проект'},false)).error.error,'AUTH_REQUIRED');
+ for(const name of ['', '   ', 42, 'x'.repeat(161)]){
+  const r=unbox(await called(run,'create_project',{name}));assert.ok(r.error,JSON.stringify(name));
+ }
+ assert.ok(unbox(await called(run,'create_project',{})).error);
+ assert.ok(unbox(await called(run,'create_project',{name:'Валидный',project_id:'stray'})).error);
+ assert.equal(unbox(await called(run,'list_projects',{})).projects.length,0);
+});
 test('read projects, exact context and revision diff',async()=>{const db=mockD1(),id=await make(db),run=build(db);let r=unbox(await called(run,'list_projects',{}));assert.equal(r.projects.length,1);r=unbox(await called(run,'get_project',{project_id:id}));assert.equal(r.counts.nodes,2);r=unbox(await called(run,'get_project',{project_id:id,detail:'full'}));assert.equal(r.graph.edges[0].type,'precedes');r=unbox(await called(run,'get_context',{project_id:id,query:'завязка'}));assert.equal(r.nodes.length,2);r=unbox(await called(run,'get_changes',{project_id:id,since_revision:0}));assert.deepEqual(r.changes.nodes.added,[])});
 test('preview is read-only; apply requires matching token, commits atomically, preserves server revisions',async()=>{const db=mockD1(),id=await make(db),run=build(db);const operations=[{op:'add_node',temp_id:'eventA',title:'Новый конфликт',description:'Участники расходятся',x:790,y:210},{op:'add_edge',from:'n2',to:'$eventA',edge_type:'causes'},{op:'update_field',id:'f1',changes:{comment:'Исправленное описание'}}];
  const args={project_id:id,expected_revision:0,operations};const pre=unbox(await called(run,'preview_patch',args));assert.equal(pre.changes.length,3);assert.equal(pre.counts_after.nodes,3);let actual=unbox(await called(run,'get_project',{project_id:id,detail:'full'}));assert.equal(actual.revision,0);assert.equal(actual.graph.nodes.length,2);
