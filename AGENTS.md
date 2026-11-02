@@ -1,46 +1,22 @@
-# Agent rules — Plot Architect / Graphite
+# Plot Architect / Graphite — instructions for agents
 
-## Scope
-- Private Plot Architect project only. Never modify Xianxia Master, Campaign Vault, or unrelated projects.
-- `main` is the reviewed **local development** baseline; it does not assert what is running on ChatGPT Sites.
-- Treat files in `site/docs/` as historical inputs where they conflict with these current guards and `docs/RELEASE_POLICY.md`.
+## Goal and sources
+Build the private Plot Architect project; do not change unrelated projects. **Documentation serves development, not the reverse.**
+- GitHub `main` is the development source, not a byte-identical copy of the deployed ChatGPT Site. Check current `main` before code changes.
+- Read only documentation relevant to the task. For design, use the approved UX decisions in Library `/Планировщик сюжета/Development/UX_DESIGN_STANDARD.md`; for a Site release, use [docs/RELEASE_POLICY.md](docs/RELEASE_POLICY.md). Historical `PA_RELEASE_A_*`, `site/docs/`, ZIP files and ledgers are references, **not instructions for new work**.
+- Direct recent decisions by the owner take precedence over historical drafts. Ask only when there is a real unresolved product or safety choice.
 
-## Platform-native-first (mandatory)
+## Work proportionately
+- Ideation, critique and visual exploration: no version audit, changelog entry, PR or release checks required.
+- Code: branch from current `main` → narrow PR → applicable tests/CI → merge. Use GitHub PR/commits/CI as the change history; **no mandatory duplicate Library ledger, per-patch ZIP, manual SHA census or documentation status synchronization**.
+- Edit a specification only when a durable UX rule, data contract, architecture or decision changes. Never fix historical status wording merely to match today's release. A documentation-only PR need not run unrelated browser/database tests; rely on applicable CI.
+- Prefer a small, reviewable change and report actual test outcomes, not inferred ones.
 
-- **Read the current official platform documentation before designing a workflow.** For ChatGPT Sites use its built-in **Save version**, **Deploy version**, project-level D1/R2 bindings, private sharing, and native identity; for build use the official Sites/Vite tooling; for development use GitHub PR + CI. Do **not** invent a second release, authentication, database-provisioning, or preview system.
-- Prefer the smallest supported operation on the **existing** Site/version. Reuse saved artifacts, existing native bindings, and previous verified CI evidence. Do not reproduce whole builds, historical audits, or Work sessions merely to satisfy locally invented procedures.
-- Keep project-specific checks only when they protect a **concrete** risk: owner-only audience, the same existing D1 binding and no unintended migration, six MCP tools, authentication, and data compatibility. Never treat invisible hosting internals as a requirement that official product controls do not expose; use documented Sites settings, supported version/deployment operations, and any **actual warnings** surfaced by the product. Never require an undocumented internal D1 preflight report.
-- Do not fake login headers, disable Sites access checks, widen the official mock sign-in host allowlist, create alternative servers/sites, or deploy using raw Cloudflare Wrangler. The development mock login is **not** a production owner-auth check.
-- Separate **predeployment** checks from **postdeployment** acceptance: real hosted identity and browser behavior must be checked on the live private deployment. Official Sites warns that publishing may apply database changes before going live and code rollback does not restore the database.
+## Protected boundaries
+- **No Site deploy, saved Site source modification, sharing change, production D1 write/migration, MCP route/schema change or Plugin Skill change without explicit owner authorization for that action.** GitHub merge alone authorizes none of these.
+- Release on the **existing** Site using supported OpenAI Sites/Vite Save version → Deploy version, existing native authentication and D1 binding; never invent a separate Site, authentication, preflight, migration or Wrangler deployment path. Follow [docs/RELEASE_POLICY.md](docs/RELEASE_POLICY.md) only for release tasks.
+- Keep owner-only access, existing `DB`, relevant MCP contracts and editorial data safe. Do not fake login headers or weaken authentication. Local mock identity does not prove production identity; code rollback does not restore D1.
+- No credentials, user plots or dumps in GitHub. Never use Work to recover, copy, preserve or migrate old/test stories (PA-WORK-GUARD-01); stop if a task depends on it. Use synthetic test data when permitted.
+- Never alter old test evidence to obtain a green CI result.
 
-Official references:
-- https://learn.chatgpt.com/docs/sites/managing-a-site
-- https://help.openai.com/en/articles/20001339-creating-and-using-chatgpt-sites
-- https://github.com/openai/sites/tree/main/packages/sites-vite-plugin
-
-**Release workflow:** The ONE canonical patch-release scenario is `docs/RELEASE_POLICY.md` → «Постоянный сценарий выпуска обычного патча», including «Подготовка готового патча и минимальный handoff в Work». Prepare the PR/diff/tests in GitHub before Work; send Work only the short Site action template with explicit owner deployment permission when applicable. Old `PA_RELEASE_A_*` instructions are historical evidence, not reusable deployment prompts. Always follow the current saved/deployed Site version before changing a patch.
-
-## Do not do without separate explicit release authorization
-- Do not deploy, publish or modify the hosted Site, its access policy, real D1, REST/MCP routes or plugin connection.
-- Do not create a second Site or independent duplicate plugin.
-- Do not commit credentials, tokens, owner identifiers, project dumps or exported user plots into the repository.
-- Never use Work for backup, migration, copying, restoring or preserving legacy/test plots, including “Кризис наследования” (PA-WORK-GUARD-01). If the plan requires it, STOP: WORK_LEGACY_DEPENDENCY.
-- Do not presume that code rollback reverts database changes. Additive isolated schema first, synthetic D1 testing, explicit rollout and recovery plan.
-
-## Source reconciliation is mandatory for a hosted release
-1. Read exact existing Site source version/deployment, live MCP tool contract, D1 schema and private-owner access.
-2. Compare that actual source against the local candidate: identify drift; patch only required files and preserve hosted-only fixes.
-3. For UI-only rollout, preserve REST, MCP tool signatures, DB migrations, and access policy byte-for-byte unless approved.
-4. Prevent silent loss of editorial data: if `eventRewrites[]` is not supported by server validation/storage, gate that feature rather than claiming persistence.
-5. All data-changing operations require explicit authorization and CAS/transaction tests. Use new synthetic project data for hosted E2E.
-6. No publication on test failure; report STOP with evidence.
-
-## Local checks for every PR
-Run from `site/`: `npm run check`, `npm run check:v2`, `npm run test:local`, `npm run build`. Report exact results; do not say actual D1 or owner identity is tested by local SQLite mocks. Run browser QA on modified interactions when browser is available.
-
-## Code/change discipline
-- Keep patches narrow. State baseline, changed files, invariant tests, reproducible commands and rollback target.
-- Do not modify historical test results, security assertions or snapshots merely to obtain green CI.
-- Separate three release types: UI (Site code), MCP server/tools (Site + discovery), Plugin Skill metadata (eligible Plugin Creator update).
-- Use private PRs and reviewable diffs; never automatically deploy on merge.
-- Avoid large duplicated handoff packets: link to immutable commit SHA and one small release task.
+Use official platform documentation when an operation depends on Sites, its bindings, authentication, or deployment. Otherwise do not perform platform checks just to satisfy a document.
