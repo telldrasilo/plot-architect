@@ -8,6 +8,20 @@
 
 **Release A update (2026-11-02):** an unpublished **saved Site v4 candidate** now exists; version ID `appgprj_6ae715d7cccc8191bc35fbcd5255d9ce~appgver_9fab684372648191b91af6756baf76b5`. It has `deployment_id:null`; **v3 is still the active deployment**. Candidate source 46/46 SHA-256 checked, 7 approved changed/new paths, 39 unchanged. D1 host-managed deployment mapping and real owner authentication remain unverified. **Deployment is NOT authorized.** See `docs/PA_RELEASE_A_V4_PREDEPLOY_GATE.md` and Library report `libfile_7ccc2afe966881918b7170e05072e997`.
 
+## Official Sites workflow: use the platform, don't reinvent it
+
+**Rule:** Official product documentation and native Sites controls are the default source of truth for hosting operations. We develop with GitHub branch → PR → CI → merge; package with supported Vite/Sites tooling; use the **existing** project's `.openai/hosting.json` (project ID and named `DB` binding); release with native **Save version → Deploy version**. Never build a private alternative deployment framework, mock auth provider, D1 provisioner, Site clone, or nonstandard release workaround.
+
+A predeploy review should check only actionable risks using supported controls: correct existing Site, saved version ID, owner-only audience, existing `DB` binding, unchanged MCP contracts, and **whether the publish operation proposes database migrations or a storage replacement**. The hosting service's undocumented internal UUID rewrite is not a separate deliverable. **A real warning, wrong binding, or non-no-op migration requires STOP before deployment.** This is not permission to guess that a dummy local Wrangler ID is safe: inspect the native deployment's actual binding plan if exposed, and never run a raw Wrangler deploy.
+
+Postdeploy, use the real private Site (not a `terminal.local` mock login) to verify native owner authentication, UI/UX, MCP discovery and read-only DB health. Do not access old plot content. Sites explicitly warns that a failed publish may already have affected the database; code rollback is NOT database rollback.
+
+**Owner instruction dated 2026-11-02:** proceed toward **private** deployment of the *already saved* Site v4 candidate `appgprj_6ae715d7cccc8191bc35fbcd5255d9ce~appgver_9fab684372648191b91af6756baf76b5` on the **existing** Site, keeping sharing owner-only. This is task-scoped authorization, not a permanent waiver of release preflight or permission for D1 writes/migrations, plugin changes or public sharing. See `docs/PA_RELEASE_A_V4_PREDEPLOY_GATE.md`.
+
+Sources:
+- https://learn.chatgpt.com/docs/sites/managing-a-site
+- https://help.openai.com/en/articles/20001339-creating-and-using-chatgpt-sites
+
 ## Release tracks
 
 | Track | Allowed change | Work/Sites stage | Plugin step |
