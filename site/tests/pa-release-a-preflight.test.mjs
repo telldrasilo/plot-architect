@@ -40,11 +40,15 @@ test('Release A: standalone HTML includes exact editor source',()=>{
   assert.ok(html.includes(editor),'inline editor script must match src/editor.js exactly');
 });
 
-test('Release A: single-event rewrite cannot start while remote-connected',()=>{
+test('UX-014: current editor enables guarded Site rewrite drafts and synchronizes their text',()=>{
   const start=editor.indexOf('function beginEventRewrite(id){');
   assert.ok(start>=0,'beginEventRewrite must exist');
   const near=editor.slice(start,start+380);
-  assert.match(near,/if\(remote\.connected\)return/,'connected Site must block local-only event rewrite');
+  assert.doesNotMatch(near,/if\(remote\.connected\)return/,'Site mode must use normal guarded persistence');
+  assert.match(near,/eventRewrites\.push/);
+  const input=editor.slice(editor.indexOf("const editor=$('ux014-task')"),editor.indexOf('function renderInspector()'));
+  assert.match(input,/draft\.taskText=e\.target\.value;save\(\);/,'textarea edits must enter the Site sync queue');
+  assert.match(editor,/id="ux014-task"[^>]*maxlength="20000"/);
 });
 
 // Include the first-connect safety regression in the CI preflight suite.
