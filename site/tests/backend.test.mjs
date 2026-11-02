@@ -32,3 +32,57 @@ test('invalid links, duplicate ids and unsafe requests are rejected',async()=>{
  const db=mockD1(),call=sender(db),bad=graph();bad.edges[0].to='n999';let r=await call('POST','/api/projects',{name:'Broken',graph:bad});assert.equal(r.status,422);
  bad.edges[0].to='n2';bad.nodes.push({...bad.nodes[0]});r=await call('POST','/api/projects',{name:'Broken',graph:bad});assert.equal(r.status,422);
 });
+
+test('UX-014 rewrite drafts persist through guarded Site revisions without changing canonical graph',async()=>{
+ const db=mockD1(),call=sender(db),initial=graph();
+ const made=await call('POST','/api/projects',{name:'Синтетическая история',graph:initial});
+ assert.equal(made.status,201);const id=made.body.id;
+ const before=(await call('GET','/api/projects/'+id)).body.graph;
+ assert.equal(before.eventRewrites,undefined,'old projects need no migration');
+ const draft={nodeId:'n1',baseRevision:0,taskText:'Усилить последствия, не меняя факты.',offerVariants:true,status:'pending'};
+ const withDraft={...before,eventRewrites:[draft]};
+ let r=await call('PUT','/api/projects/'+id,{name:'Синтетическая история',expectedRevision:0,graph:withDraft});
+ assert.equal(r.status,200);assert.equal(r.body.revision,1);
+ let current=(await call('GET','/api/projects/'+id)).body;
+ assert.equal(current.revision,1);assert.deepEqual(current.graph.eventRewrites,[draft]);
+ for(const key of ['nodes','edges','fields','lanes'])assert.deepEqual(current.graph[key],before[key],key+' unchanged');
+ const changed={...current.graph,eventRewrites:[{...draft,taskText:'Новый текст',offerVariants:false}]};
+ r=await call('PUT','/api/projects/'+id,{name:'Синтетическая история',expectedRevision:1,graph:changed});
+ assert.equal(r.status,200);assert.equal(r.body.revision,2);
+ const stale=await call('PUT','/api/projects/'+id,{name:'Синтетическая история',expectedRevision:1,graph:withDraft});
+ assert.equal(stale.status,409,'stale rewrite cannot overwrite more recent server text');
+ current=(await call('GET','/api/projects/'+id)).body;
+ assert.deepEqual(current.graph.eventRewrites,changed.eventRewrites);
+ const canceled={...current.graph,eventRewrites:[]};
+ r=await call('PUT','/api/projects/'+id,{name:'Синтетическая история',expectedRevision:2,graph:canceled});
+ assert.equal(r.status,200);
+ current=(await call('GET','/api/projects/'+id)).body;
+ assert.equal(current.revision,3);assert.deepEqual(current.graph.eventRewrites,[]);
+ for(const key of ['nodes','edges','fields','lanes'])assert.deepEqual(current.graph[key],before[key],key+' preserved after cancel');
+ const revisions=(await call('GET','/api/projects/'+id+'/revisions')).body.revisions;
+ assert.deepEqual(revisions.map(x=>x.revision),[3,2,1,0]);
+ assert.equal((await call('PUT','/api/projects/'+id,{name:'Синтетическая история',expectedRevision:3,graph:withDraft},false)).status,401);
+});
+test('UX-014 rejects corrupt or unbounded rewrite drafts without any D1 write',async()=>{
+ const db=mockD1(),call=sender(db),made=await call('POST','/api/projects',{name:'Тест',graph:graph()});
+ const id=made.body.id,base=(await call('GET','/api/projects/'+id)).body.graph;
+ const draft={nodeId:'n1',baseRevision:0,taskText:'Исправить исходное событие',offerVariants:true,status:'pending'};
+ const invalid=[
+  {eventRewrites:'not an array'},
+  {eventRewrites:[draft,draft]},
+  {eventRewrites:[{...draft,nodeId:'n999'}]},
+  {eventRewrites:[{...draft,baseRevision:-1}]},
+  {eventRewrites:[{...draft,taskText:'a'.repeat(20001)}]},
+  {eventRewrites:[{...draft,offerVariants:'yes'}]},
+  {eventRewrites:[{...draft,status:'applied'}]},
+  {eventRewrites:[{...draft,taskText:null}]}
+ ];
+ for(const partial of invalid){
+  const bad={...base,...partial};
+  const result=await call('PUT','/api/projects/'+id,{name:'Тест',expectedRevision:0,graph:bad});
+  assert.equal(result.status,422,JSON.stringify(partial.eventRewrites)?.slice(0,100));
+ }
+ const actual=(await call('GET','/api/projects/'+id)).body;
+ assert.equal(actual.revision,0);assert.deepEqual(actual.graph,base);
+ assert.deepEqual((await call('GET','/api/projects/'+id+'/revisions')).body.revisions.map(x=>x.revision),[0]);
+});
