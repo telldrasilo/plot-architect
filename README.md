@@ -1,7 +1,7 @@
 # Plot Architect / Graphite — private development source
 
 **Local baseline:** Graphite v0.13.5-alpha / UX-016, 2026-11-01.  
-**Deployment state:** LOCAL ONLY. **This repository is not a mirror of the current hosted Site source.**
+**Hosted Site:** private v4 is LIVE (deployment `appgdep_6ae8284035b48191a6603d203cd6def5`). **This repository is still a local development source, not an exact hosted source mirror.** See `docs/PA_RELEASE_A_V4_RELEASE_RESULT.md`.
 
 This repository packages the reproducible local Graphite editor and the Site/MCP candidate code for review and testing. It must **not** be deployed verbatim to the existing production Site: the live source, owner-only access, MCP bindings and D1 must first be inspected and reconciled.
 
@@ -22,7 +22,7 @@ As of 2026-11-02 a saved **v4** Sites candidate exists while **v3** remains live
 
 ## Local build modes (Node 22.13+)
 
-The default `site/npm run build` and `site/npm run dev` now use the verified Sites Vite adapter. `npm run build:legacy` and `npm run dev:legacy` retain the previous custom bundle and Wrangler QA loop for regression/rollback. The Vite adapter is **development-only** and has not been integrated into hosted Site v3. See `docs/PA_SITES_VITE_ADAPTER.md`.
+The default `site/npm run build` and `site/npm run dev` now use the verified Sites Vite adapter. `npm run build:legacy` and `npm run dev:legacy` retain the previous custom bundle and Wrangler QA loop for regression/rollback. The Sites/Vite adapter was included in the hosted private v4 release. Local Wrangler test configuration is not production binding metadata. See `docs/PA_SITES_VITE_ADAPTER.md`.
 
 ## Local checks (Node 22.13+)
 
