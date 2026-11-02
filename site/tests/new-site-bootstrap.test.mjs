@@ -39,3 +39,10 @@ test('native Sites/Vite setup and existing MCP seven-tool contract stay intact',
     assert.ok(mcp.includes("name:'"+name+"'"),name);
   }
 });
+
+test('second release smoke: browser tab provides a visible revision signal without changing JS',()=>{
+  const html=read('../public/index.html');
+  const editor=read('../src/editor.js');
+  assert.ok(html.includes('<title>Plot Architect · Graphite</title>'));
+  assert.ok(html.includes(editor),'UI editor must remain identical to canonical script');
+});
