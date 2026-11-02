@@ -14,7 +14,7 @@ Build the private Plot Architect project; do not change unrelated projects. **Do
 
 ## Protected boundaries
 - **No Site deploy, saved Site source modification, sharing change, production D1 write/migration, MCP route/schema change or Plugin Skill change without explicit owner authorization for that action.** GitHub merge alone authorizes none of these.
-- Release on the **existing** Site using supported OpenAI Sites/Vite Save version → Deploy version, existing native authentication and D1 binding; never invent a separate Site, authentication, preflight, migration or Wrangler deployment path. Follow [docs/RELEASE_POLICY.md](docs/RELEASE_POLICY.md) only for release tasks.
+- Ordinary releases update the **existing** Site using native OpenAI Sites/Vite Save version → Deploy version and unchanged native auth/D1 binding. A **new** private Site is permitted only under a newer explicit owner decision; use [docs/PA_NEW_SITE_BOOTSTRAP.md](docs/PA_NEW_SITE_BOOTSTRAP.md) for that one-time clean install. Never invent authentication, preflight, migration or a Wrangler deployment path. For ordinary updates use [docs/RELEASE_POLICY.md](docs/RELEASE_POLICY.md).
 - Keep owner-only access, existing `DB`, relevant MCP contracts and editorial data safe. Do not fake login headers or weaken authentication. Local mock identity does not prove production identity; code rollback does not restore D1.
 - No credentials, user plots or dumps in GitHub. Never use Work to recover, copy, preserve or migrate old/test stories (PA-WORK-GUARD-01); stop if a task depends on it. Use synthetic test data when permitted.
 - Never alter old test evidence to obtain a green CI result.
