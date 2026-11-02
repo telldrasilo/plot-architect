@@ -1,106 +1,41 @@
-# Plot Architect — Work-budget release policy
+# Plot Architect — release policy (only for hosted releases)
 
-## Active Site release — 2026-11-02
+This policy is **not** a prerequisite for brainstorming, local UX changes, or ordinary code PRs. The GitHub `main` branch is a development source; a running ChatGPT Site is an independent deployed state. Use native GitHub and OpenAI Sites mechanisms, not custom infrastructure.
 
-**v4 is now live privately** on the existing Site: version `appgprj_6ae715d7cccc8191bc35fbcd5255d9ce~appgver_9fab684372648191b91af6756baf76b5`, succeeded deployment `appgdep_6ae8284035b48191a6603d203cd6def5`. The previous v3 deployment is historical, not active. Owner-only access, production `authenticated:true`, D1 logical binding `DB` with two tables, and six registered MCP tools were confirmed. UI browser QA, an application-layer anonymous 401 and live MCP JSON-RPC roundtrip are **not yet verified**. No manual production D1 write or migration was performed. Reference: [PA_RELEASE_A_V4_RELEASE_RESULT.md](./PA_RELEASE_A_V4_RELEASE_RESULT.md).
+**Last evidenced private deployment:** v4, deployment `appgdep_6ae8284035b48191a6603d203cd6def5` (`succeeded`), existing owner-only Site. Evidence and partial acceptance: [PA_RELEASE_A_V4_RELEASE_RESULT.md](PA_RELEASE_A_V4_RELEASE_RESULT.md). Query Sites for the **current** deployment when performing a new release; this pointer is not a live monitor.
 
-Statements below describing v4 as unpublished are historical; do not use the save-only or deployment instructions again.
+## Ordinary release procedure
 
-## Постоянный сценарий выпуска обычного патча — canonical
+1. **Scope.** Identify UI, MCP/backend, D1 schema, or Plugin Skill changes and explicit owner authorization. Start from reviewed GitHub PR, merged commit and passing **applicable** CI. Do not recapture past releases or old stories.
+2. **Reconcile affected source.** Check the existing Site's current version/deployment and only the hosted files and contracts relevant to the change. The repo is not a production mirror. Keep hosted-only REST/auth/D1/MCP files and migrations untouched in UI-only releases. Stop for unexplained conflicting changes or data incompatibility, not differences in historical docs.
+3. **Save.** Apply the narrow approved patch using official Sites/Vite tools on the **existing private Site** and use **Save version**. Record the saved version ID. Do not deploy a whole GitHub worktree blindly or substitute a local Wrangler D1 identifier for the host binding.
+4. **Deploy only when separately authorized.** Verify the intended saved version, owner-only audience, existing named `DB` binding, relevant MCP contract and **actual** platform warnings for migrations or storage replacement. A real unsafe change/warning means stop; do not demand undocumented internal D1 preflight or bypass native controls. Use **Sites → Deploy version**, not raw Wrangler. New D1 migration, MCP semantics or Plugin Skill changes need explicit additional approval.
+5. **Targeted acceptance.** Record status, version/deployment ID and URL; verify live owner identity, affected UI flow, DB/MCP behaviour **as relevant to the change**. Record any inaccessible check as **unverified**, not passed. Never read old plots or write production D1 without permission. Code rollback does **not** roll back D1.
+6. **Record once.** The PR plus a brief release result are sufficient. Update one short current-status pointer **only if its operational information actually changed**. Do not append a duplicate Library ledger entry, rehash all historical files or create a documentation reconciliation project.
 
-**Этот раздел — единственный актуальный маршрут для следующих патчей**. Предыдущие `PA_RELEASE_A_*` описывают историю первого запуска и не должны автоматически воспроизводиться. Принцип: **пользуемся документированными функциями GitHub и ChatGPT Sites; не изобретаем собственный деплой, авторизацию, preflight или резервный Site.**
+## Risk-based checks
 
-1. **Начало.** Прочитать `AGENTS.md`, эту политику и актуальную официальную документацию затронутой платформы. Проверить `main` GitHub и текущие *метаданные* опубликованной версии Sites. GitHub — разрабатываемый код, а не автоматическое побайтовое зеркало hosted Site. Определить узкий состав изменений (UI / backend-MCP / D1 / Plugin Skill), не изучая старые сюжеты.
-2. **Разработка и CI.** Отдельная ветка → минимальный diff → Pull Request → штатные GitHub Actions (проверки исходников, локальные тесты и сборка) → merge в `main`. Проверить изменённые взаимодействия локально, насколько это поддерживается. Не повторять исторические 43/46-файловые сверки и анализ первой миграции, если исходная hosted-версия не изменилась непредвиденно.
-3. **Подготовка Site-кандидата.** Использовать **существующий Site**, сравнить только релевантные hosted-файлы с текущей рабочей версией и перенести утверждённый патч, сохраняя hosted-only REST, auth, D1, MCP и миграции. Применять официальный Sites/Vite-инструментарий и штатный **Save version**. Записать ID версии. **Нельзя деплоить GitHub-репозиторий целиком вслепую**, создавать второй Site или заменять host-managed D1 тестовой конфигурацией Wrangler.
-4. **Приватная публикация — только с разрешения владельца.** В штатных настройках Sites сверить выбранную сохранённую версию, проект, owner-only доступ, именованную привязку существующей `DB`, релевантные MCP-контракты и реальные предупреждения о миграции/замене хранилища. Если нет конкретного несовпадения/опасного предупреждения, выполнить **Sites → Deploy version** один раз. **Не требовать внутренний preflight, которого Sites не предоставляет**, и не обходить защиту через Wrangler, заголовки или mock-login. Отдельное согласие на реальные миграции D1 и изменения MCP/плагина обязательно.
-5. **Приёмка.** Получить `succeeded`, новый deployment ID и URL. Проверить реальную идентификацию владельца, owner-only режим, UI затронутого патча, доступность `DB`, MCP discovery/инструменты при соответствующем типе изменений. Если что-то проверить не удалось, записать **непроверено**, а не **пройдено**. Никаких чтений старых сюжетов и записей в production D1 без явного разрешения; не запускать автоматический rollback. Откат кода **не откатывает D1**.
-6. **Завершение.** Обновить в этом документе и Library `CURRENT_STATE.md` / `DEVELOPMENT_LEDGER.md` действующую версию, ссылку, deployment ID и только фактически проверенные результаты. Закрыть релиз; следующему патчу нужен **новый diff, а не восстановление всей истории Release A**.
+| Change type | What is required |
+| --- | --- |
+| Local UI / text only | Targeted tests and normal PR/CI; **no hosted release checks** |
+| Hosted UI patch | Reconcile relevant UI files, preserve hosted auth/DB/MCP; native private release, affected-flow smoke test |
+| MCP/API semantics or persisted graph | Verify contracts, compatibility, relevant auth and synthetic roundtrip; explicit approval and separate release scope |
+| D1 migration / destructive data operation | Separate explicit approval, additive/migration safety review, isolated synthetic transaction/CAS tests and recovery plan; STOP on unexpected changes |
+| Plugin Skill only | Use authorized Plugin Creator procedure; no Site deploy unless Site source actually changes |
 
-## Подготовка готового патча и минимальный handoff в Work
-
-**По умолчанию всё выполняется здесь и в GitHub, до Work.** При обычном UI-патче сначала довести изменение до состояния `READY_FOR_SITES`:
-
-- **Зафиксировать базу:** текущие GitHub `main`/commit и действующий Site version/deployment ID (только метаданные). Указать, что именно исправляется и какой видимый результат ожидается. GitHub source — не полная копия hosted source.
-- **Подготовить минимальный diff:** изменить только нужные файлы в ветке; приложить PR и итоговый **merge commit SHA**, список путей и тип операций (изменить/добавить/удалить). Разрешённые hosted-пути указывать явно, если имена в GitHub отличаются. Не прикладывать полный архив проекта, не копировать заново D1/MCP/auth/old stories. Если GitHub недоступен из Sites, тогда один компактный патч с проверяемыми хешами — не пересборка всей истории.
-- **Закрыть тесты вне Work:** локальные проверки/CI должны быть успешными; проверить затронутые UI-взаимодействия доступным тестовым способом. Сохранить краткий результат и отметить, что локальные тесты не доказывают production identity/D1. Отдельные D1/MCP/Plugin изменения не маскировать под UI-патч.
-- **Составить handoff на 1 операцию:** в задаче Work оставить только Site ID, PR/merge commit, разрешённые файлы, ссылку на этот регламент, конкретное разрешённое действие **Save version** или **Save + private Deploy** и критерий остановки. Не передавать десятки инструкций и не повторять архитектуру, CI, старые миграции и первичный Release A.
-- **Фиксировать результат:** saved version ID, deployment ID (если публиковали), доступ, необходимые проверки/непроверенные пункты. Work возвращает данные, мы обновляем `CURRENT_STATE.md` и ledger. Различать `saved` и `deployed`.
-
-### Короткий шаблон для Work
-
-Вместо нового большого задания для каждого патча достаточно заполнить строки ниже. **Разрешение на deployment указывается явно**; если его нет, Work только сохраняет кандидат.
+## Minimal Work handoff, only when the native Site operation is unavailable here
 
 ```text
-Plot Architect — выполни штатный выпуск патча в СУЩЕСТВУЮЩЕМ приватном Sites.
-Следуй GitHub telldrasilo/plot-architect: docs/RELEASE_POLICY.md и AGENTS.md.
-PR: <ссылка>; merge commit: <SHA>; тип: <UI / MCP / D1 / Skill>.
-Site ID: <ID>; текущая версия/deployment: <ID>; разрешённые пути: <короткий список>.
-Действие: <Save version ONLY / Save version + private Deploy version — явно разрешено владельцем>.
-Перенеси только согласованный diff, сохрани hosted-only auth/REST/D1/MCP;
-используй только штатные функции Sites. CI уже пройден — не повторяй.
-Перед Deploy сверь owner-only, DB и реальные предупреждения платформы.
-При дрейфе исходников, конкретном риске для D1/доступа или ошибке — STOP без обходов.
-Не читай и не переноси старые сюжеты, не создавай второй Site/плагин.
-Верни version ID, deployment ID (если есть), URL и фактически пройденные проверки.
+Existing private Plot Architect Site — native Sites operation only.
+GitHub PR / merge commit: <link / SHA>. Changed hosted paths: <short list>.
+Existing Site/version: <IDs>. Action authorized: <Save only | Save + private Deploy>.
+Apply only the approved diff; preserve hosted-only auth, DB, REST and MCP.
+Before Deploy check owner-only, same DB, and actual migration/storage warnings.
+STOP on conflicting source, actual access/data risk or supported-tool failure.
+Do not inspect or migrate old stories or create another Site/plugin.
+Return saved/deployed IDs and the checks actually performed.
 ```
 
-**Как экономить Work:** один короткий проход допускает Save и Deploy только при заранее данном владельцем разрешении на оба действия. Иначе остановиться после Save и запросить разрешение отдельно; не запускать Work повторно ради задач GitHub. Не передавать в Work предварительную разработку, генерацию патча, сравнение обширной истории, старые тестовые сюжеты, восстановление или миграцию. Исключение: если фактический hosted drift нельзя разрешить узким diff, остановиться и вернуть только конкретный конфликт для исправления здесь.
+Use Work sparingly for the specific native action, never to rebuild, reread old versions or rescue historical plots. Old `PA_RELEASE_A_*` instructions describe previous releases, **not** a current workflow.
 
-**Экономия Work:** здесь и в GitHub выполняем подготовку и CI; Work используем только для реальных действий со штатным интерфейсом Sites, недоступных в этом чате. По возможности один ограниченный проход; не тратить Work на перенос/восстановление старых сюжетов.
-
-**Отдельные исключения:** изменения схемы D1, серверной семантики MCP или Plugin Skill — самостоятельные релизные контуры со своей согласованной проверкой и разрешением. Для обычного UI-патча не добавлять эти операции «заодно». Официальный локальный Vite mock-login не подтверждает production owner identity.
-
-Официальные ориентиры: [Sites management](https://learn.chatgpt.com/docs/sites/managing-a-site), [Sites data and connections](https://learn.chatgpt.com/docs/sites/data-and-connections), [OpenAI Sites Vite plugin](https://github.com/openai/sites/tree/main/packages/sites-vite-plugin).
-
-## Исторические свидетельства и решения Release A (не актуальный статус)
-
-Следующие сведения о v3 и неопубликованной v4 сохранены для аудита. Текущий статус указан в начале документа, а дальнейшие релизы ведутся по постоянному сценарию выше.
-
-## Version evidence
-
-**Local:** v0.13.5-alpha / UX-016, reproducible ZIP in ChatGPT Library at `/Планировщик сюжета/Development/01_Current/PA_LOCAL_V0135_20261101/`.  
-**Hosted:** authoritative capture of saved/deployed Site v3 (source `f4ab5397ea2ac7e5b1c6804ae5a169acc7468089`), 43/43 source SHA-256 verified, in Library `libfile_6c90d4394e2081919441b279325657cb`. Exact UI-only Release A patch prepared in `docs/PA_RELEASE_A_HOSTED_V3_EXACT_PATCH.md`; not deployed.  
-**Backend:** P1/P2 v2 schema code and SQLite tests are only a spike; actual D1 gate remains `BLOCKED_D1_NOT_VERIFIED`.
-
-**Release A update (2026-11-02):** an unpublished **saved Site v4 candidate** now exists; version ID `appgprj_6ae715d7cccc8191bc35fbcd5255d9ce~appgver_9fab684372648191b91af6756baf76b5`. It has `deployment_id:null`; **v3 is still the active deployment**. Candidate source 46/46 SHA-256 checked, 7 approved changed/new paths, 39 unchanged. D1 host-managed deployment mapping and real owner authentication remain unverified. **Deployment is NOT authorized.** See `docs/PA_RELEASE_A_V4_PREDEPLOY_GATE.md` and Library report `libfile_7ccc2afe966881918b7170e05072e997`.
-
-## Official Sites workflow: use the platform, don't reinvent it
-
-**Rule:** Official product documentation and native Sites controls are the default source of truth for hosting operations. We develop with GitHub branch → PR → CI → merge; package with supported Vite/Sites tooling; use the **existing** project's `.openai/hosting.json` (project ID and named `DB` binding); release with native **Save version → Deploy version**. Never build a private alternative deployment framework, mock auth provider, D1 provisioner, Site clone, or nonstandard release workaround.
-
-A predeploy review should check only actionable risks using supported controls: correct existing Site, saved version ID, owner-only audience, existing `DB` binding, unchanged MCP contracts, and **whether the publish operation proposes database migrations or a storage replacement**. The hosting service's undocumented internal UUID rewrite is not a separate deliverable. **A real warning, wrong binding, or non-no-op migration requires STOP before deployment.** This is not permission to guess that a dummy local Wrangler ID is safe: inspect the native deployment's actual binding plan if exposed, and never run a raw Wrangler deploy.
-
-Postdeploy, use the real private Site (not a `terminal.local` mock login) to verify native owner authentication, UI/UX, MCP discovery and read-only DB health. Do not access old plot content. Sites explicitly warns that a failed publish may already have affected the database; code rollback is NOT database rollback.
-
-**Owner instruction dated 2026-11-02:** proceed toward **private** deployment of the *already saved* Site v4 candidate `appgprj_6ae715d7cccc8191bc35fbcd5255d9ce~appgver_9fab684372648191b91af6756baf76b5` on the **existing** Site, keeping sharing owner-only. This is task-scoped authorization, not a permanent waiver of release preflight or permission for D1 writes/migrations, plugin changes or public sharing. See `docs/PA_RELEASE_A_V4_PREDEPLOY_GATE.md`.
-
-Sources:
-- https://learn.chatgpt.com/docs/sites/managing-a-site
-- https://help.openai.com/en/articles/20001339-creating-and-using-chatgpt-sites
-
-**Release A follow-up (2026-11-02):** Work stopped `DEPLOY_D1_UNSAFE` without calling Deploy because a self-imposed internal D1 preflight plan is unavailable in official Sites. No mismatch or migration warning was reported. This is **not** evidence that v4 is deployed, nor proof that the dummy Cloudflare UUID is ignored. Owner still authorizes one private native deployment of saved v4 with concrete audience/`DB` checks and stop on any actual replacement/migration warning. See `docs/PA_RELEASE_A_NATIVE_DEPLOY_V4.md`; it supersedes the former impossible preflight requirement for this release. Publishing can mutate real D1 and code rollback does not revert it.
-
-## Release tracks
-
-| Track | Allowed change | Work/Sites stage | Plugin step |
-|---|---|---|---|
-| A — UI | UX-013 menus, UX-015 semantic zoom, UX-016 drag; UX-014 only with verified persistence or feature flag | Compare actual Site source, minimal patch, owner-only preview/QA, explicit private deploy | None if tool schema unchanged |
-| B — data & P5 | D1 additive tables, editorial drafts, prepared variants, new MCP semantics | Isolated synthetic real D1 tests, CAS, auth, hosted E2E, explicit deploy | Refresh/discovery if MCP schema changed |
-| C — Skill | Prompt/routing/metadata without app binding changes | No Site deployment if only Skill content changes | Guarded update of existing private plugin using current release ID |
-
-Do not combine the unverified D1 rewrite path with Track A just to reduce Work calls: a single huge risky task is not cost-effective.
-
-## Work budget
-
-Prepare tested local patch and exact file-level diff outside Work. Ask Work only to reconcile with the current hosted Source, verify security, save a candidate, run hosted tests, and deploy once if separately authorized. Avoid broad legacy history retrieval. Work is forbidden for legacy test-story preservation (`PA-WORK-GUARD-01`); old rows should remain untouched. No second Site or plugin.
-
-## Release gates
-
-1. `source_version`, `deployment_id`, access mode, Tool schema and DB migrations observed from current live Site.
-2. Scope/diff reviewed; all unexplained drift stopped.
-3. No schema loss of `eventRewrites[]`, editor notes, or visual fields; if unsupported, disable feature in hosted release rather than dropping data.
-4. Local Node/build/browser tests pass; hosted auth and persistence tested with NEW synthetic data.
-5. On private preview, owner-only identity confirmed; no cross-owner access, no auth weakening.
-6. Migration apply is explicit, additive and tested for CAS=0 rollback. Deployment rollback is not a DB rollback.
-7. Private deploy only after authorization; postdeploy tool discovery and read/write readback. Final report includes versions, changed files, test outcomes and blockers.
+Official references: [Sites management](https://learn.chatgpt.com/docs/sites/managing-a-site), [Sites data and connections](https://learn.chatgpt.com/docs/sites/data-and-connections), [OpenAI Sites Vite plugin](https://github.com/openai/sites/tree/main/packages/sites-vite-plugin).
