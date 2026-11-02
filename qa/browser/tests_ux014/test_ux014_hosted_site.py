@@ -98,7 +98,14 @@ def main():
         assert db["graph"]["eventRewrites"][0]["offerVariants"] is False
 
         page.reload()
-        page.wait_for_function("window.__graphite && __graphite.getRemote().connected")
+        # The remote.connected flag flips before openProject finishes hydrating
+        # the graph, so assert the expected persisted draft before using the UI.
+        page.wait_for_function(
+            "(expected) => window.__graphite && __graphite.getRemote().connected "
+            "&& __graphite.getRemote().revision >= 3 "
+            "&& __graphite.getEventRewrites()[0]?.taskText === expected",
+            arg=task,
+        )
         page.evaluate("() => __graphite.selectNode('n1')")
         assert page.locator("#ux014-task").input_value() == task
         assert not page.locator("#ux014-offer").is_checked()
@@ -107,7 +114,12 @@ def main():
         page.wait_for_function("() => __graphite.getRemote().revision >= 4 && !__graphite.getRemote().dirty")
         assert db["graph"]["eventRewrites"] == []
         page.reload()
-        page.wait_for_function("window.__graphite && __graphite.getRemote().connected")
+        page.wait_for_function(
+            "() => window.__graphite && __graphite.getRemote().connected "
+            "&& __graphite.getRemote().revision >= 4 "
+            "&& __graphite.getEventRewrites().length === 0 "
+            "&& __graphite.getState().nodes.some(n => n.title === 'Source')"
+        )
         page.evaluate("() => __graphite.selectNode('n1')")
         assert page.locator("#field-title").input_value() == "Source"
         assert db["graph"]["edges"] == initial_graph()["edges"]
