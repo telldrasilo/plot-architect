@@ -18,7 +18,7 @@ Official references:
 - https://help.openai.com/en/articles/20001339-creating-and-using-chatgpt-sites
 - https://github.com/openai/sites/tree/main/packages/sites-vite-plugin
 
-**Release workflow:** The ONE canonical patch-release scenario is `docs/RELEASE_POLICY.md` → «Постоянный сценарий выпуска обычного патча». Old `PA_RELEASE_A_*` instructions are historical evidence, not reusable deployment prompts. Always follow the current saved/deployed Site version before changing a patch.
+**Release workflow:** The ONE canonical patch-release scenario is `docs/RELEASE_POLICY.md` → «Постоянный сценарий выпуска обычного патча», including «Подготовка готового патча и минимальный handoff в Work». Prepare the PR/diff/tests in GitHub before Work; send Work only the short Site action template with explicit owner deployment permission when applicable. Old `PA_RELEASE_A_*` instructions are historical evidence, not reusable deployment prompts. Always follow the current saved/deployed Site version before changing a patch.
 
 ## Do not do without separate explicit release authorization
 - Do not deploy, publish or modify the hosted Site, its access policy, real D1, REST/MCP routes or plugin connection.
