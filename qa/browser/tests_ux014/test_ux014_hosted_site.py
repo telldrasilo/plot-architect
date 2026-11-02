@@ -75,6 +75,9 @@ def main():
         assert page.evaluate("() => __graphite.getRemote().connected")
         page.evaluate("() => __graphite.selectNode('n1')")
         page.locator("#i-rewrite").click()
+        # Wait for the new draft to persist before testing the next edit;
+        # otherwise the existing debounce correctly coalesces both writes.
+        page.wait_for_function("() => __graphite.getRemote().revision >= 1 && !__graphite.getRemote().dirty")
         assert page.locator("#rewrite-heading").is_visible()
         assert page.locator(".ux014-generate").is_disabled()
         assert db["graph"]["nodes"][0]["description"] == "Original fact"
