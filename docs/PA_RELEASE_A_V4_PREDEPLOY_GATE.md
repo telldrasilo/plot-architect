@@ -1,44 +1,35 @@
-# PA-RELEASE-A — saved v4 candidate, pre-deployment gate
+# PA-RELEASE-A — official private deployment of saved v4
 
-**Recorded:** 2026-11-02. **Status: CANDIDATE SAVED / NOT APPROVED FOR DEPLOYMENT.**  
-**Site ID:** `appgprj_6ae715d7cccc8191bc35fbcd5255d9ce`. Keep the existing Site, D1, MCP and plugin. No second Site.
-**Candidate v4 Version ID:** `appgprj_6ae715d7cccc8191bc35fbcd5255d9ce~appgver_9fab684372648191b91af6756baf76b5`.  
-**Candidate source commit (Sites):** `02efc872a246454889d955f7662d8be123431fe4`.  
-**Candidate version deployment ID:** `null`.  
-**Compiled archive SHA-256 (Sites):** `8e9323cebe58c0db0b3ea84bd07d15bfc30ae72a010bc6bf2546cb7bb3fe7604`.  
-**Current live deployment (v3):** `appgdep_6ae72bc3affc8191bb43ff3843cf616e`, Site source `f4ab5397ea2ac7e5b1c6804ae5a169acc7468089`.  
-**Evidence:** ChatGPT Library report `libfile_7ccc2afe966881918b7170e05072e997`, `PA_RELEASE_A_CANDIDATE_V4_NOT_APPROVED_REPORT_20261102.zip` (contains RESULT.json and human-readable report). This document records the report; does not claim a new live Site inspection.
+**Current release state (2026-11-02):** v4 saved, **NOT YET DEPLOYED**. Owner has explicitly requested **private publication of this version on the existing Site**. Deployment may proceed only through native Sites with the finite preflight below. Do not ask for a redundant approval if those conditions are satisfied; stop if they are not.
 
-## Verified by Work (save-only)
+**Existing Site:** `appgprj_6ae715d7cccc8191bc35fbcd5255d9ce`  
+**Saved v4 version:** `appgprj_6ae715d7cccc8191bc35fbcd5255d9ce~appgver_9fab684372648191b91af6756baf76b5`  
+**Current live v3 deployment (rollback reference):** `appgdep_6ae72bc3affc8191bb43ff3843cf616e`  
+**Saved v4 deployment ID:** `null` in Work's last verified report.  
+**Site v4 source commit:** `02efc872a246454889d955f7662d8be123431fe4`  
+**Original v4 evidence:** Library `libfile_7ccc2afe966881918b7170e05072e997`; 46/46 SHA-256 match, exactly seven approved changes, 39 unchanged. Previous hosted-v3+Vite CI tests, MCP contract and local synthetic D1 tests PASS.
 
-- Saved exactly one new **unpublished** Site source version, v4. One save version call, no deployment call. Live v3 deployment ID and previous timestamp unchanged after.
-- Source 46/46 SHA-256 match; exactly 7 approved changed/new files relative to 43-file v3 baseline, remaining 39 byte-identical. Existing hosted Worker/REST authorization, `src/mcp_server.mjs`, Graph contract and Drizzle files remain unchanged.
-- Previous successful Vite build and synthetic GitHub CI evidence reused. Candidate artifact includes `dist/server/index.js`, `dist/client/index.html`, `dist/.openai/hosting.json`, `dist/server/wrangler.json` and Drizzle metadata.
-- Read-only Sites D1 overview before/after returns binding `DB` and existing tables `plot_projects` and `plot_revisions`. No D1 row reads, migrations, writes, backups, legacy-plot access, sharing changes, MCP changes or plugin changes.
-- Existing owner-only access policy unchanged. Real production owner sign-in and current D1 CRUD from candidate v4 are **not tested**, because v4 has no deployment.
+## Policy: use native Sites, not our own infrastructure
 
-## Why v4 is NOT approved for deployment
+Follow [official Sites managing and publishing](https://learn.chatgpt.com/docs/sites/managing-a-site) and [OpenAI Sites Help Center](https://help.openai.com/en/articles/20001339-creating-and-using-chatgpt-sites). Sites natively manages project linkage, saved versions, deployment, audience and D1 by `.openai/hosting.json` (`project_id`, `d1: "DB"`). **Do not** create a new Site, run direct Cloudflare deployment, develop mock login, emulate production identity or invent a separate release system. Reuse the **saved v4**; do not rebuild or resave unless a concrete failure requires a new approved release.
 
-The bundled Cloudflare Vite output `dist/server/wrangler.json` contains a **dummy local development D1 database ID** `00000000-0000-0000-0000-000000000001`. The saved artifact's `.openai/hosting.json` says `project_id` = existing Site and `d1: DB`, and Sites read-only metadata still shows `DB`. **None of these alone proves** how the Sites deployment service resolves the final D1 UUID or whether it replaces/ignores the local Wrangler binding when deploying.
+## One native Deploy version attempt (owner authorized, conditional)
 
-The official Sites guide states `.openai/hosting.json` holds project linkage and optional storage binding names, and that `Save version` and `Deploy version` are separate operations: https://learn.chatgpt.com/docs/sites/managing-a-site. The Cloudflare Vite guide states `dist/server/wrangler.json` is the output configuration used for preview and deployment in the generic Cloudflare Vite workflow: https://developers.cloudflare.com/workers/vite-plugin/reference/migrating-from-wrangler-dev/. These public descriptions **do not constitute a guarantee** about Sites' internal override logic.
+Use Sites/Work to perform **one** official `Deploy version` operation for the **existing saved v4** only after checking:
+1. Existing Site and selected saved v4 ID match the IDs above; current active deployment is still v3. Existing audience remains **owner-only** (not public, not shared). Site settings still show D1 binding `DB`, `.openai/hosting.json` retains the same project ID and `d1: "DB"`, and the six existing MCP tools are retained.
+2. In the native deployment preview/plan or supported metadata, verify deployment **does not replace or detach the existing D1** and **does not propose new database migrations/schema changes**. Saved `dist/server/wrangler.json` contains a **dummy local development ID** `00000000-0000-0000-0000-000000000001`. This is a genuine safety flag: never blindly publish a raw Cloudflare build with that ID. Use official Site-managed D1. The official docs describe the named binding, but do not guarantee undocumented internal UUID substitution. **Do not invent an internal verification requirement the platform cannot expose**; use the native binding and deployment controls. If the operation indicates the dummy DB would be used, would replace D1, would run migrations, or the identity of the target database conflicts with current Site metadata, STOP `DEPLOY_D1_UNSAFE`. Do not attempt workarounds.
+3. Do not require `/signin-with-chatgpt` in Work's `terminal.local` preview: the upstream Vite plugin intentionally rejects it. Real owner auth is a **postdeployment** check, not proven by local mock identity.
 
-The OpenAI dev mock sign-in is only for loopback hosts; the `terminal.local` browser returns intentional 403. **Do not weaken or bypass the upstream host check**, and do not treat a `localhost` CI mock as the owner's real hosted identity.
+If the native deploy interface cannot attest that the old database binding will be retained and gives no reliable way to distinguish the dummy ID from the existing managed binding, **STOP and report the exact missing capability**. Do not convert uncertainty into a claim of safety. Otherwise execute native **Deploy saved version v4 once**, keeping owner-only audience.
 
-## Next allowed investigation (read-only, without Work if possible)
+## Postdeployment read-only acceptance
 
-1. Inspect the **saved v4** version metadata and its packaged Worker binding manifest, without rewriting or resaving v4.
-2. Seek *authoritative supported Sites metadata or documentation* showing exactly how the project-level hosted D1 `DB` is bound during **Deploy existing saved version**. Accept a confirmed binding mapping or explicit platform guarantee; do **not** infer that a dummy ID will be ignored.
-3. Confirm a deploy of this version is expected to cause **no database migration/schema changes** and retains MCP discovery, six tool signatures and owner-only audience.
-4. If the actual mapping/behavior cannot be proven, leave `D1_BINDING_UNVERIFIED_FOR_DEPLOY` and STOP. An altered production-safe source package would need a **new review, CI, saved candidate and owner approval**, not a silent patch to saved v4.
-5. If all gates pass, obtain **separate explicit owner authorization** before any private deployment. No Work call or deployment is authorized by this document.
+- Record new deployment ID, version v4 and live URL; reconfirm audience owner-only, `DB` still present and existing migration/schema overview unchanged. Do **not** inspect existing story rows.
+- Verify real ChatGPT owner authentication at the live Site, anonymous API access denied, and Graphite UI (context menu, tooltip, inspector, semantic zoom and drag). If the normal UI would list older projects, do not open or modify them.
+- Check MCP `server/discover`, protocol `2026-07-28`, and exactly six existing MCP tools, with unchanged signatures.
+- **Do not write any real D1 rows by default.** New synthetic project write/readback needs separately explicit permission. No backup, restoration or migration of old/test stories; no plugin updates or secret changes.
+- On a failure: stop, report observable evidence and the live deployment state. Do not silently redeploy or assume rolling back code reverts D1. OpenAI warns that publishing can affect a Site's database even before the new version is live.
 
-## Post-deployment acceptance plan — only after separately approved deployment
+## Outcome
 
-- Record the new deployment ID, destination version v4 and unchanged owner-only access policy; confirm the owner can authenticate through native Sites, while an unauthenticated user gets 401.
-- Check rendered Graphite UI/UX-013/014/015/016. No opening or editing existing user/legacy stories.
-- Check MCP `server/discover` protocol `2026-07-28` and the same six tool signatures.
-- If explicitly allowed, use only one **new isolated synthetic project** to test create/reload/notes/fields/stale `409`, with an explicit expectation for how it will be identified/removed afterward. Do not assume rollback restores D1.
-- On any failing release criterion: cease use of v4, follow a separately reviewed code rollback plan to v3. **Code rollback does not reverse D1 migration/data changes.**
-
-**Non-negotiable exclusions:** no new Site, no external public publication, no D1 migration/repair, no importing/restoring old plots, no changing the MCP/plugin/access policy, no deployment without owner approval.
+Report `DEPLOYED_PRIVATE_V4` with version and deployment IDs, live URL, unchanged owner-only access, DB/MCP outcome and read-only acceptance status; or report `DEPLOY_D1_UNSAFE` / other concrete blocker, with the v3 active deployment unchanged. **Do not report publication unless Sites confirms success.**
