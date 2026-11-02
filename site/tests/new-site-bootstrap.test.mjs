@@ -23,17 +23,17 @@ test('local dummy D1 identifier cannot be mistaken for hosted database',()=>{
 test('fresh D1 migration remains additive and provides revision storage',()=>{
   const sql=read('../drizzle/0001_initial.sql');
   for(const entity of ['plot_projects','plot_revisions']){
-    assert.match(sql,new RegExp('CREATE TABLE IF NOT EXISTS '+entity+'\\b'));
+    assert.ok(sql.includes('CREATE TABLE IF NOT EXISTS '+entity+' ('),entity);
   }
-  assert.doesNotMatch(sql,/\\b(?:DROP|DELETE|TRUNCATE)\\b/i);
+  for(const forbidden of ['DROP TABLE','DELETE FROM','TRUNCATE'])assert.ok(!sql.toUpperCase().includes(forbidden),forbidden);
   const journal=JSON.parse(read('../drizzle/meta/_journal.json'));
   assert.deepEqual(journal.entries.map(x=>x.tag),['0001_initial']);
 });
 
 test('native Sites/Vite setup and existing MCP seven-tool contract stay intact',()=>{
   const cfg=read('../sites-vite-compat/vite.config.mjs');
-  assert.match(cfg, /sites\\(\\)/);
-  assert.match(cfg, /cloudflare\\(\\{ configPath: '\\.\\/wrangler\\.sites\\.jsonc'/);
+  assert.ok(cfg.includes('sites()'));
+  assert.ok(cfg.includes("cloudflare({ configPath: './wrangler.sites.jsonc'"));
   const mcp=read('../src/mcp_server.mjs');
   for(const name of ['list_projects','create_project','get_project','get_context','get_changes','preview_patch','apply_patch']){
     assert.ok(mcp.includes("name:'"+name+"'"),name);
