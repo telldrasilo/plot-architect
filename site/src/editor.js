@@ -1025,13 +1025,25 @@ function renderGapInspector(el,n){
   '<button id="cw-stage-cancel" type="button">Отмена</button></section>':'';
  const existing=cwWorkflowTestMode&&cwNoteHasWorkspace(n.id)
   ?'<p class="muted">Рабочая область этой заметки уже создана. Варианты остаются вне сюжета.</p>':'';
+ const handoffAvailable=cwWorkflowTestMode&&!cwNoteHasWorkspace(n.id);
+ const expanded=handoffAvailable&&cwHandoffNoteId===n.id&&!!cwHandoffPrompt;
+ const handoff=handoffAvailable?'<section class="cw-chatgpt-handoff" aria-label="Передача задания в ChatGPT">'+
+  '<button id="cw-handoff-request" type="button">Запрос для ChatGPT</button>'+
+  (expanded?'<p class="muted">Скопируйте запрос в ChatGPT, затем вставьте только JSON из ответа.</p>'+
+   '<label for="cw-handoff-prompt">Запрос</label><textarea id="cw-handoff-prompt" readonly></textarea>'+
+   '<button id="cw-handoff-copy" type="button">Скопировать запрос</button>'+
+   '<label for="cw-handoff-answer">Ответ ChatGPT (JSON)</label>'+
+   '<textarea id="cw-handoff-answer" placeholder="{&quot;branches&quot;:[...]}"></textarea>'+
+   '<button id="cw-handoff-import" type="button">Проверить варианты</button>':'')+
+  '</section>':'';
  const legacy=cwWorkflowTestMode?'':'<div class="field"><label class="check-row"><input type="checkbox" id="gap-offer" '+
   (n.offerVariants?'checked':'')+'>Предлагать три варианта</label></div>';
  el.hidden=false;
- el.innerHTML=`<div class="inspect-head"><b>▤ Заметка · придумать новое</b><button id="close-inspect">×</button></div>
- <div class="field"><label>Задание ChatGPT</label><textarea id="gap-text" class="gap-note-editor" placeholder="Что нужно придумать?">${esc(n.text)}</textarea></div>
- ${legacy}<div class="muted">Отдельная временная нода. Не событие и не канонический факт. Стрелки к ней задают редакторский контекст.</div>
- ${existing}<hr><div class="inspect-actions">${stageButton}<button id="gap-link">Связать</button><button id="gap-delete">Удалить заметку…</button></div>${stageReview}`;
+ el.innerHTML='<div class="inspect-head"><b>▤ Заметка · придумать новое</b><button id="close-inspect">×</button></div>'+
+ '<div class="field"><label>Задание ChatGPT</label><textarea id="gap-text" class="gap-note-editor" placeholder="Что нужно придумать?">'+esc(n.text)+'</textarea></div>'+
+ legacy+'<div class="muted">Отдельная временная нода. Не событие и не канонический факт. Стрелки к ней задают редакторский контекст.</div>'+
+ existing+handoff+'<hr><div class="inspect-actions">'+stageButton+
+ '<button id="gap-link">Связать</button><button id="gap-delete">Удалить заметку…</button></div>'+stageReview;
  $('close-inspect').onclick=()=>{selected=null;render()};
  $('gap-text').onchange=e=>setGapNoteText(n.id,e.target.value);
  if($('gap-offer'))$('gap-offer').onchange=e=>{commit(()=>{const a=gnby(n.id);a.offerVariants=e.target.checked},'Режим предложений изменён');selected={type:'gapNote',id:n.id};render()};
@@ -1040,6 +1052,34 @@ function renderGapInspector(el,n){
  if($('cw-stage-note'))$('cw-stage-note').onclick=()=>{void cwPrepareNoteStage(n.id)};
  if($('cw-stage-confirm'))$('cw-stage-confirm').onclick=()=>{void cwConfirmNoteStage()};
  if($('cw-stage-cancel'))$('cw-stage-cancel').onclick=()=>{cwStageReview=null;renderInspector()};
+ if($('cw-handoff-request'))$('cw-handoff-request').onclick=()=>{
+  if(!cwServerReady())return note('Сначала сохраните проект');
+  try{
+   cwHandoffPrompt=cwBuildChatGPTPrompt(n.id);
+   cwHandoffNoteId=n.id;cwHandoffRevision=remote.revision;
+   cwHandoffProjectId=activeProjectId;cwHandoffNoteText=n.text;
+   renderInspector();
+  }catch(err){note('Запрос не подготовлен: '+err.message)}
+ };
+ if($('cw-handoff-prompt'))$('cw-handoff-prompt').value=cwHandoffPrompt;
+ if($('cw-handoff-copy'))$('cw-handoff-copy').onclick=async()=>{
+  const value=cwHandoffPrompt;
+  try{
+   if(!navigator.clipboard?.writeText)throw Error('Clipboard unavailable');
+   await navigator.clipboard.writeText(value);note('Запрос скопирован. Вставьте его в ChatGPT');
+  }catch{
+   $('cw-handoff-prompt').focus();$('cw-handoff-prompt').select();
+   note('Выделенный запрос можно скопировать вручную');
+  }
+ };
+ if($('cw-handoff-import'))$('cw-handoff-import').onclick=()=>{
+  const response=$('cw-handoff-answer').value;
+  try{
+   const prepared=cwPrepareChatGPTAlternatives(n.id,response);
+   render();
+   note('Проверено: '+prepared.branchCount+' ветвей и '+prepared.nodeCount+' событий. Разместите их отдельно от сюжета');
+  }catch(err){note('Ответ не принят: '+err.message)}
+ };
 }
 
 function gapAnchor(end){if(end.kind==='gap_note'){const n=gnby(end.id);if(!n||n.parent!==state.view)return null;const h=document.querySelector(`[data-gap-note="${n.id}"]`)?.offsetHeight||115;return {x:n.x+126,y:n.y+h/2}};
