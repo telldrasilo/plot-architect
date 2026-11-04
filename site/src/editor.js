@@ -139,7 +139,7 @@ function setCWPreparedNoteAlternativesForTest(noteId,spec){
   ...structuredClone(spec),noteText:gnby(noteId).text,sourceRevision:remote.revision
  });
  cwStageReview=null;
- renderInspector();
+ render();
 }
 function cwNoteHasWorkspace(noteId){
  return (state.workspaces||[]).some(a=>a.taskId===noteId);
