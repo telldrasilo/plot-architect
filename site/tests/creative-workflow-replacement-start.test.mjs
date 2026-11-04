@@ -17,7 +17,7 @@ test('replacement preview captures exact original node and all incident directed
 });
 test('explicit begin suspends original and all affected arrows without modifying source',()=>{
  const g=story(),before=clone(g),r=begin(g,['n2']);assert.deepEqual(g,before);assert.deepEqual(r.graph.nodes,g.nodes);assert.deepEqual(r.graph.edges,g.edges);
- assert.deepEqual(r.graph.replacements,[{id:'replace-1',state:'open',sourceNodeIds:['n2'],suspendedEdgeIds:['e1','e2','e3','e4']}]);
+ assert.deepEqual(r.graph.replacements,[{id:'replace-1',state:'open',sourceNodeIds:['n2'],suspendedEdgeIds:['e1','e2','e3','e4'],sourceGraphRevision:9}]);
  assert.deepEqual(names(canonicalProjection(r.graph).nodes),['n1','n3','n4','n5','n6']);assert.deepEqual(names(canonicalProjection(r.graph).edges),['e5','e6']);
  assert.deepEqual(r.changes.autoRewiredEdgeIds,[]);assert.equal(r.graph.revision,9);
 });
