@@ -5,11 +5,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
-const SERVER = new URL('./server.mjs', import.meta.url);
+const SERVER = fileURLToPath(new URL('./server.mjs', import.meta.url));
 
 function startProbe(stateFile) {
-  const child = spawn(process.execPath, [SERVER.pathname], {
+  const child = spawn(process.execPath, [SERVER], {
     env: { ...process.env, GRAPHITE_MCP_PROBE_STATE_FILE: stateFile },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
