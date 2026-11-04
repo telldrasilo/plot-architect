@@ -86,37 +86,36 @@ def main():
         page.locator("#ux014-task").fill(task)
         page.wait_for_function("() => __graphite.getRemote().revision >= 2 && !__graphite.getRemote().dirty")
         assert db["graph"]["eventRewrites"][0]["taskText"] == task
-        assert db["graph"]["eventRewrites"][0]["offerVariants"] is True
+        assert db["graph"]["eventRewrites"][0]["offerVariants"] is True  # legacy field retained for older data
+        assert page.locator("#ux014-offer").count() == 0
+        assert page.locator(".ux014-generate").inner_text() == "Подготовить решение"
         assert db["graph"]["nodes"][0]["title"] == "Source"
         assert db["graph"]["nodes"][0]["description"] == "Original fact"
         assert db["graph"]["nodes"][0]["manualFieldIds"] == ["f1"]
         assert db["graph"]["edges"] == initial_graph()["edges"]
         assert db["graph"]["fields"] == initial_graph()["fields"]
 
-        page.locator("#ux014-offer").uncheck()
-        page.wait_for_function("() => __graphite.getRemote().revision >= 3 && !__graphite.getRemote().dirty")
-        assert db["graph"]["eventRewrites"][0]["offerVariants"] is False
-
         page.reload()
         # The remote.connected flag flips before openProject finishes hydrating
         # the graph, so assert the expected persisted draft before using the UI.
         page.wait_for_function(
             "(expected) => window.__graphite && __graphite.getRemote().connected "
-            "&& __graphite.getRemote().revision >= 3 "
+            "&& __graphite.getRemote().revision >= 2 "
             "&& __graphite.getEventRewrites()[0]?.taskText === expected",
             arg=task,
         )
         page.evaluate("() => __graphite.selectNode('n1')")
         assert page.locator("#ux014-task").input_value() == task
-        assert not page.locator("#ux014-offer").is_checked()
+        assert page.locator("#ux014-offer").count() == 0
+        assert db["graph"]["eventRewrites"][0]["offerVariants"] is True
 
         page.locator("#ux014-cancel").click()
-        page.wait_for_function("() => __graphite.getRemote().revision >= 4 && !__graphite.getRemote().dirty")
+        page.wait_for_function("() => __graphite.getRemote().revision >= 3 && !__graphite.getRemote().dirty")
         assert db["graph"]["eventRewrites"] == []
         page.reload()
         page.wait_for_function(
             "() => window.__graphite && __graphite.getRemote().connected "
-            "&& __graphite.getRemote().revision >= 4 "
+            "&& __graphite.getRemote().revision >= 3 "
             "&& __graphite.getEventRewrites().length === 0 "
             "&& __graphite.getState().nodes.some(n => n.title === 'Source')"
         )
@@ -126,7 +125,7 @@ def main():
 
         # Simulate a simultaneous server revision from another editor/MCP writer.
         page.locator("#i-rewrite").click()
-        page.wait_for_function("() => __graphite.getRemote().revision >= 5 && !__graphite.getRemote().dirty")
+        page.wait_for_function("() => __graphite.getRemote().revision >= 4 && !__graphite.getRemote().dirty")
         db["revision"] += 1
         db["graph"]["nodes"][0]["description"] = "Updated elsewhere"
         page.locator("#ux014-task").fill("Local draft must survive 409")
@@ -145,7 +144,7 @@ def main():
         context.close()
         browser.close()
     print(json.dumps({"result": "PASS", "writes": len(db["writes"]),
-                      "scenarios": ["create", "type", "toggle", "reload",
+                      "scenarios": ["create", "type", "adaptive-no-checkbox", "reload",
                                     "cancel", "409", "local recovery"]}))
 
 
