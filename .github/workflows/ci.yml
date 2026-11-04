@@ -25,4 +25,5 @@ jobs:
       - run: npm run check
       - run: npm run check:v2
       - run: npm run test:local
+      - run: node --test ../qa/mcp-probe/probe.test.mjs
       - run: npm run build
