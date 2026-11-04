@@ -35,7 +35,8 @@ export function validateCreativeWorkflowGraph(graph){
   const originalNodes=new Set(),suspended=new Set(),replacementIds=new Set();
   for(const r of replacements){
     if(!obj(r)||!id(r.id)||replacementIds.has(r.id)||!['open','completed'].includes(r.state)
-      ||!Array.isArray(r.sourceNodeIds)||!r.sourceNodeIds.length||!Array.isArray(r.suspendedEdgeIds))fail('REPLACEMENT_INVALID','identity, state or arrays');
+      ||!Array.isArray(r.sourceNodeIds)||!r.sourceNodeIds.length||!Array.isArray(r.suspendedEdgeIds)
+      ||(r.sourceGraphRevision!==undefined&&(!Number.isSafeInteger(r.sourceGraphRevision)||r.sourceGraphRevision<0)))fail('REPLACEMENT_INVALID','identity, state, revision or arrays');
     replacementIds.add(r.id);
     if(new Set(r.sourceNodeIds).size!==r.sourceNodeIds.length||new Set(r.suspendedEdgeIds).size!==r.suspendedEdgeIds.length)fail('REPLACEMENT_INVALID',r.id+' duplicate source');
     for(const sourceId of r.sourceNodeIds){
@@ -147,6 +148,8 @@ export function assertProtectedOriginalsUnchanged(previous,next){
     const match=replacements.get(r.id);
     if(!match)fail('REPLACEMENT_REMOVED',r.id+' requires explicit cancel operation');
     if(JSON.stringify(r.sourceNodeIds)!==JSON.stringify(match.sourceNodeIds)||JSON.stringify(r.suspendedEdgeIds)!==JSON.stringify(match.suspendedEdgeIds))fail('REPLACEMENT_CHANGED',r.id);
+    if(r.sourceGraphRevision!==match.sourceGraphRevision)fail('REPLACEMENT_CHANGED',r.id+' baseline revision');
+    if(r.state==='completed'&&match.state!=='completed')fail('REPLACEMENT_STATE_CHANGED',r.id+' completed replacement cannot reopen implicitly');
     const past=r.edgeResolutions??[],now=match.edgeResolutions??[];
     if(past.length>now.length||past.some((decision,i)=>JSON.stringify(decision)!==JSON.stringify(now[i])))fail('RESOLUTION_CHANGED',r.id);
     for(const nodeId of r.sourceNodeIds)if(JSON.stringify(a.nodes.get(nodeId))!==JSON.stringify(b.nodes.get(nodeId)))fail('ORIGINAL_CHANGED',nodeId);
@@ -225,7 +228,10 @@ export function applyStartReplacement(graph,{replacementId,sourceNodeIds,expecte
   next.replacements.push({
     id:replacementId,state:'open',
     sourceNodeIds:[...current.sourceNodeIds],
-    suspendedEdgeIds:[...current.suspendedEdgeIds]
+    suspendedEdgeIds:[...current.suspendedEdgeIds],
+    // Only a revision pointer; the trusted old graph must be loaded from the
+    // server's revision history for any future safe cancellation.
+    ...(Number.isSafeInteger(graph.revision)&&graph.revision>=0?{sourceGraphRevision:graph.revision}:{})
   });
   validateCreativeWorkflowGraph(next);
   assertProtectedOriginalsUnchanged(graph,next);
