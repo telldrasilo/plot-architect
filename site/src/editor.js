@@ -633,13 +633,35 @@ function renderGapNotes(){const host=$('gap-notes');host.innerHTML='';
   el.addEventListener('pointercancel',()=>{if(interaction?.type==='gap-note-move'){interaction=null;render()}});
  }
 }
-function renderGapInspector(el,n){el.hidden=false;el.innerHTML=`<div class="inspect-head"><b>▤ Заметка · придумать новое</b><button id="close-inspect">×</button></div><div class="field"><label>Задание ChatGPT</label><textarea id="gap-text" class="gap-note-editor" placeholder="Что нужно придумать?">${esc(n.text)}</textarea></div><div class="field"><label class="check-row"><input type="checkbox" id="gap-offer" ${n.offerVariants?'checked':''}>Предлагать три варианта</label></div><div class="muted">Отдельная временная нода. Не событие и не канонический факт. Стрелки к ней задают редакторский контекст.</div><hr><div class="inspect-actions"><button id="gap-link">Связать</button><button id="gap-delete">Удалить заметку…</button></div>`;
+function renderGapInspector(el,n){
+ const prepared=cwWorkflowTestMode&&cwPreparedNoteAlternatives.has(n.id)&&!cwNoteHasWorkspace(n.id);
+ const review=cwStageReview?.noteId===n.id?cwStageReview:null;
+ const ready=review?.plan;
+ const summary=ready?'Подготовлено '+ready.branchSummaries.length+' ветвей · '+ready.proposedNodes.length
+  +' событий · '+ready.proposedEdges.length+' внутренних связей. Сюжет останется без изменений.':'';
+ const stageButton=prepared?'<button id="cw-stage-note" type="button">Разместить варианты</button>':'';
+ const stageReview=review?'<section class="cw-note-stage-review" role="group" aria-label="Проверка вариантов">'+
+  '<p>'+esc(summary)+'</p><button id="cw-stage-confirm" type="button">Сохранить черновики</button>'+
+  '<button id="cw-stage-cancel" type="button">Отмена</button></section>':'';
+ const existing=cwWorkflowTestMode&&cwNoteHasWorkspace(n.id)
+  ?'<p class="muted">Рабочая область этой заметки уже создана. Варианты остаются вне сюжета.</p>':'';
+ const legacy=cwWorkflowTestMode?'':'<div class="field"><label class="check-row"><input type="checkbox" id="gap-offer" '+
+  (n.offerVariants?'checked':'')+'>Предлагать три варианта</label></div>';
+ el.hidden=false;
+ el.innerHTML=`<div class="inspect-head"><b>▤ Заметка · придумать новое</b><button id="close-inspect">×</button></div>
+ <div class="field"><label>Задание ChatGPT</label><textarea id="gap-text" class="gap-note-editor" placeholder="Что нужно придумать?">${esc(n.text)}</textarea></div>
+ ${legacy}<div class="muted">Отдельная временная нода. Не событие и не канонический факт. Стрелки к ней задают редакторский контекст.</div>
+ ${existing}<hr><div class="inspect-actions">${stageButton}<button id="gap-link">Связать</button><button id="gap-delete">Удалить заметку…</button></div>${stageReview}`;
  $('close-inspect').onclick=()=>{selected=null;render()};
  $('gap-text').onchange=e=>setGapNoteText(n.id,e.target.value);
- $('gap-offer').onchange=e=>{commit(()=>{const a=gnby(n.id);a.offerVariants=e.target.checked},'Режим предложений изменён');selected={type:'gapNote',id:n.id};render()};
+ if($('gap-offer'))$('gap-offer').onchange=e=>{commit(()=>{const a=gnby(n.id);a.offerVariants=e.target.checked},'Режим предложений изменён');selected={type:'gapNote',id:n.id};render()};
  $('gap-link').onclick=()=>beginGapLink('gap_note',n.id);
  $('gap-delete').onclick=()=>deleteGapNote(n.id);
+ if($('cw-stage-note'))$('cw-stage-note').onclick=()=>{void cwPrepareNoteStage(n.id)};
+ if($('cw-stage-confirm'))$('cw-stage-confirm').onclick=()=>{void cwConfirmNoteStage()};
+ if($('cw-stage-cancel'))$('cw-stage-cancel').onclick=()=>{cwStageReview=null;renderInspector()};
 }
+
 function gapAnchor(end){if(end.kind==='gap_note'){const n=gnby(end.id);if(!n||n.parent!==state.view)return null;const h=document.querySelector(`[data-gap-note="${n.id}"]`)?.offsetHeight||115;return {x:n.x+126,y:n.y+h/2}};
  if(end.kind==='semantic_field'){const f=fby(end.id);return f&&f.parent===state.view?{x:f.x+f.width/2,y:f.y+f.height/2}:null;}
  if(end.kind==='plot_node'){const n=nby(end.id);return n&&n.parent===state.view?nodeCenter(n):null;}return null;}
