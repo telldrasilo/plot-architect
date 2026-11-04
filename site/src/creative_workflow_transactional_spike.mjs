@@ -7,17 +7,20 @@
  * A single source of story truth remains plot_projects.graph_json. The
  * receipt table holds operation metadata only, never a competing story graph.
  */
-import {createHash} from 'node:crypto';
-import {validateGraph} from './graph_contract.mjs';
-import {applyStageNoteAlternatives} from './creative_workflow_note_staging.mjs';
+import {validateServerGraph} from './creative_workflow_server_boundary.mjs';
+import {previewStageNoteAlternatives,applyStageNoteAlternatives} from './creative_workflow_note_staging.mjs';
 import {
   CreativeWorkflowContractError,
   validateCreativeWorkflowGraph,
+  previewDraftAcceptance,
+  previewReplacementStart,
   applyDraftAcceptance,
   applyStartReplacement
 } from './creative_workflow_contract.mjs';
-import {applyReplacementReconnection} from './creative_workflow_reconnection.mjs';
+import {previewReplacementReconnection,applyReplacementReconnection} from './creative_workflow_reconnection.mjs';
 import {
+  previewCompleteReplacement,
+  previewCancelReplacement,
   applyCompleteReplacement,
   applyCancelReplacement
 } from './creative_workflow_lifecycle.mjs';
@@ -39,19 +42,22 @@ function canonical(value){
   if(object(value))return Object.fromEntries(Object.keys(value).sort().map(k=>[k,canonical(value[k])]));
   return value;
 }
-function digest(value){
-  return createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
+async function digest(value){
+  const bytes=new TextEncoder().encode(JSON.stringify(canonical(value)));
+  const hash=await crypto.subtle.digest('SHA-256',bytes);
+  return Array.from(new Uint8Array(hash),b=>b.toString(16).padStart(2,'0')).join('');
 }
-function commandValidation(command){
+function commandValidation(command,requiresReview=true){
   if(!object(command)||!Object.hasOwn(fields,command.kind))fail('COMMAND_INVALID','unknown command');
   const allowed=new Set(['kind',...fields[command.kind]]);
-  if(Object.keys(command).some(k=>!allowed.has(k))||!Object.hasOwn(command,'expectedPreview'))
-    fail('COMMAND_INVALID','unexpected field or missing reviewed preview');
+  if(Object.keys(command).some(k=>!allowed.has(k))||
+    (requiresReview&&!Object.hasOwn(command,'expectedPreview'))||
+    (!requiresReview&&Object.hasOwn(command,'expectedPreview')))
+    fail('COMMAND_INVALID','unexpected field or invalid review field');
 }
 function verifiedGraph(raw,revision){
-  const normalized=validateGraph(raw);
+  const normalized=validateServerGraph(raw);
   normalized.revision=revision; // server row, not graph_json or client, is authoritative
-  validateCreativeWorkflowGraph(normalized);
   return normalized;
 }
 async function readReceipt(db,projectId,operationId){
@@ -97,13 +103,14 @@ async function runDomain(db,projectId,graph,expectedRevision,command){
  * A stale/different request fails closed. The CAS update, immutable revision
  * snapshot and receipt insert MUST be committed in one DB batch.
  */
-export async function commitSyntheticWorkflowCommand(db,{
+export async function commitWorkflowCommand(db,{
   projectId,operationId,expectedRevision,command
 }={}){
   if(!validId(projectId)||!validId(operationId)||!validRevision(expectedRevision))
     fail('REQUEST_INVALID','project ID, operation ID and expected revision required');
   commandValidation(command);
-  const requestHash=digest({expectedRevision,command});
+  await assertWorkflowReceiptStore(db);
+  const requestHash=await digest({expectedRevision,command});
   const previousReceipt=await readReceipt(db,projectId,operationId);
   if(previousReceipt)return replay(previousReceipt,requestHash);
   const row=await db.prepare(
@@ -146,4 +153,61 @@ export async function commitSyntheticWorkflowCommand(db,{
   if(results?.[1]?.meta?.changes!==1||results?.[2]?.meta?.changes!==1)
     fail('BATCH_INVARIANT','history and receipt must be written with graph');
   return {...response,replayed:false};
+}
+
+
+// Legacy name retained for the existing isolated SQLite spike tests.
+export const commitSyntheticWorkflowCommand=commitWorkflowCommand;
+
+/**
+ * Explicit capability guard. Fail closed if the receipt table has not been
+ * approved and installed. Does not create or migrate D1 resources.
+ */
+export async function assertWorkflowReceiptStore(db){
+  try{
+    await db.prepare('SELECT operation_id FROM cw_operation_receipts LIMIT 0').all();
+  }catch{
+    fail('WORKFLOW_STORAGE_UNAVAILABLE','cw_operation_receipts table is not available');
+  }
+}
+
+async function baselineFromHistory(db,projectId,graph,replacementId){
+  const replacement=(graph.replacements??[]).find(r=>r.id===replacementId);
+  if(!replacement||!validRevision(replacement.sourceGraphRevision))
+    fail('TRUSTED_BASELINE_REQUIRED','recorded source revision missing');
+  const saved=await db.prepare('SELECT graph_json FROM plot_revisions WHERE project_id=? AND revision=?')
+    .bind(projectId,replacement.sourceGraphRevision).first();
+  if(!saved)fail('TRUSTED_BASELINE_REQUIRED','historical revision not found');
+  return verifiedGraph(JSON.parse(saved.graph_json),replacement.sourceGraphRevision);
+}
+
+/**
+ * Read-only reviewed preview; the same project revision and proposal must
+ * be submitted later to commitWorkflowCommand. No receipt is created here.
+ */
+export async function previewWorkflowCommand(db,{projectId,expectedRevision,command}={}){
+  if(!validId(projectId)||!validRevision(expectedRevision))
+    fail('REQUEST_INVALID','project ID and expected revision required');
+  commandValidation(command,false);
+  await assertWorkflowReceiptStore(db);
+  const record=await db.prepare('SELECT id,revision,graph_json FROM plot_projects WHERE id=? AND deleted_at IS NULL')
+    .bind(projectId).first();
+  if(!record)fail('PROJECT_NOT_FOUND',projectId);
+  if(record.revision!==expectedRevision)fail('REVISION_CONFLICT','project changed since preview');
+  const graph=verifiedGraph(JSON.parse(record.graph_json),record.revision);
+  let preview;
+  switch(command.kind){
+    case 'stage_note': preview=previewStageNoteAlternatives(graph,command);break;
+    case 'accept_draft': preview=previewDraftAcceptance(graph,command);break;
+    case 'start_replacement': preview=previewReplacementStart(graph,command.sourceNodeIds);break;
+    case 'reconnect': preview=previewReplacementReconnection(graph,command);break;
+    case 'complete': preview=previewCompleteReplacement(graph,command);break;
+    case 'cancel':{
+      const baselineGraph=await baselineFromHistory(db,projectId,graph,command.replacementId);
+      preview=previewCancelReplacement(graph,{...command,baselineGraph});
+      break;
+    }
+    default:fail('COMMAND_INVALID','unsupported command');
+  }
+  return {projectId,expectedRevision,kind:command.kind,preview};
 }

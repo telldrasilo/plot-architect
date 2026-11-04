@@ -2,6 +2,7 @@ import {handleMcp} from './mcp_server.mjs';
 import {validateGraph,GraphValidationError} from './graph_contract.mjs';
 import {CreativeWorkflowContractError} from './creative_workflow_contract.mjs';
 import {validateServerGraph,assertOrdinaryGraphWrite,assertOrdinaryGraphCreation} from './creative_workflow_server_boundary.mjs';
+import {assertWorkflowReceiptStore,previewWorkflowCommand,commitWorkflowCommand} from './creative_workflow_transactional_spike.mjs';
 const j=(data,status=200,headers={})=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...headers}});
 const problem=(msg,status=400,code='BAD_REQUEST')=>j({error:code,message:msg},status);
 const uuid=()=>crypto.randomUUID();
@@ -33,6 +34,38 @@ async function api(request,env){
  if(!await permitted(request,env))return problem('Требуется вход владельца через ChatGPT',401,'AUTH_REQUIRED');
  const method=request.method;
  if(!['GET','HEAD','OPTIONS'].includes(method)&&request.headers.has('Origin')&&request.headers.get('Origin')!==url.origin)return problem('Недопустимый источник запроса',403,'ORIGIN_DENIED');
+
+ // CW opt-in REST integration is disabled in every environment by default.
+ // A future owner-approved rollout requires a separately approved receipt
+ // schema and explicit activation; merely merging GitHub source deploys nothing.
+ const cw=/^\/api\/projects\/([a-zA-Z0-9-]{1,80})\/workflow\/(preview|apply)$/.exec(path);
+ if(cw){
+  if(env.CW_WORKFLOW_ENABLED!=='true')return problem('Редакторские операции пока недоступны',404,'WORKFLOW_DISABLED');
+  if(method!=='POST')return problem('Метод не поддерживается',405);
+  const [,projectId,mode]=cw;
+  try{
+   // Detect missing receipt schema before attempting any graph mutation.
+   await assertWorkflowReceiptStore(env.DB);
+   const body=await jsonBody(request);
+   const allowed=mode==='preview'?['expectedRevision','command']:['expectedRevision','operationId','command'];
+   if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).some(k=>!allowed.includes(k)))
+    throw new CreativeWorkflowContractError('REQUEST_INVALID','unexpected workflow request fields');
+   const opts={projectId,expectedRevision:body.expectedRevision,command:body.command};
+   const result=mode==='preview'
+    ?await previewWorkflowCommand(env.DB,opts)
+    :await commitWorkflowCommand(env.DB,{...opts,operationId:body.operationId});
+   return j(result);
+  }catch(e){
+   if(e instanceof CreativeWorkflowContractError){
+    const code=e.code,status=code==='WORKFLOW_STORAGE_UNAVAILABLE'?503
+     :code==='PROJECT_NOT_FOUND'?404
+     :['REVISION_CONFLICT','PREVIEW_STALE','OPERATION_ID_REUSED'].includes(code)?409:422;
+    return problem(e.message,status,code);
+   }
+   throw e;
+  }
+ }
+
  if(path==='/api/projects'){
    if(method==='GET'){const items=await env.DB.prepare('SELECT id,name,revision,created_at,updated_at FROM plot_projects WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT 100').all();return j({projects:items.results||[]})}
    if(method==='POST'){
