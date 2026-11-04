@@ -196,6 +196,145 @@ async function cwWorkflowRequest(id,mode,payload){
  }
  return body;
 }
+
+function cwDraftMoveCommand(){
+ const items=[...cwDraftMoveEdits].map(([nodeId,p])=>({nodeId,x:p.x,y:p.y}));
+ return {kind:'move_drafts',workspaceId:cwMoveWorkspaceId,moves:items};
+}
+async function cwPrepareDraftMove(){
+ if(!cwServerReady()||cwMoveStale||!cwDraftMoveEdits.size||!cwMoveWorkspaceId){
+  note('Завершите синхронизацию перед сохранением расположения');return
+ }
+ if(cwMoveReview?.attempted)return note('Повторите прежнюю операцию или обновите проект');
+ const id=activeProjectId,revision=remote.revision,command=cwDraftMoveCommand();
+ cwAcceptanceBusy=true;
+ try{
+  const result=await cwWorkflowRequest(id,'preview',{expectedRevision:revision,command});
+  if(activeProjectId!==id||remote.revision!==revision||remote.dirty||remote.blocked)
+   throw Error('Проект изменился во время проверки');
+  const plan=result.preview;
+  if(!plan||plan.workspaceId!==command.workspaceId
+    ||!Array.isArray(plan.positionChanges)||plan.positionChanges.length!==command.moves.length
+    ||!Array.isArray(plan.affectedDraftEdgeIds)||plan.autoRewiredEdgeIds?.length)
+   throw Error('Сервер вернул неправильный состав изменений');
+  for(let i=0;i<command.moves.length;i++){
+   const move=command.moves[i],review=plan.positionChanges[i];
+   const original=state.nodes.find(n=>n.id===move.nodeId);
+   if(!original||original.workspaceId!==command.workspaceId
+      ||review?.nodeId!==move.nodeId
+      ||review.before?.x!==original.x||review.before?.y!==original.y
+      ||review.after?.x!==move.x||review.after?.y!==move.y)
+    throw Error('Позиции отличаются от проверяемого состояния');
+  }
+  cwMoveReview={projectId:id,revision,command,plan,operationId:crypto.randomUUID(),attempted:false};
+ }catch(err){
+  cwMoveReview=null;
+  if(err.code==='REVISION_CONFLICT'||err.code==='PREVIEW_STALE')cwMoveStale=true;
+  note('Не удалось проверить расположение: '+err.message);
+ }finally{cwAcceptanceBusy=false;renderCreativeWorkspacePreview()}
+}
+async function cwApplyDraftMove(){
+ const review=cwMoveReview;
+ if(!review||!cwServerReady()||cwMoveStale)return note('Проверьте актуальную ревизию проекта');
+ if(review.projectId!==activeProjectId||review.revision!==remote.revision)
+  return note('Ревизия проекта изменилась');
+ // If an earlier apply had an ambiguous network outcome, only retry the SAME
+ // operation ID and SAME reviewed command. Never silently create another one.
+ review.attempted=true;
+ cwAcceptanceBusy=true;
+ try{
+  const result=await cwWorkflowRequest(review.projectId,'apply',{
+   expectedRevision:review.revision,operationId:review.operationId,
+   command:{...review.command,expectedPreview:review.plan}
+  });
+  if(!Number.isSafeInteger(result?.revision))throw Error('Сервер не подтвердил ревизию');
+  const latest=await apiRequest('/api/projects/'+encodeURIComponent(review.projectId));
+  if(activeProjectId!==review.projectId||remote.dirty||remote.blocked)
+   throw Error('Локальное состояние изменилось — необходимо обновление');
+  if(!Number.isSafeInteger(latest.revision)||latest.revision<result.revision)
+   throw Error('Сервер вернул старую версию проекта');
+  const next=validateImported(latest.graph);
+  for(const move of review.command.moves){
+   const node=next.nodes.find(n=>n.id===move.nodeId);
+   if(!node||node.workspaceId!==review.command.workspaceId
+      ||node.x!==move.x||node.y!==move.y)
+    throw Error('Перемещение не обнаружено в серверной ревизии');
+  }
+  state=next;remote.revision=latest.revision;remote.dirty=false;
+  selected=null;selectedNodeIds.clear();linkFrom=null;history=[];
+  cwClearDraftSelection();cwClearDraftMoves();
+  recomputeFieldTags();save(false);render();
+  $('saved').textContent='✓ Сохранено в Site · '+remote.revision;
+  note('Расположение черновиков сохранено. События остаются вне сюжета');
+ }catch(err){
+  if(['REVISION_CONFLICT','PREVIEW_STALE','OPERATION_ID_REUSED'].includes(err.code)){
+   cwMoveStale=true;cwMoveReview=null;
+   note('Конфликт ревизий. Обновите проект перед повторным перемещением');
+  }else note('Сохранение не подтверждено: '+err.message);
+ }finally{cwAcceptanceBusy=false;renderCreativeWorkspacePreview()}
+}
+function cwBeginDraftDrag(event,card,node,area,svg,links,byId){
+ event.stopPropagation();
+ if(event.button!==0||event.target.closest('button,label,input'))return;
+ if(!cwWorkflowTestMode)return;
+ if(!cwServerReady()||cwMoveStale||cwMoveReview?.attempted){
+  note('Завершите предыдущую операцию перед перемещением');return
+ }
+ if(cwMoveWorkspaceId&&cwMoveWorkspaceId!==area.id&&cwDraftMoveEdits.size){
+  note('Сначала сохраните или сбросьте изменения другой рабочей области');return
+ }
+ if(cwMoveReview)cwMoveReview=null;
+ event.preventDefault();
+ const original=state.nodes.find(n=>n.id===node.id);
+ if(!original||original.workspaceId!==area.id)return;
+ const startX=event.clientX,startY=event.clientY,fromX=node.x,fromY=node.y;
+ const clamp=(x,min,max)=>Math.max(min,Math.min(max,x));
+ const minX=area.x,minY=area.y,maxX=area.x+area.width-208,maxY=area.y+area.height-105;
+ let proposedX=fromX,proposedY=fromY,moved=false;
+ card.setPointerCapture(event.pointerId);
+ const draw=()=>{
+  card.style.left=(proposedX-area.x)+'px';
+  card.style.top=(proposedY-area.y)+'px';
+  for(const edge of links){
+   if(edge.from!==node.id&&edge.to!==node.id)continue;
+   const from=edge.from===node.id?{x:proposedX,y:proposedY}:byId.get(edge.from);
+   const to=edge.to===node.id?{x:proposedX,y:proposedY}:byId.get(edge.to);
+   const path=[...svg.querySelectorAll('.cw-preview-link')].find(p=>p.dataset.cwEdge===edge.id);
+   if(path&&from&&to)path.setAttribute('d',
+    'M '+(from.x-area.x+208)+' '+(from.y-area.y+56)
+    +' L '+(to.x-area.x)+' '+(to.y-area.y+56));
+  }
+ };
+ const move=e=>{
+  e.stopPropagation();
+  const dx=(e.clientX-startX)/pan.scale,dy=(e.clientY-startY)/pan.scale;
+  if(!moved&&Math.abs(dx)+Math.abs(dy)<4)return;
+  moved=true;
+  proposedX=Math.round(clamp(fromX+dx,minX,maxX));
+  proposedY=Math.round(clamp(fromY+dy,minY,maxY));
+  draw();
+ };
+ const cleanup=()=>{
+  card.removeEventListener('pointermove',move);
+  card.removeEventListener('pointerup',end);
+  card.removeEventListener('pointercancel',cancel);
+ };
+ const end=e=>{
+  e.stopPropagation();cleanup();
+  if(moved&&(!cwMoveWorkspaceId||cwMoveWorkspaceId===area.id)){
+   cwMoveWorkspaceId=area.id;
+   if(proposedX===original.x&&proposedY===original.y)cwDraftMoveEdits.delete(node.id);
+   else cwDraftMoveEdits.set(node.id,{x:proposedX,y:proposedY});
+   if(!cwDraftMoveEdits.size)cwMoveWorkspaceId=null;
+  }
+  renderCreativeWorkspacePreview();
+ };
+ const cancel=e=>{e.stopPropagation();cleanup();renderCreativeWorkspacePreview()};
+ card.addEventListener('pointermove',move);
+ card.addEventListener('pointerup',end);
+ card.addEventListener('pointercancel',cancel);
+}
+
 async function cwPrepareNoteStage(noteId){
  if(!cwCleanForOperation())return note('Сначала завершите сохранение в Site');
  const prepared=cwPreparedNoteAlternatives.get(noteId),n=gnby(noteId);
