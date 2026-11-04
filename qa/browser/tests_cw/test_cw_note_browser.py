@@ -88,7 +88,10 @@ def main():
 
         assert len(db["graph"]["gapNotes"]) == 1
         assert db["graph"]["gapNotes"][0]["text"] == task
-        assert db["graph"]["gapNotes"][0]["offerVariants"] is True  # legacy UI flag, not new policy
+        # CW-006: old persisted offerVariants must not control or advertise a number of ideas.
+        assert page.locator("#gap-offer").count() == 0
+        assert "Предлагать три варианта" not in page.locator("#inspector").inner_text()
+        assert "3 варианта" not in page.locator('[data-gap-note="' + note_id + '"]').inner_text()
         assert db["graph"]["gapLinks"][0]["to"] == {"kind": "plot_node", "id": "n2"}
         def core_fields(items):
             return [(n["id"], n["title"], n["description"], n["x"], n["y"]) for n in items]
