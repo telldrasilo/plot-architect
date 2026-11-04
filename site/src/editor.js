@@ -125,6 +125,22 @@ const currentEdges=()=>{const ids=new Set(visible().map(n=>n.id)),suspended=cwSu
 let creativeWorkspacePreview=null;
 let cwWorkflowTestMode=false;
 let cwAcceptanceReview=null;
+let cwSelectedWorkspaceId=null;
+const cwSelectedDraftIds=new Set();
+function cwClearDraftSelection(){
+ cwSelectedWorkspaceId=null;cwSelectedDraftIds.clear();cwAcceptanceReview=null;
+}
+function cwToggleDraftSelection(nodeId,workspaceId){
+ if(!cwWorkflowTestMode||cwAcceptanceBusy)return;
+ if(!state.nodes.some(n=>n.id===nodeId&&n.workspaceId===workspaceId))return;
+ if(cwSelectedWorkspaceId!==workspaceId){
+  cwSelectedDraftIds.clear();cwSelectedWorkspaceId=workspaceId;
+ }
+ if(cwSelectedDraftIds.has(nodeId))cwSelectedDraftIds.delete(nodeId);
+ else cwSelectedDraftIds.add(nodeId);
+ if(!cwSelectedDraftIds.size)cwSelectedWorkspaceId=null;
+ cwAcceptanceReview=null;renderCreativeWorkspacePreview();
+}
 let cwStageReview=null;
 let cwAcceptanceBusy=false;
 // QA-only prepared proposals. Never copied to persistentGraph(), Site or MCP
@@ -148,7 +164,7 @@ function cwNoteHasWorkspace(noteId){
 // or enables CW_WORKFLOW_ENABLED; disabled by default in every ordinary editor.
 function setCWWorkflowTestMode(enabled){
  cwWorkflowTestMode=enabled===true;
- cwAcceptanceReview=null;
+ cwClearDraftSelection();
  cwStageReview=null;
  if(!cwWorkflowTestMode)cwPreparedNoteAlternatives.clear();
  renderCreativeWorkspacePreview();
@@ -230,20 +246,25 @@ async function cwConfirmNoteStage(){
  }finally{cwAcceptanceBusy=false;renderInspector()}
 }
 
-async function cwPrepareAccept(nodeId,workspaceId){
+async function cwPrepareAccept(nodeIds,workspaceId){
  if(!cwCleanForOperation()){note('Сначала завершите сохранение проекта в Site');return}
- if(!state.nodes.some(n=>n.id===nodeId&&n.workspaceId===workspaceId))return;
- const id=activeProjectId,revision=remote.revision;
+ if(!Array.isArray(nodeIds)||!nodeIds.length||new Set(nodeIds).size!==nodeIds.length
+   ||nodeIds.some(id=>!state.nodes.some(n=>n.id===id&&n.workspaceId===workspaceId))){
+  note('Выберите черновики одной рабочей области');return
+ }
+ const id=activeProjectId,revision=remote.revision,selection=[...nodeIds];
  cwAcceptanceBusy=true;
  try{
-  const command={kind:'accept_draft',workspaceId,nodeIds:[nodeId]};
+  const command={kind:'accept_draft',workspaceId,nodeIds:selection};
   const reviewed=await cwWorkflowRequest(id,'preview',{expectedRevision:revision,command});
   if(activeProjectId!==id||remote.revision!==revision||remote.dirty||remote.blocked)
    throw Error('Проект изменился во время проверки. Повторите действие');
   const plan=reviewed.preview;
-  if(!plan||JSON.stringify(plan.acceptNodeIds)!==JSON.stringify([nodeId])||plan.workspaceId!==workspaceId)
+  if(!plan||JSON.stringify(plan.acceptNodeIds)!==JSON.stringify(selection)
+    ||plan.workspaceId!==workspaceId||!Array.isArray(plan.promoteEdgeIds)
+    ||!Array.isArray(plan.reviewEdgeIds)||plan.autoRewiredEdgeIds?.length)
    throw Error('Проверка вернула неожиданный состав изменений');
-  cwAcceptanceReview={projectId:id,revision,nodeId,workspaceId,plan,operationId:crypto.randomUUID()};
+  cwAcceptanceReview={projectId:id,revision,nodeIds:selection,workspaceId,plan,operationId:crypto.randomUUID()};
  }catch(err){cwAcceptanceReview=null;note('Не удалось проверить принятие: '+err.message)}
  finally{cwAcceptanceBusy=false;renderCreativeWorkspacePreview()}
 }
@@ -253,7 +274,7 @@ async function cwConfirmAccept(){
  if(review.projectId!==activeProjectId||review.revision!==remote.revision)return note('Ревизия проекта изменилась');
  cwAcceptanceBusy=true;
  try{
-  const command={kind:'accept_draft',workspaceId:review.workspaceId,nodeIds:[review.nodeId],expectedPreview:review.plan};
+  const command={kind:'accept_draft',workspaceId:review.workspaceId,nodeIds:[...review.nodeIds],expectedPreview:review.plan};
   const committed=await cwWorkflowRequest(review.projectId,'apply',{
    expectedRevision:review.revision,operationId:review.operationId,command
   });
@@ -268,11 +289,11 @@ async function cwConfirmAccept(){
   remote.revision=latest.revision;
   remote.dirty=false;
   selected=null;selectedNodeIds.clear();linkFrom=null;history=[];
-  cwAcceptanceReview=null;
+  cwClearDraftSelection();
   recomputeFieldTags();
   save(false);render();
   $('saved').textContent='✓ Сохранено в Site · '+remote.revision;
-  note('Событие принято в сюжет. Остальные черновики сохранены');
+  note('Выбранные события приняты в сюжет. Остальные черновики сохранены');
  }catch(err){
   // Keep the same operationId for retry after an ambiguous network failure.
   // Never silently mint a second write after a possibly committed request.
@@ -1474,7 +1495,7 @@ function validateImported(g){if(!g||!Array.isArray(g.nodes)||!Array.isArray(g.ed
  for(const [prefix,property,list] of [['n','nextNode',out.nodes],['e','nextEdge',out.edges],['f','nextField',out.fields],['l','nextLine',out.lanes]]){let max=0;for(const x of list){const match=new RegExp('^'+prefix+'(\\d+)$').exec(x.id);if(match)max=Math.max(max,Number(match[1]))}out[property]=Math.max(out[property]||1,max+1)}out.view=null;out.revision=Number.isSafeInteger(out.revision)?out.revision:0;return out}
 function downloadJson(data,filename){const u=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=u;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(u),2500)}
 function exportProject(){downloadJson({format:'plot-architect/project-1',exportedAt:new Date().toISOString(),project:{id:activeProjectId,name:projectName(),graph:persistentGraph()}},'plot-architect-'+projectName().replace(/[^a-zA-Zа-яА-Я0-9-]+/g,'-').slice(0,50)+'.json');note('Проект экспортирован')}
-async function openProject(id){creativeWorkspacePreview=null;cwAcceptanceReview=null;cwStageReview=null;cwPreparedNoteAlternatives.clear();
+async function openProject(id){creativeWorkspacePreview=null;cwClearDraftSelection();cwStageReview=null;cwPreparedNoteAlternatives.clear();
  if(remote.connected){if(remote.dirty||remote.busy)await flushRemote();if(remote.blocked)throw Error('Сохраните резервную копию: конфликт ревизий');const rec=await apiRequest('/api/projects/'+encodeURIComponent(id));remote.revision=rec.revision;
  let pending=false;try{pending=localStorage.getItem(PENDING_PREFIX+id)==='1'}catch{}
  const backup=pending?localStorage.getItem(KEY_PREFIX+id):null;
@@ -1483,7 +1504,7 @@ async function openProject(id){creativeWorkspacePreview=null;cwAcceptanceReview=
  else{state=JSON.parse(localStorage.getItem(KEY_PREFIX+id)||'null')||blankGraph()}
  activeProjectId=id;KEY=KEY_PREFIX+id;registry.activeId=id;selected=null;linkFrom=null;history=[];focusMode=false;forceAllEdges=false;state.view=null;recomputeFieldTags();save(false);updateProjectLabel();render();fit();if(remote.blocked)$('saved').textContent='! Есть несинхронизированная копия · экспортируйте JSON';
 }
-async function createProject(name,graph){creativeWorkspacePreview=null;cwAcceptanceReview=null;cwStageReview=null;cwPreparedNoteAlternatives.clear();graph=validateImported(graph);for(const node of graph.nodes||[])delete node.autoFieldIds;graph.revision=0;
+async function createProject(name,graph){creativeWorkspacePreview=null;cwClearDraftSelection();cwStageReview=null;cwPreparedNoteAlternatives.clear();graph=validateImported(graph);for(const node of graph.nodes||[])delete node.autoFieldIds;graph.revision=0;
  let id;if(remote.connected){await flushRemote();const res=await apiRequest('/api/projects',{method:'POST',body:{name,graph}});id=res.id;remote.revision=res.revision}
  else id=newLocalId();
  if(remote.connected){clearTimeout(remote.timer);remote.timer=null;remote.blocked=false;remote.dirty=false;}
@@ -1525,6 +1546,6 @@ async function connectSite(silent=false){
 $('projects-open').onclick=showProjectManager;
 updateProjectLabel();
 if(location.protocol==='http:'||location.protocol==='https:')setTimeout(()=>connectSite(true).catch(e=>{note('Site пока недоступен: '+e.message);$('saved').textContent='! Работа локально · Site недоступен'}),150);
-window.__graphite={setCWWorkflowTestMode,getCWWorkflowTestMode:()=>cwWorkflowTestMode,setCWPreparedNoteAlternativesForTest,setCreativeWorkspacePreview,getCreativeWorkspacePreview:()=>structuredClone(creativeWorkspacePreview),showPlotContextMenu,newGapNote,setGapNoteText,getGapNotes:()=>structuredClone(state.gapNotes),getGapLinks:()=>structuredClone(state.gapLinks),getEventRewrites:()=>structuredClone(state.eventRewrites||[]),beginEventRewrite,cancelEventRewrite,deletePlotNode,beginGapLink,completeGapLink,createEditorialField:newEditorialField,createEditorialFieldFromSelection,deleteEditorialField,addEditorialMembers,removeEditorialMembers,updateEditorialInstruction,getEditorialFields:()=>structuredClone(state.editorialFields),getEditorialNotes:()=>structuredClone(state.editorialNotes),getSelection:()=>groupIds(),selectNodes:ids=>setNodeSelection(ids),moveSelectedBy,previewNodeMove:(ids,dx,dy)=>previewNodeMove(ids.map(id=>{const n=nby(id);return n?{id,x:n.x,y:n.y}:null}).filter(Boolean),dx,dy),getContextMenuState:()=>({open:!plotContextMenu.hidden,items:[...plotContextMenu.querySelectorAll("[role=menuitem]")].map(b=>b.textContent.trim())}),showProjectManager,createProject,openProject,exportProject,validateImported,blankGraph,getProjectIndex:()=>structuredClone(registry),getStarterOrigin:()=>({...STARTER_ORIGIN,localProjectId:STARTER_LOCAL_ID}),getRemote:()=>({...remote,token:remote.token?'***':null,timer:null}),createField,deleteField,setFieldGeometry:(id,patch)=>commit(()=>{Object.assign(fby(id),patch);normalizeField(fby(id))}),moveField,selectField:id=>{selected={type:'field',id};render()},getFieldMembership:id=>fieldMembership(nby(id)),getState:()=>structuredClone(state),getPan:()=>({...pan}),getIssues:directionIssues,arrange,fit,addNode,undo,selectNode:id=>{selected={type:'node',id};render()},setPosition:(id,x,y)=>commit(()=>{let n=nby(id);n.x=x;n.y=y}),setNodeAppearance:(id,patch)=>commit(()=>{const n=nby(id);if(!n)throw Error("Unknown node");if(patch.width!==undefined)n.width=Math.max(180,Math.min(780,patch.width));if(patch.height!==undefined)n.height=Math.max(95,Math.min(640,patch.height));if(patch.color!==undefined){if(patch.color===null)delete n.color;else if(COLORS.includes(patch.color))n.color=patch.color;else throw Error("Invalid color")}}),setInspectorPinned:v=>{inspectorPinned=!!v;renderInspector();positionInspector()},getSelected:()=>selected,getNavigation:()=>({focusMode,overviewOn,forceAllEdges,routeMode,lodOverview,semanticMode:semanticZoomLevel()}),getSemanticZoom:()=>semanticZoomLevel(),setZoomForTest:(scale)=>setZoom(scale),getEdgePlan:()=>{const p=connectionPlan();return {overview:p.overview,bridges:p.bridges.map(g=>({key:g.key,edgeIds:g.edges.map(e=>e.id)})),displayed:p.visibleEdges.map(e=>e.id),suppressed:[...p.localSuppressed.entries()]};},setAllEdges,setRouteMode,getPerf:()=>({...perfStats}),jumpToNode,jumpToField,toggleFocus:focusToggle,toggleOverview:()=>{overviewOn=!overviewOn;render()},loadFixture:fixture=>{state=structuredClone(fixture);selected=null;history=[];recomputeFieldTags();save();render()},reset:()=>{state=seed();recomputeFieldTags();history=[];selected=null;save();render();fit()}};
+window.__graphite={setCWWorkflowTestMode,getCWWorkflowTestMode:()=>cwWorkflowTestMode,getCWSelectedDraftIds:()=>[...cwSelectedDraftIds],setCWPreparedNoteAlternativesForTest,setCreativeWorkspacePreview,getCreativeWorkspacePreview:()=>structuredClone(creativeWorkspacePreview),showPlotContextMenu,newGapNote,setGapNoteText,getGapNotes:()=>structuredClone(state.gapNotes),getGapLinks:()=>structuredClone(state.gapLinks),getEventRewrites:()=>structuredClone(state.eventRewrites||[]),beginEventRewrite,cancelEventRewrite,deletePlotNode,beginGapLink,completeGapLink,createEditorialField:newEditorialField,createEditorialFieldFromSelection,deleteEditorialField,addEditorialMembers,removeEditorialMembers,updateEditorialInstruction,getEditorialFields:()=>structuredClone(state.editorialFields),getEditorialNotes:()=>structuredClone(state.editorialNotes),getSelection:()=>groupIds(),selectNodes:ids=>setNodeSelection(ids),moveSelectedBy,previewNodeMove:(ids,dx,dy)=>previewNodeMove(ids.map(id=>{const n=nby(id);return n?{id,x:n.x,y:n.y}:null}).filter(Boolean),dx,dy),getContextMenuState:()=>({open:!plotContextMenu.hidden,items:[...plotContextMenu.querySelectorAll("[role=menuitem]")].map(b=>b.textContent.trim())}),showProjectManager,createProject,openProject,exportProject,validateImported,blankGraph,getProjectIndex:()=>structuredClone(registry),getStarterOrigin:()=>({...STARTER_ORIGIN,localProjectId:STARTER_LOCAL_ID}),getRemote:()=>({...remote,token:remote.token?'***':null,timer:null}),createField,deleteField,setFieldGeometry:(id,patch)=>commit(()=>{Object.assign(fby(id),patch);normalizeField(fby(id))}),moveField,selectField:id=>{selected={type:'field',id};render()},getFieldMembership:id=>fieldMembership(nby(id)),getState:()=>structuredClone(state),getPan:()=>({...pan}),getIssues:directionIssues,arrange,fit,addNode,undo,selectNode:id=>{selected={type:'node',id};render()},setPosition:(id,x,y)=>commit(()=>{let n=nby(id);n.x=x;n.y=y}),setNodeAppearance:(id,patch)=>commit(()=>{const n=nby(id);if(!n)throw Error("Unknown node");if(patch.width!==undefined)n.width=Math.max(180,Math.min(780,patch.width));if(patch.height!==undefined)n.height=Math.max(95,Math.min(640,patch.height));if(patch.color!==undefined){if(patch.color===null)delete n.color;else if(COLORS.includes(patch.color))n.color=patch.color;else throw Error("Invalid color")}}),setInspectorPinned:v=>{inspectorPinned=!!v;renderInspector();positionInspector()},getSelected:()=>selected,getNavigation:()=>({focusMode,overviewOn,forceAllEdges,routeMode,lodOverview,semanticMode:semanticZoomLevel()}),getSemanticZoom:()=>semanticZoomLevel(),setZoomForTest:(scale)=>setZoom(scale),getEdgePlan:()=>{const p=connectionPlan();return {overview:p.overview,bridges:p.bridges.map(g=>({key:g.key,edgeIds:g.edges.map(e=>e.id)})),displayed:p.visibleEdges.map(e=>e.id),suppressed:[...p.localSuppressed.entries()]};},setAllEdges,setRouteMode,getPerf:()=>({...perfStats}),jumpToNode,jumpToField,toggleFocus:focusToggle,toggleOverview:()=>{overviewOn=!overviewOn;render()},loadFixture:fixture=>{state=structuredClone(fixture);selected=null;history=[];recomputeFieldTags();save();render()},reset:()=>{state=seed();recomputeFieldTags();history=[];selected=null;save();render();fit()}};
 recomputeFieldTags();save();render();
 })();
