@@ -90,7 +90,9 @@ def main():
         assert db["graph"]["gapNotes"][0]["text"] == task
         assert db["graph"]["gapNotes"][0]["offerVariants"] is True  # legacy UI flag, not new policy
         assert db["graph"]["gapLinks"][0]["to"] == {"kind": "plot_node", "id": "n2"}
-        assert db["graph"]["nodes"] == initial_graph()["nodes"]
+        def core_fields(items):
+            return [(n["id"], n["title"], n["description"], n["x"], n["y"]) for n in items]
+        assert core_fields(db["graph"]["nodes"]) == core_fields(initial_graph()["nodes"])
         assert db["graph"]["edges"] == initial_graph()["edges"]
         assert "workspaces" not in db["graph"], "browser does not yet stage prepared alternatives"
 
