@@ -34,7 +34,8 @@ export function previewStageNoteAlternatives(graph,{noteId,workspaceId,workspace
   if(!id(noteId)||!id(workspaceId)||!Array.isArray(graph.gapNotes))
     fail('NOTE_INVALID','existing standalone note required');
   const note=graph.gapNotes.find(n=>n.id===noteId);
-  if(!obj(note)||!limited(note.text,8000)||!note.text.trim()||note.status!=='pending')
+  if(!obj(note))fail('NOTE_NOT_FOUND',noteId);
+  if(!limited(note.text,8000)||!note.text.trim()||note.status!=='pending')
     fail('NOTE_NOT_READY','nonempty pending note required');
   if((graph.workspaces??[]).some(w=>w.id===workspaceId||w.taskId===noteId))
     fail('WORKSPACE_CONFLICT','note already has an area or ID is taken');
