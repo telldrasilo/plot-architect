@@ -4,6 +4,7 @@
  * No OpenAI API is called and no credentials are embedded.
  */
 import {validateGraph} from './graph_contract.mjs';
+import {canonicalReadGraph,assertOrdinaryGraphWrite} from './creative_workflow_server_boundary.mjs';
 const VERSION='2025-06-18';
 const DATA_LIMIT=1250000;
 const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','MCP-Protocol-Version':VERSION}});
@@ -134,13 +135,13 @@ async function callTool(name,args,request,env,internalApi){
  validateArgs(args,['project_id']);
  if(name==='get_project'){
   if(args.detail!==undefined&&!['summary','full'].includes(args.detail))throw new Error('Неверный detail');
-  const p=await getCurrent(request,internalApi,args.project_id),g=p.graph;
+  const p=await getCurrent(request,internalApi,args.project_id),g=canonicalReadGraph(p.graph);
   if(args.detail==='full'){if(JSON.stringify(g).length>DATA_LIMIT)throw new Error('Граф слишком велик, используйте get_context');return {project_id:p.id,name:p.name,revision:p.revision,graph:g}}
   return {project_id:p.id,name:p.name,revision:p.revision,counts:{nodes:g.nodes.length,edges:g.edges.length,fields:g.fields.length},fields:g.fields.map(f=>({id:f.id,title:f.title,comment:f.comment||''})),sample_nodes:g.nodes.slice(0,30).map(n=>({id:n.id,title:n.title,description:n.description?.slice(0,250)})),truncated:g.nodes.length>30};
  }
  if(name==='get_context'){
   if(!args.query&&!(Array.isArray(args.node_ids)&&args.node_ids.length))throw new Error('Укажите query или node_ids');
-  const p=await getCurrent(request,internalApi,args.project_id),g=p.graph,requested=new Set(Array.isArray(args.node_ids)?args.node_ids:[]);
+  const p=await getCurrent(request,internalApi,args.project_id),g=canonicalReadGraph(p.graph),requested=new Set(Array.isArray(args.node_ids)?args.node_ids:[]);
   if(args.query){const q=String(args.query).toLowerCase().trim();if(q.length>150)throw new Error('Слишком длинный запрос');for(const n of g.nodes){if((n.title+' '+n.description).toLowerCase().includes(q))requested.add(n.id);if(requested.size>=30)break}}
   if(requested.size>30)throw new Error('Можно запросить не более 30 событий');
   const picked=new Set(requested);if(args.neighbors!==false){for(const e of g.edges)if(requested.has(e.from)||requested.has(e.to)){picked.add(e.from);picked.add(e.to)}}
@@ -152,15 +153,18 @@ async function callTool(name,args,request,env,internalApi){
   if(!Number.isSafeInteger(args.since_revision)||args.since_revision<0)throw new Error('Неверная ревизия');
   const p=await getCurrent(request,internalApi,args.project_id);if(args.since_revision>p.revision)throw new Error('Запрошена будущая ревизия');
   const old=await env.DB.prepare('SELECT graph_json FROM plot_revisions WHERE project_id=? AND revision=?').bind(p.id,args.since_revision).first();if(!old)throw new Error('Исторический снимок отсутствует');
-  return {project_id:p.id,from_revision:args.since_revision,to_revision:p.revision,changes:countDiff(JSON.parse(old.graph_json),p.graph)};
+  return {project_id:p.id,from_revision:args.since_revision,to_revision:p.revision,changes:countDiff(canonicalReadGraph(JSON.parse(old.graph_json)),canonicalReadGraph(p.graph))};
  }
  if(name==='preview_patch'||name==='apply_patch'){
   if(!Number.isSafeInteger(args.expected_revision)||args.expected_revision<0)throw new Error('Неверная ожидаемая ревизия');
   const p=await getCurrent(request,internalApi,args.project_id);
   if(p.revision!==args.expected_revision)throw Object.assign(new Error('REVISION_CONFLICT: сначала прочитайте свежий граф'),{status:409,currentRevision:p.revision});
   const {graph,created,details}=applyGraphOps(p.graph,args.operations);
+  // Generic MCP patch may update active plot only. It must not stage/promote
+  // drafts, alter replacement records or edit a suspended original.
+  assertOrdinaryGraphWrite(p.graph,graph);
   const preview_token=await digest({project_id:p.id,expected_revision:p.revision,operations:args.operations});
-  if(name==='preview_patch')return {project_id:p.id,expected_revision:p.revision,preview_token,changes:details,created,counts_before:{nodes:p.graph.nodes.length,edges:p.graph.edges.length,fields:p.graph.fields.length},counts_after:{nodes:graph.nodes.length,edges:graph.edges.length,fields:graph.fields.length},warning:'Предпросмотр: запись не выполнена'};
+  if(name==='preview_patch')return {project_id:p.id,expected_revision:p.revision,preview_token,changes:details,created,counts_before:{nodes:canonicalReadGraph(p.graph).nodes.length,edges:canonicalReadGraph(p.graph).edges.length,fields:canonicalReadGraph(p.graph).fields.length},counts_after:{nodes:canonicalReadGraph(graph).nodes.length,edges:canonicalReadGraph(graph).edges.length,fields:canonicalReadGraph(graph).fields.length},warning:'Предпросмотр: запись не выполнена'};
   if(args.preview_token!==preview_token)throw new Error('preview_token не соответствует предпросмотру');
   const saved=await rest(request,internalApi,'PUT','/api/projects/'+p.id,{name:p.name,expectedRevision:p.revision,graph,message:'MCP: '+details.map(d=>d.op).join(', ').slice(0,350)});
   return {project_id:p.id,revision:saved.revision,changes:details,created,saved:true};
