@@ -124,7 +124,7 @@ test('missing author review or stale local revision reject with zero side effect
 });
 test('empty, nonpending, and nonexistent notes are not staging sources',()=>{
   for(const edit of [g=>{g.gapNotes[0].text='   '},g=>{g.gapNotes[0].status='done'},g=>{g.gapNotes=[]}]){
-    const g=graph();edit(g);mustFail(()=>review(g,input(g)),g.gapNotes.length?'NOTE_NOT_READY':'NOTE_INVALID');
+    const g=graph();edit(g);mustFail(()=>review(g,input(g)),g.gapNotes.length?'NOTE_NOT_READY':'NOTE_NOT_FOUND');
   }
 });
 test('technical capacity limits are explicit, independent of a fixed variant count',()=>{
