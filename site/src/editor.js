@@ -162,7 +162,13 @@ const cwPreparedNoteAlternatives=new Map();
 // automatic story write. The bridge is QA-only until an approved integration.
 let cwHandoffNoteId=null;
 let cwHandoffPrompt='';
-function cwHandoffClear(){cwHandoffNoteId=null;cwHandoffPrompt=''}
+let cwHandoffRevision=null;
+let cwHandoffProjectId=null;
+let cwHandoffNoteText=null;
+function cwHandoffClear(){
+ cwHandoffNoteId=null;cwHandoffPrompt='';cwHandoffRevision=null;
+ cwHandoffProjectId=null;cwHandoffNoteText=null;
+}
 function cwHandoffContext(noteId){
  const note=gnby(noteId);
  if(!note||!note.text?.trim()||state.view!==null)
@@ -264,6 +270,9 @@ function cwPrepareChatGPTAlternatives(noteId,raw){
   throw Error('Сначала завершите сохранение проекта в тестовом режиме');
  const n=gnby(noteId);
  if(!n||!n.text?.trim())throw Error('Заметка не найдена');
+ if(cwHandoffNoteId!==noteId||cwHandoffProjectId!==activeProjectId
+  ||cwHandoffRevision!==remote.revision||cwHandoffNoteText!==n.text)
+  throw Error('Запрос ChatGPT устарел. Подготовьте новый запрос');
  const parsed=cwParseChatGPTAlternatives(raw);
  const maxSize=Math.max(...parsed.map(b=>b.events.length));
  const canonical=cwActiveNodes();
@@ -315,7 +324,7 @@ function setCWWorkflowTestMode(enabled){
  cwClearDraftSelection();
  cwClearDraftMoves();
  cwStageReview=null;
- if(!cwWorkflowTestMode)cwPreparedNoteAlternatives.clear();
+ if(!cwWorkflowTestMode){cwPreparedNoteAlternatives.clear();cwHandoffClear()}
  renderCreativeWorkspacePreview();
  if(selected?.type==='gapNote')renderInspector();
 }
@@ -801,7 +810,7 @@ const remote={connected:false,token:null,revision:0,dirty:false,busy:false,block
 // Only confirmed pins are persistent. Automatic memberships are recalculated from geometry on every load.
 function persistentGraph(){const graph=structuredClone(state);for(const node of graph.nodes||[])delete node.autoFieldIds;return graph}
 function save(sync=true){let localOk=true;try{localStorage.setItem(KEY,JSON.stringify(persistentGraph()));const entry=registryEntry(activeProjectId);if(entry){entry.revision=state.revision;entry.updatedAt=Date.now();writeRegistry()}}catch{localOk=false};$('saved').textContent=localOk?'● '+(remote.connected?'Локальная копия сохранена':'Сохранено локально')+' · '+state.revision:'! Локальное хранилище недоступно';if(remote.connected&&sync)queueRemote();return localOk}
-function commit(f,message){if(cwAcceptanceBusy)return note('Дождитесь завершения проверки принятия');if(cwDraftMoveEdits.size)return note('Сначала сохраните или сбросьте расположение черновиков');cwStageReview=null;history.push(JSON.stringify(persistentGraph()));if(history.length>60)history.shift();f();cleanEditorialReferences();memoRender=null;recomputeFieldTags();state.revision++;const stored=save();render();if(!stored)note('Изменения в памяти, но браузер не сохранил их. Экспортируйте JSON.');else if(message)note(message)}
+function commit(f,message){if(cwAcceptanceBusy)return note('Дождитесь завершения проверки принятия');cwHandoffClear();if(cwDraftMoveEdits.size)return note('Сначала сохраните или сбросьте расположение черновиков');cwStageReview=null;history.push(JSON.stringify(persistentGraph()));if(history.length>60)history.shift();f();cleanEditorialReferences();memoRender=null;recomputeFieldTags();state.revision++;const stored=save();render();if(!stored)note('Изменения в памяти, но браузер не сохранил их. Экспортируйте JSON.');else if(message)note(message)}
 function undo(){if(cwDraftMoveEdits.size)return note('Сначала сохраните или сбросьте расположение черновиков');if(!history.length)return note('Нет действий для отмены');state=JSON.parse(history.pop());recomputeFieldTags();selected=null;selectedNodeIds.clear();linkFrom=null;save();render();note('Действие отменено')}
 function notifyModal(title,detail,placeholder,callback,init=''){modalOpen=true;let host=$('modal-host');host.innerHTML=`<div class="backdrop"><form class="modal" id="dialog"><h2>${esc(title)}</h2><p>${esc(detail)}</p><input id="entry" placeholder="${esc(placeholder)}" value="${esc(init)}" required maxlength="160"><p id="dialog-error" class="dialog-error" role="alert" hidden></p><div class="buttons"><button type="button" id="cancel">Отмена</button><button class="primary" type="submit">Сохранить</button></div></form></div>`;const close=()=>{modalOpen=false;host.innerHTML=''};$('cancel').onclick=close;$('dialog').onsubmit=e=>{e.preventDefault();const val=$('entry').value.trim();if(!val){$('entry').setCustomValidity('Введите название');$('entry').reportValidity();return}try{callback(val);close()}catch(err){console.error('Ошибка при сохранении',err);const warning=$('dialog-error');if(warning){warning.textContent='Не удалось сохранить. Попробуйте снова.';warning.hidden=false;}note('Не удалось сохранить поле или событие')}};$('entry').addEventListener('input',()=>{$('entry').setCustomValidity('')});$('entry').focus();$('entry').select()}
 function colorOf(n){return COLORS.includes(n.color)?n.color:(lby(n.lineIds[0])?.color||'#9b9488')}
@@ -978,7 +987,7 @@ function newGapNote(at=null){const r=canvasRect();const start={x:Math.round((r.w
  selected={type:'gapNote',id};render();return id;
 }
 function setGapNoteText(id,text){const n=gnby(id),v=String(text).slice(0,8000);if(!n||n.text===v)return;
- cwPreparedNoteAlternatives.delete(id);cwStageReview=null;
+ cwPreparedNoteAlternatives.delete(id);cwStageReview=null;cwHandoffClear();
  commit(()=>{const rec=gnby(id);rec.text=v;rec.status='pending'},'Заметка сохранена');selected={type:'gapNote',id};render();
 }
 function beginGapLink(kind,id){gapLinkFrom={kind,id};linkFrom=null;note('Выберите событие, поле или заметку для контекстной связи')}
@@ -1845,7 +1854,7 @@ function validateImported(g){if(!g||!Array.isArray(g.nodes)||!Array.isArray(g.ed
  for(const [prefix,property,list] of [['n','nextNode',out.nodes],['e','nextEdge',out.edges],['f','nextField',out.fields],['l','nextLine',out.lanes]]){let max=0;for(const x of list){const match=new RegExp('^'+prefix+'(\\d+)$').exec(x.id);if(match)max=Math.max(max,Number(match[1]))}out[property]=Math.max(out[property]||1,max+1)}out.view=null;out.revision=Number.isSafeInteger(out.revision)?out.revision:0;return out}
 function downloadJson(data,filename){const u=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=u;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(u),2500)}
 function exportProject(){downloadJson({format:'plot-architect/project-1',exportedAt:new Date().toISOString(),project:{id:activeProjectId,name:projectName(),graph:persistentGraph()}},'plot-architect-'+projectName().replace(/[^a-zA-Zа-яА-Я0-9-]+/g,'-').slice(0,50)+'.json');note('Проект экспортирован')}
-async function openProject(id){creativeWorkspacePreview=null;cwClearDraftSelection();cwClearDraftMoves();cwStageReview=null;cwPreparedNoteAlternatives.clear();
+async function openProject(id){creativeWorkspacePreview=null;cwClearDraftSelection();cwClearDraftMoves();cwStageReview=null;cwPreparedNoteAlternatives.clear();cwHandoffClear();
  if(remote.connected){if(remote.dirty||remote.busy)await flushRemote();if(remote.blocked)throw Error('Сохраните резервную копию: конфликт ревизий');const rec=await apiRequest('/api/projects/'+encodeURIComponent(id));remote.revision=rec.revision;
  let pending=false;try{pending=localStorage.getItem(PENDING_PREFIX+id)==='1'}catch{}
  const backup=pending?localStorage.getItem(KEY_PREFIX+id):null;
@@ -1854,7 +1863,7 @@ async function openProject(id){creativeWorkspacePreview=null;cwClearDraftSelecti
  else{state=JSON.parse(localStorage.getItem(KEY_PREFIX+id)||'null')||blankGraph()}
  activeProjectId=id;KEY=KEY_PREFIX+id;registry.activeId=id;selected=null;linkFrom=null;history=[];focusMode=false;forceAllEdges=false;state.view=null;recomputeFieldTags();save(false);updateProjectLabel();render();fit();if(remote.blocked)$('saved').textContent='! Есть несинхронизированная копия · экспортируйте JSON';
 }
-async function createProject(name,graph){creativeWorkspacePreview=null;cwClearDraftSelection();cwClearDraftMoves();cwStageReview=null;cwPreparedNoteAlternatives.clear();graph=validateImported(graph);for(const node of graph.nodes||[])delete node.autoFieldIds;graph.revision=0;
+async function createProject(name,graph){creativeWorkspacePreview=null;cwClearDraftSelection();cwClearDraftMoves();cwStageReview=null;cwPreparedNoteAlternatives.clear();cwHandoffClear();graph=validateImported(graph);for(const node of graph.nodes||[])delete node.autoFieldIds;graph.revision=0;
  let id;if(remote.connected){await flushRemote();const res=await apiRequest('/api/projects',{method:'POST',body:{name,graph}});id=res.id;remote.revision=res.revision}
  else id=newLocalId();
  if(remote.connected){clearTimeout(remote.timer);remote.timer=null;remote.blocked=false;remote.dirty=false;}
