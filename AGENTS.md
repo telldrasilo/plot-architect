@@ -10,6 +10,7 @@ Build the private Plot Architect project; do not change unrelated projects. **Do
 - Ideation, critique and visual exploration: no version audit, changelog entry, PR or release checks required.
 - Code: branch from current `main` → narrow PR → applicable tests/CI → merge. Use GitHub PR/commits/CI as the change history; **no mandatory duplicate Library ledger, per-patch ZIP, manual SHA census or documentation status synchronization**.
 - Edit a specification only when a durable UX rule, data contract, architecture or decision changes. Never fix historical status wording merely to match today's release. A documentation-only PR need not run unrelated browser/database tests; rely on applicable CI.
+- **UX decision-to-release check:** when a newer owner decision retires an interaction, audit every related surface (new-object defaults, inspector controls, card labels, sibling tools, MCP prompts, tests and current UX standard). Keep persisted legacy fields only for compatibility, not as active product rules. Add a regression assertion forbidding the retired interaction; do not treat passing old tests or a green deploy as UX approval.
 - Prefer a small, reviewable change and report actual test outcomes, not inferred ones.
 
 ## Protected boundaries
