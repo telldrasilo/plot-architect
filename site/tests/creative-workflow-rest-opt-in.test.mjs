@@ -170,3 +170,73 @@ test('old generic REST PUT cannot edit a draft staged by the opt-in command',asy
  const r=await request(env,'PUT','/api/projects/'+id,{name:g.name,expectedRevision:1,graph:g.graph});
  assert.equal(r.status,422);assert.equal((await graph(env,id)).revision,1);
 });
+
+
+test('move_drafts is reviewed, persisted, and leaves ordinary MCP canon unchanged',async()=>{
+ const {db,sql}=storage(),env={DB:db,CW_WORKFLOW_ENABLED:'true'},id=await create(env);
+ await apply(env,id,0,'stage',stage());
+ const before=(await graph(env,id)).graph;
+ const command={kind:'move_drafts',workspaceId:'w1',moves:[
+  {nodeId:'draft-a',x:240,y:620},{nodeId:'draft-b',x:490,y:620}
+ ]};
+ const previewResult=await preview(env,id,1,command);
+ assert.equal(previewResult.status,200);
+ assert.deepEqual(previewResult.data.preview.affectedDraftEdgeIds,['draft-ab']);
+ assert.deepEqual(counts(sql,id),{revision:1,history:2,receipts:1});
+ const result=await apply(env,id,1,'move',command);
+ assert.equal(result.status,200,JSON.stringify(result.data));
+ assert.deepEqual(counts(sql,id),{revision:2,history:3,receipts:2});
+ const moved=(await graph(env,id)).graph;
+ assert.equal(moved.nodes.find(n=>n.id==='draft-a').x,240);
+ assert.equal(moved.nodes.find(n=>n.id==='draft-b').y,620);
+ assert.deepEqual(moved.edges,before.edges);
+ assert.deepEqual(moved.replacements??[],before.replacements??[]);
+ const rpc=await request(env,'POST','/mcp',{jsonrpc:'2.0',id:1,method:'tools/call',
+  params:{name:'get_project',arguments:{project_id:id,detail:'full'}}});
+ assert.equal(rpc.status,200);
+ assert.deepEqual(rpc.data.result.structuredContent.graph.nodes.map(n=>n.id),['n1','n2','n3']);
+});
+test('duplicate move operation replays without moving again or creating extra receipt',async()=>{
+ const {db,sql}=storage(),env={DB:db,CW_WORKFLOW_ENABLED:'true'},id=await create(env);
+ await apply(env,id,0,'stage',stage());
+ const command={kind:'move_drafts',workspaceId:'w1',moves:[{nodeId:'draft-a',x:240,y:620}]};
+ const p=await preview(env,id,1,command);
+ const body={expectedRevision:1,operationId:'stable-move',command:{...command,expectedPreview:p.data.preview}};
+ const first=await request(env,'POST',path(id)+'apply',body);
+ const replayed=await request(env,'POST',path(id)+'apply',body);
+ assert.equal(first.status,200);assert.equal(replayed.status,200);
+ assert.equal(replayed.data.replayed,true);
+ const tampered=structuredClone(body);tampered.command.moves[0].x=260;
+ const rejected=await request(env,'POST',path(id)+'apply',tampered);
+ assert.equal(rejected.status,409);assert.equal(rejected.data.error,'OPERATION_ID_REUSED');
+ assert.deepEqual(counts(sql,id),{revision:2,history:3,receipts:2});
+});
+test('stale move command is atomic and cannot partially relocate other draft nodes',async()=>{
+ const {db,sql}=storage(),env={DB:db,CW_WORKFLOW_ENABLED:'true'},id=await create(env);
+ await apply(env,id,0,'stage',stage());
+ const first={kind:'move_drafts',workspaceId:'w1',moves:[{nodeId:'draft-a',x:220,y:570}]};
+ const planned=await preview(env,id,1,first);
+ await apply(env,id,1,'another-move',{kind:'move_drafts',workspaceId:'w1',
+  moves:[{nodeId:'draft-b',x:460,y:560}]});
+ const attempted=await request(env,'POST',path(id)+'apply',{
+  expectedRevision:1,operationId:'old',command:{...first,expectedPreview:planned.data.preview}
+ });
+ assert.equal(attempted.status,409);assert.equal(attempted.data.error,'REVISION_CONFLICT');
+ const saved=(await graph(env,id)).graph;
+ assert.equal(saved.nodes.find(n=>n.id==='draft-a').x,130);
+ assert.equal(saved.nodes.find(n=>n.id==='draft-b').x,460);
+ assert.deepEqual(counts(sql,id),{revision:2,history:3,receipts:2});
+});
+test('legacy generic PUT still cannot update moved draft coordinates',async()=>{
+ const {db}=storage(),env={DB:db,CW_WORKFLOW_ENABLED:'true'},id=await create(env);
+ await apply(env,id,0,'stage',stage());
+ await apply(env,id,1,'move',{kind:'move_drafts',workspaceId:'w1',
+  moves:[{nodeId:'draft-a',x:230,y:610}]});
+ const saved=await graph(env,id);const forged=structuredClone(saved.graph);
+ forged.nodes.find(n=>n.id==='draft-a').x=260;
+ const response=await request(env,'PUT','/api/projects/'+id,{
+  name:saved.name,expectedRevision:2,graph:forged
+ });
+ assert.equal(response.status,422);
+ assert.equal((await graph(env,id)).graph.nodes.find(n=>n.id==='draft-a').x,230);
+});
