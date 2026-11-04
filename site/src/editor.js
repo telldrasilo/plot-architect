@@ -624,7 +624,7 @@ function renderGapNotes(){const host=$('gap-notes');host.innerHTML='';
  for(const n of gapInView()){
   const el=document.createElement('article');el.className='gap-note'+(selected?.type==='gapNote'&&selected.id===n.id?' selected':'');
   el.dataset.gapNote=n.id;el.style.left=n.x+'px';el.style.top=n.y+'px';el.tabIndex=0;
-  el.innerHTML=`<div class="gap-note-head">▤ ${esc(n.title||'Заметка')}</div><div class="gap-note-body ${!n.text?'gap-note-empty':''}">${esc(n.text||'Напишите, что нужно придумать здесь…')}</div><div class="gap-note-foot">${n.offerVariants?'3 варианта':'1 вариант'} · не сюжетное событие</div>`;
+  el.innerHTML=`<div class="gap-note-head">▤ ${esc(n.title||'Заметка')}</div><div class="gap-note-body ${!n.text?'gap-note-empty':''}">${esc(n.text||'Напишите, что нужно придумать здесь…')}</div><div class="gap-note-foot">${cwWorkflowTestMode?(cwNoteHasWorkspace(n.id)?'Варианты в рабочей области':cwPreparedNoteAlternatives.has(n.id)?'Подготовлено '+cwPreparedNoteAlternatives.get(n.id).branches.length+' ветвей':'Редакторское задание'):(n.offerVariants?'3 варианта':'1 вариант')} · не сюжетное событие</div>`;
   host.append(el);
   el.onclick=e=>{e.stopPropagation();if(completeGapLink('gap_note',n.id))return;selected={type:'gapNote',id:n.id};render()};
   el.addEventListener('pointerdown',e=>{if(e.button!==0||e.target.closest('input,textarea')||e.ctrlKey)return;interaction={type:'gap-note-move',id:n.id,px:e.clientX,py:e.clientY,x:n.x,y:n.y,moved:false};el.setPointerCapture(e.pointerId)});
