@@ -63,6 +63,7 @@ function ensureEditorialState(s){
  if(!Number.isSafeInteger(s.nextGapNote)||s.nextGapNote<=gapMax)s.nextGapNote=gapMax+1;
  const linkMax=Math.max(0,...s.gapLinks.map(n=>Number(/^gl(\d+)$/.exec(n.id||'')?.[1]||0)));
  if(!Number.isSafeInteger(s.nextGapLink)||s.nextGapLink<=linkMax)s.nextGapLink=linkMax+1;
+ // CW-006: offerVariants survives only as legacy persisted metadata; generation obeys the task text.
  for(const n of s.gapNotes){n.text=String(n.text||'');if(typeof n.offerVariants!=='boolean')n.offerVariants=true;n.status=n.status||'pending';n.parent=n.parent??null;}
  // UX-014: single-event rewrite drafts are editorial overlays keyed by immutable node IDs.
  if(!Array.isArray(s.eventRewrites))s.eventRewrites=[];
@@ -1006,7 +1007,7 @@ function renderGapNotes(){const host=$('gap-notes');host.innerHTML='';
  for(const n of gapInView()){
   const el=document.createElement('article');el.className='gap-note'+(selected?.type==='gapNote'&&selected.id===n.id?' selected':'');
   el.dataset.gapNote=n.id;el.style.left=n.x+'px';el.style.top=n.y+'px';el.tabIndex=0;
-  el.innerHTML=`<div class="gap-note-head">▤ ${esc(n.title||'Заметка')}</div><div class="gap-note-body ${!n.text?'gap-note-empty':''}">${esc(n.text||'Напишите, что нужно придумать здесь…')}</div><div class="gap-note-foot">${cwWorkflowTestMode?(cwNoteHasWorkspace(n.id)?'Варианты в рабочей области':cwPreparedNoteAlternatives.has(n.id)?'Подготовлено '+cwPreparedNoteAlternatives.get(n.id).branches.length+' ветвей':'Редакторское задание'):(n.offerVariants?'3 варианта':'1 вариант')} · не сюжетное событие</div>`;
+  el.innerHTML=`<div class="gap-note-head">▤ ${esc(n.title||'Заметка')}</div><div class="gap-note-body ${!n.text?'gap-note-empty':''}">${esc(n.text||'Напишите, что нужно придумать здесь…')}</div><div class="gap-note-foot">${cwWorkflowTestMode?(cwNoteHasWorkspace(n.id)?'Варианты в рабочей области':cwPreparedNoteAlternatives.has(n.id)?'Подготовлено '+cwPreparedNoteAlternatives.get(n.id).branches.length+' ветвей':'Редакторское задание') :'Редакторское задание'} · не сюжетное событие</div>`;
   host.append(el);
   el.onclick=e=>{e.stopPropagation();if(completeGapLink('gap_note',n.id))return;selected={type:'gapNote',id:n.id};render()};
   el.addEventListener('pointerdown',e=>{if(e.button!==0||e.target.closest('input,textarea')||e.ctrlKey)return;interaction={type:'gap-note-move',id:n.id,px:e.clientX,py:e.clientY,x:n.x,y:n.y,moved:false};el.setPointerCapture(e.pointerId)});
@@ -1038,17 +1039,14 @@ function renderGapInspector(el,n){
    '<textarea id="cw-handoff-answer" placeholder="{&quot;branches&quot;:[...]}"></textarea>'+
    '<button id="cw-handoff-import" type="button">Проверить варианты</button>':'')+
   '</section>':'';
- const legacy=cwWorkflowTestMode?'':'<div class="field"><label class="check-row"><input type="checkbox" id="gap-offer" '+
-  (n.offerVariants?'checked':'')+'>Предлагать три варианта</label></div>';
  el.hidden=false;
  el.innerHTML='<div class="inspect-head"><b>▤ Заметка · придумать новое</b><button id="close-inspect">×</button></div>'+
  '<div class="field"><label>Задание ChatGPT</label><textarea id="gap-text" class="gap-note-editor" placeholder="Что нужно придумать?">'+esc(n.text)+'</textarea></div>'+
- legacy+'<div class="muted">Отдельная временная нода. Не событие и не канонический факт. Стрелки к ней задают редакторский контекст.</div>'+
+ '<div class="muted">Отдельная временная нода. Не событие и не канонический факт. Стрелки к ней задают редакторский контекст.</div>'+
  existing+handoff+'<hr><div class="inspect-actions">'+stageButton+
  '<button id="gap-link">Связать</button><button id="gap-delete">Удалить заметку…</button></div>'+stageReview;
  $('close-inspect').onclick=()=>{selected=null;render()};
  $('gap-text').onchange=e=>setGapNoteText(n.id,e.target.value);
- if($('gap-offer'))$('gap-offer').onchange=e=>{commit(()=>{const a=gnby(n.id);a.offerVariants=e.target.checked},'Режим предложений изменён');selected={type:'gapNote',id:n.id};render()};
  $('gap-link').onclick=()=>beginGapLink('gap_note',n.id);
  $('gap-delete').onclick=()=>deleteGapNote(n.id);
  if($('cw-stage-note'))$('cw-stage-note').onclick=()=>{void cwPrepareNoteStage(n.id)};
@@ -1244,12 +1242,10 @@ function renderEditorialInspector(el,f){el.hidden=false;const taskNote=state.edi
  const inside=visible().filter(n=>!nodeIds.includes(n.id));
  el.innerHTML=`<div class="inspect-head"><b>▨ На переработку</b><button id="close-inspect" title="Закрыть">×</button></div>
   <div class="field"><label>Название задания</label><input id="ef-title" maxlength="160" value="${esc(f.title)}"></div>
-  <div class="field"><label class="check-row"><input type="checkbox" id="ef-offer-variants" ${f.offerVariants?'checked':''}>Предлагать три варианта</label></div>
   <div class="field"><label>События для переработки (${ns.length})</label>${ns.map(n=>`<div class="field-tag-row"><span title="${esc(n.title)}">${esc(n.title)}</span><button data-ef-remove="${esc(n.id)}" title="Исключить из задания, не удаляя событие">×</button></div>`).join('')||'<p class="muted">Перетащите события внутрь поля или добавьте выбранные.</p>'}</div>
-  <div class="inspect-actions"><button id="ef-delete">Удалить задание…</button></div><p class="muted">Варианты будет создавать ChatGPT после подключения P5. Исходные события не меняются.</p>`;
+  <div class="inspect-actions"><button id="ef-delete">Удалить задание…</button></div><p class="muted">Обработка этого редакторского поля через ChatGPT пока не подключена. Исходные события не меняются.</p>`;
  $('close-inspect').onclick=()=>{selected=null;render()};
  $('ef-title').onchange=e=>{const title=e.target.value.trim();if(title&&title!==f.title){commit(()=>{efby(f.id).title=title},'Задание переименовано');selected={type:'editorialField',id:f.id};render()}};
- $('ef-offer-variants').onchange=e=>{commit(()=>{efby(f.id).offerVariants=e.target.checked},'Режим вариантов изменён');selected={type:'editorialField',id:f.id};render()};
  el.querySelectorAll('[data-ef-remove]').forEach(b=>b.onclick=()=>removeEditorialMembers(f.id,[b.dataset.efRemove]));
  $('ef-delete').onclick=()=>deleteEditorialField(f.id);
 }
@@ -1343,7 +1339,7 @@ function renderFieldInspector(el,f){el.hidden=false;
  $('f-zoom').onclick=()=>jumpToField(f.id);$('f-delete').onclick=()=>deleteField(f.id);$('close-inspect').onclick=()=>{selected=null;render()};
 }
 
-function renderNodes(){const host=$('nodes');host.innerHTML='';const keep=focusIds(),chosen=new Set(groupIds()),parentsWithChildren=new Set(state.nodes.filter(k=>k.parent).map(k=>k.parent));for(const n of visible()){const rewrite=rewriteBy(n.id);const el=document.createElement('article');el.className='node '+(n.size||'normal')+(rewrite?' rewrite-draft':'')+(chosen.has(n.id)?' selected':'')+(n.status==='proposed'?' node-proposed':'')+(keep&&!keep.has(n.id)?' focus-muted':'');el.dataset.node=n.id;el.style.left=n.x+'px';el.style.top=n.y+'px';if(Number.isFinite(n.width)||Number.isFinite(n.height))el.classList.add('node-custom-size');if(Number.isFinite(n.width))el.style.width=widthOf(n)+'px';if(Number.isFinite(n.height))el.style.minHeight=heightOf(n)+'px';el.style.setProperty('--color',colorOf(n));el.tabIndex=0;el.setAttribute('aria-label',(rewrite?'Заметка переработки: ':'Событие: ')+n.title);el.innerHTML=`${chosen.size===1&&chosen.has(n.id)?`<div class="node-actions">${!rewrite?'<button data-command="inside" title="Открыть детали">↗ Внутрь</button><button data-command="link" title="Соединить с другим событием">↗ Связать</button>':''}<button data-command="edit" title="Редактировать">⋯</button></div>`:''}${rewrite?'<div class="ux014-node-kind">▤ Заметка · переработка</div>':''}<div class="node-header"><div class="node-marker"></div><div class="node-title">${esc(n.title)}</div></div><div class="node-note">${esc(rewrite?(rewrite.taskText||'Что изменить?'):(n.description||'Добавьте короткое описание события'))}</div><div class="node-foot">${rewrite?`<span class="ux014-rewrite-status">Исходник сохранён · ${rewrite.offerVariants?'3 варианта':'1 вариант'}</span>`:tagNames(n).map(tag=>`<span class="field-chip ${tag.manual?'manual-chip':''}" title="${tag.manual?'Закреплённый тег':'Назначен полем'}">${esc(tag.name)}</span>`).join('')}${!rewrite&&!tagNames(n).length?'<span>Без поля</span>':''}${!rewrite?editorialInView().filter(ef=>ef.memberIds.includes(n.id)).map(ef=>`<span class="editorial-chip" title="Редакторское задание, не смысловой тег">▨ ${esc(ef.title)}</span>`).join(''):''}${!rewrite&&parentsWithChildren.has(n.id)?'<span class="tag">Есть детали</span>':''}</div>${rewrite?'':'<button class="node-add" title="Продолжить сюжет" data-command="after">+</button>'}${chosen.size===1&&chosen.has(n.id)?'<button class="node-resize-grip" title="Изменить ширину и высоту карточки" aria-label="Изменить размер ноды">⤡</button>':''}`;host.append(el);
+function renderNodes(){const host=$('nodes');host.innerHTML='';const keep=focusIds(),chosen=new Set(groupIds()),parentsWithChildren=new Set(state.nodes.filter(k=>k.parent).map(k=>k.parent));for(const n of visible()){const rewrite=rewriteBy(n.id);const el=document.createElement('article');el.className='node '+(n.size||'normal')+(rewrite?' rewrite-draft':'')+(chosen.has(n.id)?' selected':'')+(n.status==='proposed'?' node-proposed':'')+(keep&&!keep.has(n.id)?' focus-muted':'');el.dataset.node=n.id;el.style.left=n.x+'px';el.style.top=n.y+'px';if(Number.isFinite(n.width)||Number.isFinite(n.height))el.classList.add('node-custom-size');if(Number.isFinite(n.width))el.style.width=widthOf(n)+'px';if(Number.isFinite(n.height))el.style.minHeight=heightOf(n)+'px';el.style.setProperty('--color',colorOf(n));el.tabIndex=0;el.setAttribute('aria-label',(rewrite?'Заметка переработки: ':'Событие: ')+n.title);el.innerHTML=`${chosen.size===1&&chosen.has(n.id)?`<div class="node-actions">${!rewrite?'<button data-command="inside" title="Открыть детали">↗ Внутрь</button><button data-command="link" title="Соединить с другим событием">↗ Связать</button>':''}<button data-command="edit" title="Редактировать">⋯</button></div>`:''}${rewrite?'<div class="ux014-node-kind">▤ Заметка · переработка</div>':''}<div class="node-header"><div class="node-marker"></div><div class="node-title">${esc(n.title)}</div></div><div class="node-note">${esc(rewrite?(rewrite.taskText||'Что изменить?'):(n.description||'Добавьте короткое описание события'))}</div><div class="node-foot">${rewrite?`<span class="ux014-rewrite-status">Исходник сохранён · задание на переработку</span>`:tagNames(n).map(tag=>`<span class="field-chip ${tag.manual?'manual-chip':''}" title="${tag.manual?'Закреплённый тег':'Назначен полем'}">${esc(tag.name)}</span>`).join('')}${!rewrite&&!tagNames(n).length?'<span>Без поля</span>':''}${!rewrite?editorialInView().filter(ef=>ef.memberIds.includes(n.id)).map(ef=>`<span class="editorial-chip" title="Редакторское задание, не смысловой тег">▨ ${esc(ef.title)}</span>`).join(''):''}${!rewrite&&parentsWithChildren.has(n.id)?'<span class="tag">Есть детали</span>':''}</div>${rewrite?'':'<button class="node-add" title="Продолжить сюжет" data-command="after">+</button>'}${chosen.size===1&&chosen.has(n.id)?'<button class="node-resize-grip" title="Изменить ширину и высоту карточки" aria-label="Изменить размер ноды">⤡</button>':''}`;host.append(el);
  el.onclick=e=>{if(e.target.closest('button'))return;e.stopPropagation();if(dragCompletedFor===n.id){dragCompletedFor=null;return}if(completeGapLink('plot_node',n.id))return;if(linkFrom){finishLink(n.id);return}if(e.ctrlKey||e.metaKey){toggleNodeSelection(n.id);return}setNodeSelection([n.id],n.id)};el.ondblclick=e=>{if(e.target.closest('button'))return;e.stopPropagation();notifyModal('Переименовать','Изменение не затронет связи.', 'Название',v=>commit(()=>{nby(n.id).title=v},'Название изменено'),n.title)};
  el.querySelectorAll('[data-command]').forEach(b=>b.onclick=e=>{e.stopPropagation();const id=n.id;const c=b.dataset.command;if(c==='after')addAfter(id);if(c==='link'){linkFrom=id;selected={type:'node',id};render();note('Нажмите на другую карточку — создадим последовательность')}if(c==='edit'){selected={type:'node',id};renderInspector()}if(c==='inside'){state.view=id;selected=null;pan={x:110,y:95,scale:1};render();note('Внутренний уровень — отдельное полотно')}});
  const grip=el.querySelector('.node-resize-grip');
@@ -1387,14 +1383,12 @@ function renderSingleEventRewriteInspector(el,n,d){
  el.innerHTML=`<div class="inspect-head"><button type="button" class="ux014-header-title rewrite-heading-tip" id="rewrite-heading" data-tip="${esc(tip)}" aria-label="Переработка события. Исходное событие; то же место на графе, исходные связи сохранены" aria-describedby="hover-help">Переработка события <span aria-hidden="true" class="ux014-info">ⓘ</span></button><span class="inspect-top-tools"><button id="pin-inspect" title="${inspectorPinned?'Вернуть окно к событию':'Закрепить окно справа'}">${inspectorPinned?'↗ Рядом':'▣ Справа'}</button><button id="close-inspect" title="Закрыть">×</button></span></div>
  <div class="ux014-original"><strong class="ux014-original-title">${esc(n.title)}</strong><p class="ux014-original-description">${esc(n.description||'Описание отсутствует')}</p></div>
  <div class="field"><label for="ux014-task">Что изменить?</label><textarea id="ux014-task" class="ux014-task" maxlength="20000" placeholder="Опишите задачу для ChatGPT">${esc(d.taskText)}</textarea></div>
- <div class="field"><label class="check-row"><input id="ux014-offer" type="checkbox" ${d.offerVariants?'checked':''}>Предлагать три варианта</label></div>
  <p class="ux014-quiet-note">Исходное содержание не изменяется. Подготовка и применение вариантов появятся после P5/P6.</p>
- <button class="ux014-generate" type="button" disabled title="Генерация вариантов пока не подключена">Подготовить ${d.offerVariants?'3 варианта':'1 вариант'}</button>
+ <button class="ux014-generate" type="button" disabled title="Генерация вариантов пока не подключена">Подготовить решение</button>
  <div class="ux014-rewrite-actions"><button id="ux014-cancel" type="button">← Отменить переработку</button></div>`;
  $('pin-inspect').onclick=()=>{inspectorPinned=!inspectorPinned;renderInspector();positionInspector()};
  $('close-inspect').onclick=()=>{selected=null;render()};
  $('ux014-cancel').onclick=()=>cancelEventRewrite(n.id);
- $('ux014-offer').onchange=e=>{commit(()=>{const draft=rewriteBy(n.id);if(draft)draft.offerVariants=e.target.checked},'Режим вариантов обновлён');selected={type:'node',id:n.id};render()};
  const editor=$('ux014-task');let editing=false;
  editor.onfocus=()=>{editing=false};
  editor.oninput=e=>{
