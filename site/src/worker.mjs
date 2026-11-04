@@ -1,5 +1,7 @@
 import {handleMcp} from './mcp_server.mjs';
 import {validateGraph,GraphValidationError} from './graph_contract.mjs';
+import {CreativeWorkflowContractError} from './creative_workflow_contract.mjs';
+import {validateServerGraph,assertOrdinaryGraphWrite,assertOrdinaryGraphCreation} from './creative_workflow_server_boundary.mjs';
 const j=(data,status=200,headers={})=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...headers}});
 const problem=(msg,status=400,code='BAD_REQUEST')=>j({error:code,message:msg},status);
 const uuid=()=>crypto.randomUUID();
@@ -15,9 +17,10 @@ async function change(db,id,expectedRevision,graph,name,message){
   if(!Number.isSafeInteger(expectedRevision)||expectedRevision<0)return problem('Нужна ожидаемая ревизия',422,'INVALID_REVISION');
   const old=await getRecord(db,id);if(!old)return problem('Проект не найден',404,'NOT_FOUND');
   if(old.revision!==expectedRevision)return j({error:'REVISION_CONFLICT',expectedRevision,currentRevision:old.revision},409);
+  const approved=assertOrdinaryGraphWrite(JSON.parse(old.graph_json),graph);
   const next=expectedRevision+1,ts=now();
   const result=await db.batch([
-    db.prepare('UPDATE plot_projects SET name=?, graph_json=?, revision=?, updated_at=? WHERE id=? AND revision=? AND deleted_at IS NULL').bind(name,JSON.stringify(graph),next,ts,id,expectedRevision),
+    db.prepare('UPDATE plot_projects SET name=?, graph_json=?, revision=?, updated_at=? WHERE id=? AND revision=? AND deleted_at IS NULL').bind(name,JSON.stringify(approved),next,ts,id,expectedRevision),
     db.prepare('INSERT INTO plot_revisions (project_id,revision,graph_json,message,created_at) SELECT id,revision,graph_json,?,? FROM plot_projects WHERE id=? AND revision=? AND deleted_at IS NULL AND changes()=1').bind(String(message||'Изменение').slice(0,500),ts,id,next)
   ]);
   if((result?.[0]?.meta?.changes??0)!==1)return j({error:'REVISION_CONFLICT',message:'Состояние обновилось параллельно'},409);
@@ -35,7 +38,7 @@ async function api(request,env){
    if(method==='POST'){
       const body=await jsonBody(request);const name=String(body.name||'Новая история').trim().slice(0,160);
       if(!name)return problem('Название обязательно',422);
-      const graph=validateGraph(body.graph);const id=uuid(),ts=now(),data=JSON.stringify(graph);
+      const graph=assertOrdinaryGraphCreation(body.graph);const id=uuid(),ts=now(),data=JSON.stringify(graph);
       await env.DB.batch([
        env.DB.prepare('INSERT INTO plot_projects (id,name,graph_json,revision,created_at,updated_at) VALUES (?,?,?,0,?,?)').bind(id,name,data,ts,ts),
        env.DB.prepare('INSERT INTO plot_revisions (project_id,revision,graph_json,message,created_at) VALUES (?,?,?,?,?)').bind(id,0,data,'Создание',ts)
@@ -61,7 +64,7 @@ async function api(request,env){
  if(!action){
   if(method==='GET'){const p=await getRecord(env.DB,id);return p?j({id:p.id,name:p.name,revision:p.revision,graph:JSON.parse(p.graph_json),createdAt:p.created_at,updatedAt:p.updated_at}):problem('Проект не найден',404,'NOT_FOUND')}
   if(method==='PUT'){
-   const body=await jsonBody(request);const graph=validateGraph(body.graph);const name=String(body.name||'').trim().slice(0,160);
+   const body=await jsonBody(request);const graph=validateServerGraph(body.graph);const name=String(body.name||'').trim().slice(0,160);
    if(!name)return problem('Название обязательно',422);
    return change(env.DB,id,body.expectedRevision,graph,name,body.message);
   }
@@ -80,7 +83,7 @@ export default {
    const url=new URL(request.url);
    if(url.pathname==='/mcp')return handleMcp(request,env,(req)=>api(req,env));
    if(url.pathname.startsWith('/api/')){
-     try{return await api(request,env)}catch(e){const msg=String(e?.message||e);if(e instanceof GraphValidationError||e instanceof SyntaxError||/JSON|Некоррект|Неверн|Слишком|Превышен|Отсутствующ|Цикл|Повтор|Недопустим/.test(msg))return problem(msg,422,'INVALID_GRAPH');console.error('API error',e);return problem('Внутренняя ошибка сервера',500,'SERVER_ERROR')}
+     try{return await api(request,env)}catch(e){const msg=String(e?.message||e);if(e instanceof GraphValidationError||e instanceof CreativeWorkflowContractError||e instanceof SyntaxError||/JSON|Некоррект|Неверн|Слишком|Превышен|Отсутствующ|Цикл|Повтор|Недопустим/.test(msg))return problem(msg,422,'INVALID_GRAPH');console.error('API error',e);return problem('Внутренняя ошибка сервера',500,'SERVER_ERROR')}
    }
    if(!await permitted(request,env))return new Response('Требуется вход владельца через ChatGPT',{status:401,headers:{'Cache-Control':'no-store'}});
    if((url.pathname==='/'||url.pathname==='/index.html')&&request.method==='GET')return new Response(env.PLOT_HTML||'Build missing',{headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin'}});
