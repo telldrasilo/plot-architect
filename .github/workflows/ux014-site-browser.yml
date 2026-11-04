@@ -31,3 +31,5 @@ jobs:
         run: python qa/browser/tests_cw/test_cw_persisted_workspace_accept_browser.py
       - name: Review and stage prepared alternatives from standalone note
         run: python qa/browser/tests_cw/test_cw_note_stage_browser.py
+      - name: Exercise grouped draft acceptance in real synthetic editor
+        run: python qa/browser/tests_cw/test_cw_group_acceptance_browser.py
