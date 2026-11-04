@@ -125,13 +125,34 @@ const currentEdges=()=>{const ids=new Set(visible().map(n=>n.id)),suspended=cwSu
 let creativeWorkspacePreview=null;
 let cwWorkflowTestMode=false;
 let cwAcceptanceReview=null;
+let cwStageReview=null;
 let cwAcceptanceBusy=false;
+// QA-only prepared proposals. Never copied to persistentGraph(), Site or MCP
+// before the user explicitly reviews and applies a stage_note command.
+const cwPreparedNoteAlternatives=new Map();
+function setCWPreparedNoteAlternativesForTest(noteId,spec){
+ if(!cwWorkflowTestMode||!gnby(noteId)||state.view!==null)
+  throw Error('Тестовая подготовка доступна только для открытой заметки');
+ if(!spec||typeof spec!=='object'||!Array.isArray(spec.branches)||!spec.branches.length
+    ||!spec.workspace||!spec.workspaceId)throw Error('Нет подготовленных вариантов');
+ cwPreparedNoteAlternatives.set(noteId,{
+  ...structuredClone(spec),noteText:gnby(noteId).text,sourceRevision:remote.revision
+ });
+ cwStageReview=null;
+ render();
+}
+function cwNoteHasWorkspace(noteId){
+ return (state.workspaces||[]).some(a=>a.taskId===noteId);
+}
 // QA-only activation. This client switch never changes server access controls
 // or enables CW_WORKFLOW_ENABLED; disabled by default in every ordinary editor.
 function setCWWorkflowTestMode(enabled){
  cwWorkflowTestMode=enabled===true;
  cwAcceptanceReview=null;
+ cwStageReview=null;
+ if(!cwWorkflowTestMode)cwPreparedNoteAlternatives.clear();
  renderCreativeWorkspacePreview();
+ if(selected?.type==='gapNote')renderInspector();
 }
 function cwCleanForOperation(){
  return cwWorkflowTestMode&&remote.connected&&!remote.blocked&&!remote.busy&&!remote.dirty&&!cwAcceptanceBusy
@@ -148,6 +169,67 @@ async function cwWorkflowRequest(id,mode,payload){
  }
  return body;
 }
+async function cwPrepareNoteStage(noteId){
+ if(!cwCleanForOperation())return note('Сначала завершите сохранение в Site');
+ const prepared=cwPreparedNoteAlternatives.get(noteId),n=gnby(noteId);
+ if(!prepared||!n||!n.text.trim()||cwNoteHasWorkspace(noteId)
+   ||prepared.noteText!==n.text||prepared.sourceRevision!==remote.revision)
+  return note('Подготовленные варианты устарели. Повторите подготовку');
+ const projectId=activeProjectId,revision=remote.revision;
+ const command={kind:'stage_note',noteId,workspaceId:prepared.workspaceId,
+  workspace:structuredClone(prepared.workspace),branches:structuredClone(prepared.branches)};
+ cwAcceptanceBusy=true;
+ try{
+  const response=await cwWorkflowRequest(projectId,'preview',{expectedRevision:revision,command});
+  if(activeProjectId!==projectId||remote.revision!==revision||remote.dirty||remote.blocked)
+   throw Error('Проект изменился во время проверки');
+  const plan=response.preview;
+  if(plan?.noteId!==noteId||plan.workspaceId!==command.workspaceId
+    ||!Array.isArray(plan.branchSummaries)
+    ||plan.branchSummaries.length!==command.branches.length
+    ||!Array.isArray(plan.proposedNodes)||!Array.isArray(plan.proposedEdges)
+    ||plan.autoRewiredEdgeIds?.length)
+   throw Error('Неожиданное содержимое серверного предпросмотра');
+  cwStageReview={projectId,revision,noteId,command,plan,operationId:crypto.randomUUID()};
+ }catch(err){cwStageReview=null;note('Предпросмотр не получен: '+err.message)}
+ finally{cwAcceptanceBusy=false;renderInspector()}
+}
+async function cwConfirmNoteStage(){
+ const r=cwStageReview;
+ if(!r||!cwCleanForOperation())return note('Проект изменился. Повторите проверку');
+ if(activeProjectId!==r.projectId||remote.revision!==r.revision
+    ||gnby(r.noteId)?.text!==r.plan.sourceNote?.text)
+  return note('Заметка или ревизия изменилась');
+ cwAcceptanceBusy=true;
+ try{
+  const confirmed=await cwWorkflowRequest(r.projectId,'apply',{
+   expectedRevision:r.revision,operationId:r.operationId,
+   command:{...r.command,expectedPreview:r.plan}
+  });
+  if(!Number.isSafeInteger(confirmed?.revision))
+   throw Error('Сервер не подтвердил запись');
+  const latest=await apiRequest('/api/projects/'+encodeURIComponent(r.projectId));
+  if(activeProjectId!==r.projectId||remote.dirty||remote.blocked)
+   throw Error('Локальная копия изменилась во время сохранения');
+  if(!Number.isSafeInteger(latest.revision)||latest.revision<confirmed.revision)
+   throw Error('Сервер вернул устаревшую ревизию');
+  const next=validateImported(latest.graph);
+  if(!next.workspaces?.some(a=>a.id===r.command.workspaceId&&a.taskId===r.noteId))
+   throw Error('Рабочая область не найдена в сохранённой версии');
+  state=next;remote.revision=latest.revision;remote.dirty=false;
+  selected={type:'gapNote',id:r.noteId};selectedNodeIds.clear();linkFrom=null;history=[];
+  cwPreparedNoteAlternatives.delete(r.noteId);cwStageReview=null;
+  recomputeFieldTags();save(false);render();fit();
+  $('saved').textContent='✓ Сохранено в Site · '+remote.revision;
+  note('Варианты сохранены в рабочей области — не в сюжете');
+ }catch(err){
+  // Do not rotate operationId following an ambiguous reply or lost GET.
+  if(['REVISION_CONFLICT','PREVIEW_STALE','OPERATION_ID_REUSED'].includes(err.code)){
+   cwStageReview=null;note('Изменилась ревизия. Проверьте проект и повторите подготовку');
+  }else note('Сохранение не подтверждено: '+err.message);
+ }finally{cwAcceptanceBusy=false;renderInspector()}
+}
+
 async function cwPrepareAccept(nodeId,workspaceId){
  if(!cwCleanForOperation()){note('Сначала завершите сохранение проекта в Site');return}
  if(!state.nodes.some(n=>n.id===nodeId&&n.workspaceId===workspaceId))return;
@@ -348,7 +430,7 @@ const remote={connected:false,token:null,revision:0,dirty:false,busy:false,block
 // Only confirmed pins are persistent. Automatic memberships are recalculated from geometry on every load.
 function persistentGraph(){const graph=structuredClone(state);for(const node of graph.nodes||[])delete node.autoFieldIds;return graph}
 function save(sync=true){let localOk=true;try{localStorage.setItem(KEY,JSON.stringify(persistentGraph()));const entry=registryEntry(activeProjectId);if(entry){entry.revision=state.revision;entry.updatedAt=Date.now();writeRegistry()}}catch{localOk=false};$('saved').textContent=localOk?'● '+(remote.connected?'Локальная копия сохранена':'Сохранено локально')+' · '+state.revision:'! Локальное хранилище недоступно';if(remote.connected&&sync)queueRemote();return localOk}
-function commit(f,message){if(cwAcceptanceBusy)return note('Дождитесь завершения проверки принятия');history.push(JSON.stringify(persistentGraph()));if(history.length>60)history.shift();f();cleanEditorialReferences();memoRender=null;recomputeFieldTags();state.revision++;const stored=save();render();if(!stored)note('Изменения в памяти, но браузер не сохранил их. Экспортируйте JSON.');else if(message)note(message)}
+function commit(f,message){if(cwAcceptanceBusy)return note('Дождитесь завершения проверки принятия');cwStageReview=null;history.push(JSON.stringify(persistentGraph()));if(history.length>60)history.shift();f();cleanEditorialReferences();memoRender=null;recomputeFieldTags();state.revision++;const stored=save();render();if(!stored)note('Изменения в памяти, но браузер не сохранил их. Экспортируйте JSON.');else if(message)note(message)}
 function undo(){if(!history.length)return note('Нет действий для отмены');state=JSON.parse(history.pop());recomputeFieldTags();selected=null;selectedNodeIds.clear();linkFrom=null;save();render();note('Действие отменено')}
 function notifyModal(title,detail,placeholder,callback,init=''){modalOpen=true;let host=$('modal-host');host.innerHTML=`<div class="backdrop"><form class="modal" id="dialog"><h2>${esc(title)}</h2><p>${esc(detail)}</p><input id="entry" placeholder="${esc(placeholder)}" value="${esc(init)}" required maxlength="160"><p id="dialog-error" class="dialog-error" role="alert" hidden></p><div class="buttons"><button type="button" id="cancel">Отмена</button><button class="primary" type="submit">Сохранить</button></div></form></div>`;const close=()=>{modalOpen=false;host.innerHTML=''};$('cancel').onclick=close;$('dialog').onsubmit=e=>{e.preventDefault();const val=$('entry').value.trim();if(!val){$('entry').setCustomValidity('Введите название');$('entry').reportValidity();return}try{callback(val);close()}catch(err){console.error('Ошибка при сохранении',err);const warning=$('dialog-error');if(warning){warning.textContent='Не удалось сохранить. Попробуйте снова.';warning.hidden=false;}note('Не удалось сохранить поле или событие')}};$('entry').addEventListener('input',()=>{$('entry').setCustomValidity('')});$('entry').focus();$('entry').select()}
 function colorOf(n){return COLORS.includes(n.color)?n.color:(lby(n.lineIds[0])?.color||'#9b9488')}
@@ -525,6 +607,7 @@ function newGapNote(at=null){const r=canvasRect();const start={x:Math.round((r.w
  selected={type:'gapNote',id};render();return id;
 }
 function setGapNoteText(id,text){const n=gnby(id),v=String(text).slice(0,8000);if(!n||n.text===v)return;
+ cwPreparedNoteAlternatives.delete(id);cwStageReview=null;
  commit(()=>{const rec=gnby(id);rec.text=v;rec.status='pending'},'Заметка сохранена');selected={type:'gapNote',id};render();
 }
 function beginGapLink(kind,id){gapLinkFrom={kind,id};linkFrom=null;note('Выберите событие, поле или заметку для контекстной связи')}
@@ -541,7 +624,7 @@ function renderGapNotes(){const host=$('gap-notes');host.innerHTML='';
  for(const n of gapInView()){
   const el=document.createElement('article');el.className='gap-note'+(selected?.type==='gapNote'&&selected.id===n.id?' selected':'');
   el.dataset.gapNote=n.id;el.style.left=n.x+'px';el.style.top=n.y+'px';el.tabIndex=0;
-  el.innerHTML=`<div class="gap-note-head">▤ ${esc(n.title||'Заметка')}</div><div class="gap-note-body ${!n.text?'gap-note-empty':''}">${esc(n.text||'Напишите, что нужно придумать здесь…')}</div><div class="gap-note-foot">${n.offerVariants?'3 варианта':'1 вариант'} · не сюжетное событие</div>`;
+  el.innerHTML=`<div class="gap-note-head">▤ ${esc(n.title||'Заметка')}</div><div class="gap-note-body ${!n.text?'gap-note-empty':''}">${esc(n.text||'Напишите, что нужно придумать здесь…')}</div><div class="gap-note-foot">${cwWorkflowTestMode?(cwNoteHasWorkspace(n.id)?'Варианты в рабочей области':cwPreparedNoteAlternatives.has(n.id)?'Подготовлено '+cwPreparedNoteAlternatives.get(n.id).branches.length+' ветвей':'Редакторское задание'):(n.offerVariants?'3 варианта':'1 вариант')} · не сюжетное событие</div>`;
   host.append(el);
   el.onclick=e=>{e.stopPropagation();if(completeGapLink('gap_note',n.id))return;selected={type:'gapNote',id:n.id};render()};
   el.addEventListener('pointerdown',e=>{if(e.button!==0||e.target.closest('input,textarea')||e.ctrlKey)return;interaction={type:'gap-note-move',id:n.id,px:e.clientX,py:e.clientY,x:n.x,y:n.y,moved:false};el.setPointerCapture(e.pointerId)});
@@ -550,13 +633,35 @@ function renderGapNotes(){const host=$('gap-notes');host.innerHTML='';
   el.addEventListener('pointercancel',()=>{if(interaction?.type==='gap-note-move'){interaction=null;render()}});
  }
 }
-function renderGapInspector(el,n){el.hidden=false;el.innerHTML=`<div class="inspect-head"><b>▤ Заметка · придумать новое</b><button id="close-inspect">×</button></div><div class="field"><label>Задание ChatGPT</label><textarea id="gap-text" class="gap-note-editor" placeholder="Что нужно придумать?">${esc(n.text)}</textarea></div><div class="field"><label class="check-row"><input type="checkbox" id="gap-offer" ${n.offerVariants?'checked':''}>Предлагать три варианта</label></div><div class="muted">Отдельная временная нода. Не событие и не канонический факт. Стрелки к ней задают редакторский контекст.</div><hr><div class="inspect-actions"><button id="gap-link">Связать</button><button id="gap-delete">Удалить заметку…</button></div>`;
+function renderGapInspector(el,n){
+ const prepared=cwWorkflowTestMode&&cwPreparedNoteAlternatives.has(n.id)&&!cwNoteHasWorkspace(n.id);
+ const review=cwStageReview?.noteId===n.id?cwStageReview:null;
+ const ready=review?.plan;
+ const summary=ready?'Подготовлено '+ready.branchSummaries.length+' ветвей · '+ready.proposedNodes.length
+  +' событий · '+ready.proposedEdges.length+' внутренних связей. Сюжет останется без изменений.':'';
+ const stageButton=prepared?'<button id="cw-stage-note" type="button">Разместить варианты</button>':'';
+ const stageReview=review?'<section class="cw-note-stage-review" role="group" aria-label="Проверка вариантов">'+
+  '<p>'+esc(summary)+'</p><button id="cw-stage-confirm" type="button">Сохранить черновики</button>'+
+  '<button id="cw-stage-cancel" type="button">Отмена</button></section>':'';
+ const existing=cwWorkflowTestMode&&cwNoteHasWorkspace(n.id)
+  ?'<p class="muted">Рабочая область этой заметки уже создана. Варианты остаются вне сюжета.</p>':'';
+ const legacy=cwWorkflowTestMode?'':'<div class="field"><label class="check-row"><input type="checkbox" id="gap-offer" '+
+  (n.offerVariants?'checked':'')+'>Предлагать три варианта</label></div>';
+ el.hidden=false;
+ el.innerHTML=`<div class="inspect-head"><b>▤ Заметка · придумать новое</b><button id="close-inspect">×</button></div>
+ <div class="field"><label>Задание ChatGPT</label><textarea id="gap-text" class="gap-note-editor" placeholder="Что нужно придумать?">${esc(n.text)}</textarea></div>
+ ${legacy}<div class="muted">Отдельная временная нода. Не событие и не канонический факт. Стрелки к ней задают редакторский контекст.</div>
+ ${existing}<hr><div class="inspect-actions">${stageButton}<button id="gap-link">Связать</button><button id="gap-delete">Удалить заметку…</button></div>${stageReview}`;
  $('close-inspect').onclick=()=>{selected=null;render()};
  $('gap-text').onchange=e=>setGapNoteText(n.id,e.target.value);
- $('gap-offer').onchange=e=>{commit(()=>{const a=gnby(n.id);a.offerVariants=e.target.checked},'Режим предложений изменён');selected={type:'gapNote',id:n.id};render()};
+ if($('gap-offer'))$('gap-offer').onchange=e=>{commit(()=>{const a=gnby(n.id);a.offerVariants=e.target.checked},'Режим предложений изменён');selected={type:'gapNote',id:n.id};render()};
  $('gap-link').onclick=()=>beginGapLink('gap_note',n.id);
  $('gap-delete').onclick=()=>deleteGapNote(n.id);
+ if($('cw-stage-note'))$('cw-stage-note').onclick=()=>{void cwPrepareNoteStage(n.id)};
+ if($('cw-stage-confirm'))$('cw-stage-confirm').onclick=()=>{void cwConfirmNoteStage()};
+ if($('cw-stage-cancel'))$('cw-stage-cancel').onclick=()=>{cwStageReview=null;renderInspector()};
 }
+
 function gapAnchor(end){if(end.kind==='gap_note'){const n=gnby(end.id);if(!n||n.parent!==state.view)return null;const h=document.querySelector(`[data-gap-note="${n.id}"]`)?.offsetHeight||115;return {x:n.x+126,y:n.y+h/2}};
  if(end.kind==='semantic_field'){const f=fby(end.id);return f&&f.parent===state.view?{x:f.x+f.width/2,y:f.y+f.height/2}:null;}
  if(end.kind==='plot_node'){const n=nby(end.id);return n&&n.parent===state.view?nodeCenter(n):null;}return null;}
@@ -1369,7 +1474,7 @@ function validateImported(g){if(!g||!Array.isArray(g.nodes)||!Array.isArray(g.ed
  for(const [prefix,property,list] of [['n','nextNode',out.nodes],['e','nextEdge',out.edges],['f','nextField',out.fields],['l','nextLine',out.lanes]]){let max=0;for(const x of list){const match=new RegExp('^'+prefix+'(\\d+)$').exec(x.id);if(match)max=Math.max(max,Number(match[1]))}out[property]=Math.max(out[property]||1,max+1)}out.view=null;out.revision=Number.isSafeInteger(out.revision)?out.revision:0;return out}
 function downloadJson(data,filename){const u=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=u;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(u),2500)}
 function exportProject(){downloadJson({format:'plot-architect/project-1',exportedAt:new Date().toISOString(),project:{id:activeProjectId,name:projectName(),graph:persistentGraph()}},'plot-architect-'+projectName().replace(/[^a-zA-Zа-яА-Я0-9-]+/g,'-').slice(0,50)+'.json');note('Проект экспортирован')}
-async function openProject(id){creativeWorkspacePreview=null;cwAcceptanceReview=null;
+async function openProject(id){creativeWorkspacePreview=null;cwAcceptanceReview=null;cwStageReview=null;cwPreparedNoteAlternatives.clear();
  if(remote.connected){if(remote.dirty||remote.busy)await flushRemote();if(remote.blocked)throw Error('Сохраните резервную копию: конфликт ревизий');const rec=await apiRequest('/api/projects/'+encodeURIComponent(id));remote.revision=rec.revision;
  let pending=false;try{pending=localStorage.getItem(PENDING_PREFIX+id)==='1'}catch{}
  const backup=pending?localStorage.getItem(KEY_PREFIX+id):null;
@@ -1378,7 +1483,7 @@ async function openProject(id){creativeWorkspacePreview=null;cwAcceptanceReview=
  else{state=JSON.parse(localStorage.getItem(KEY_PREFIX+id)||'null')||blankGraph()}
  activeProjectId=id;KEY=KEY_PREFIX+id;registry.activeId=id;selected=null;linkFrom=null;history=[];focusMode=false;forceAllEdges=false;state.view=null;recomputeFieldTags();save(false);updateProjectLabel();render();fit();if(remote.blocked)$('saved').textContent='! Есть несинхронизированная копия · экспортируйте JSON';
 }
-async function createProject(name,graph){creativeWorkspacePreview=null;cwAcceptanceReview=null;graph=validateImported(graph);for(const node of graph.nodes||[])delete node.autoFieldIds;graph.revision=0;
+async function createProject(name,graph){creativeWorkspacePreview=null;cwAcceptanceReview=null;cwStageReview=null;cwPreparedNoteAlternatives.clear();graph=validateImported(graph);for(const node of graph.nodes||[])delete node.autoFieldIds;graph.revision=0;
  let id;if(remote.connected){await flushRemote();const res=await apiRequest('/api/projects',{method:'POST',body:{name,graph}});id=res.id;remote.revision=res.revision}
  else id=newLocalId();
  if(remote.connected){clearTimeout(remote.timer);remote.timer=null;remote.blocked=false;remote.dirty=false;}
@@ -1420,6 +1525,6 @@ async function connectSite(silent=false){
 $('projects-open').onclick=showProjectManager;
 updateProjectLabel();
 if(location.protocol==='http:'||location.protocol==='https:')setTimeout(()=>connectSite(true).catch(e=>{note('Site пока недоступен: '+e.message);$('saved').textContent='! Работа локально · Site недоступен'}),150);
-window.__graphite={setCWWorkflowTestMode,getCWWorkflowTestMode:()=>cwWorkflowTestMode,setCreativeWorkspacePreview,getCreativeWorkspacePreview:()=>structuredClone(creativeWorkspacePreview),showPlotContextMenu,newGapNote,setGapNoteText,getGapNotes:()=>structuredClone(state.gapNotes),getGapLinks:()=>structuredClone(state.gapLinks),getEventRewrites:()=>structuredClone(state.eventRewrites||[]),beginEventRewrite,cancelEventRewrite,deletePlotNode,beginGapLink,completeGapLink,createEditorialField:newEditorialField,createEditorialFieldFromSelection,deleteEditorialField,addEditorialMembers,removeEditorialMembers,updateEditorialInstruction,getEditorialFields:()=>structuredClone(state.editorialFields),getEditorialNotes:()=>structuredClone(state.editorialNotes),getSelection:()=>groupIds(),selectNodes:ids=>setNodeSelection(ids),moveSelectedBy,previewNodeMove:(ids,dx,dy)=>previewNodeMove(ids.map(id=>{const n=nby(id);return n?{id,x:n.x,y:n.y}:null}).filter(Boolean),dx,dy),getContextMenuState:()=>({open:!plotContextMenu.hidden,items:[...plotContextMenu.querySelectorAll("[role=menuitem]")].map(b=>b.textContent.trim())}),showProjectManager,createProject,openProject,exportProject,validateImported,blankGraph,getProjectIndex:()=>structuredClone(registry),getStarterOrigin:()=>({...STARTER_ORIGIN,localProjectId:STARTER_LOCAL_ID}),getRemote:()=>({...remote,token:remote.token?'***':null,timer:null}),createField,deleteField,setFieldGeometry:(id,patch)=>commit(()=>{Object.assign(fby(id),patch);normalizeField(fby(id))}),moveField,selectField:id=>{selected={type:'field',id};render()},getFieldMembership:id=>fieldMembership(nby(id)),getState:()=>structuredClone(state),getPan:()=>({...pan}),getIssues:directionIssues,arrange,fit,addNode,undo,selectNode:id=>{selected={type:'node',id};render()},setPosition:(id,x,y)=>commit(()=>{let n=nby(id);n.x=x;n.y=y}),setNodeAppearance:(id,patch)=>commit(()=>{const n=nby(id);if(!n)throw Error("Unknown node");if(patch.width!==undefined)n.width=Math.max(180,Math.min(780,patch.width));if(patch.height!==undefined)n.height=Math.max(95,Math.min(640,patch.height));if(patch.color!==undefined){if(patch.color===null)delete n.color;else if(COLORS.includes(patch.color))n.color=patch.color;else throw Error("Invalid color")}}),setInspectorPinned:v=>{inspectorPinned=!!v;renderInspector();positionInspector()},getSelected:()=>selected,getNavigation:()=>({focusMode,overviewOn,forceAllEdges,routeMode,lodOverview,semanticMode:semanticZoomLevel()}),getSemanticZoom:()=>semanticZoomLevel(),setZoomForTest:(scale)=>setZoom(scale),getEdgePlan:()=>{const p=connectionPlan();return {overview:p.overview,bridges:p.bridges.map(g=>({key:g.key,edgeIds:g.edges.map(e=>e.id)})),displayed:p.visibleEdges.map(e=>e.id),suppressed:[...p.localSuppressed.entries()]};},setAllEdges,setRouteMode,getPerf:()=>({...perfStats}),jumpToNode,jumpToField,toggleFocus:focusToggle,toggleOverview:()=>{overviewOn=!overviewOn;render()},loadFixture:fixture=>{state=structuredClone(fixture);selected=null;history=[];recomputeFieldTags();save();render()},reset:()=>{state=seed();recomputeFieldTags();history=[];selected=null;save();render();fit()}};
+window.__graphite={setCWWorkflowTestMode,getCWWorkflowTestMode:()=>cwWorkflowTestMode,setCWPreparedNoteAlternativesForTest,setCreativeWorkspacePreview,getCreativeWorkspacePreview:()=>structuredClone(creativeWorkspacePreview),showPlotContextMenu,newGapNote,setGapNoteText,getGapNotes:()=>structuredClone(state.gapNotes),getGapLinks:()=>structuredClone(state.gapLinks),getEventRewrites:()=>structuredClone(state.eventRewrites||[]),beginEventRewrite,cancelEventRewrite,deletePlotNode,beginGapLink,completeGapLink,createEditorialField:newEditorialField,createEditorialFieldFromSelection,deleteEditorialField,addEditorialMembers,removeEditorialMembers,updateEditorialInstruction,getEditorialFields:()=>structuredClone(state.editorialFields),getEditorialNotes:()=>structuredClone(state.editorialNotes),getSelection:()=>groupIds(),selectNodes:ids=>setNodeSelection(ids),moveSelectedBy,previewNodeMove:(ids,dx,dy)=>previewNodeMove(ids.map(id=>{const n=nby(id);return n?{id,x:n.x,y:n.y}:null}).filter(Boolean),dx,dy),getContextMenuState:()=>({open:!plotContextMenu.hidden,items:[...plotContextMenu.querySelectorAll("[role=menuitem]")].map(b=>b.textContent.trim())}),showProjectManager,createProject,openProject,exportProject,validateImported,blankGraph,getProjectIndex:()=>structuredClone(registry),getStarterOrigin:()=>({...STARTER_ORIGIN,localProjectId:STARTER_LOCAL_ID}),getRemote:()=>({...remote,token:remote.token?'***':null,timer:null}),createField,deleteField,setFieldGeometry:(id,patch)=>commit(()=>{Object.assign(fby(id),patch);normalizeField(fby(id))}),moveField,selectField:id=>{selected={type:'field',id};render()},getFieldMembership:id=>fieldMembership(nby(id)),getState:()=>structuredClone(state),getPan:()=>({...pan}),getIssues:directionIssues,arrange,fit,addNode,undo,selectNode:id=>{selected={type:'node',id};render()},setPosition:(id,x,y)=>commit(()=>{let n=nby(id);n.x=x;n.y=y}),setNodeAppearance:(id,patch)=>commit(()=>{const n=nby(id);if(!n)throw Error("Unknown node");if(patch.width!==undefined)n.width=Math.max(180,Math.min(780,patch.width));if(patch.height!==undefined)n.height=Math.max(95,Math.min(640,patch.height));if(patch.color!==undefined){if(patch.color===null)delete n.color;else if(COLORS.includes(patch.color))n.color=patch.color;else throw Error("Invalid color")}}),setInspectorPinned:v=>{inspectorPinned=!!v;renderInspector();positionInspector()},getSelected:()=>selected,getNavigation:()=>({focusMode,overviewOn,forceAllEdges,routeMode,lodOverview,semanticMode:semanticZoomLevel()}),getSemanticZoom:()=>semanticZoomLevel(),setZoomForTest:(scale)=>setZoom(scale),getEdgePlan:()=>{const p=connectionPlan();return {overview:p.overview,bridges:p.bridges.map(g=>({key:g.key,edgeIds:g.edges.map(e=>e.id)})),displayed:p.visibleEdges.map(e=>e.id),suppressed:[...p.localSuppressed.entries()]};},setAllEdges,setRouteMode,getPerf:()=>({...perfStats}),jumpToNode,jumpToField,toggleFocus:focusToggle,toggleOverview:()=>{overviewOn=!overviewOn;render()},loadFixture:fixture=>{state=structuredClone(fixture);selected=null;history=[];recomputeFieldTags();save();render()},reset:()=>{state=seed();recomputeFieldTags();history=[];selected=null;save();render();fit()}};
 recomputeFieldTags();save();render();
 })();
