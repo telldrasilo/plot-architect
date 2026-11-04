@@ -25,3 +25,5 @@ jobs:
         run: python qa/browser/tests_ux014/test_ux014_hosted_site.py
       - name: Exercise standalone note and editorial link on synthetic Site API
         run: python qa/browser/tests_cw/test_cw_note_browser.py
+      - name: Inspect same-canvas transient workspace prototype
+        run: python qa/browser/tests_cw/test_cw_workspace_preview_browser.py
