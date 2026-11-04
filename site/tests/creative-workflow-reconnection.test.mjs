@@ -114,7 +114,7 @@ test('a plan and matching in-memory revision are required, with no partial side 
  assert.deepEqual(g,before);
 });
 test('one invalid decision aborts the entire batch without any new edges',()=>{
- const g=accepted(),before=copy(g);failure(()=>plan(g,[rewire('e1','new1','n1','x','precedes'),rewire('e2','bad','n5','n3','causes')]),'EXTERNAL_ENDPOINT_CHANGED');
+ const g=accepted(),before=copy(g);failure(()=>applyReplacementReconnection(g,{replacementId:'r1',decisions:[rewire('e1','new1','n1','x','precedes'),rewire('e2','bad','y','n5','causes')],expectedPreview:{},expectedRevision:12}),'EXTERNAL_ENDPOINT_CHANGED');
  assert.deepEqual(g,before);
 });
 test('previously resolved relation cannot silently disappear or be rewritten',()=>{
