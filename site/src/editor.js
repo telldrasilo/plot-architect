@@ -284,6 +284,7 @@ function cwBeginDraftDrag(event,card,node,area,svg,links,byId){
   note('Сначала сохраните или сбросьте изменения другой рабочей области');return
  }
  if(cwMoveReview)cwMoveReview=null;
+ cwAcceptanceReview=null;cwStageReview=null;
  event.preventDefault();
  const original=state.nodes.find(n=>n.id===node.id);
  if(!original||original.workspaceId!==area.id)return;
@@ -488,7 +489,10 @@ function cwPersistedWorkspaceScene(){
  if(state.view!==null||!Array.isArray(state.workspaces)||!state.workspaces.length)return null;
  const workspaces=state.workspaces.filter(a=>a&&typeof a.id==='string');
  const ownerIds=new Set(workspaces.map(a=>a.id));
- const nodes=state.nodes.filter(n=>n.workspaceId&&ownerIds.has(n.workspaceId));
+ const nodes=state.nodes.filter(n=>n.workspaceId&&ownerIds.has(n.workspaceId)).map(n=>{
+  const position=cwDraftMoveEdits.get(n.id);
+  return position?{...n,x:position.x,y:position.y}:n;
+ });
  const ids=new Map(nodes.map(n=>[n.id,n]));
  const edges=state.edges.filter(e=>e.workspaceId&&e.draftRelation==='internal'
   &&ids.has(e.from)&&ids.has(e.to)&&ids.get(e.from).workspaceId===e.workspaceId&&ids.get(e.to).workspaceId===e.workspaceId);
@@ -520,10 +524,23 @@ function renderCreativeWorkspacePreview(){
    const path=document.createElementNS(namespace,'path');
    const ax=from.x-area.x+208,ay=from.y-area.y+56,bx=to.x-area.x,by=to.y-area.y+56;
    path.setAttribute('d','M '+ax+' '+ay+' L '+bx+' '+by);
-   path.setAttribute('class','cw-preview-link');svg.append(path);
+   path.setAttribute('class','cw-preview-link');path.dataset.cwEdge=edge.id;svg.append(path);
   }
   box.append(svg);
   const nodes=data.nodes.filter(n=>n.workspaceId===area.id);
+  if(persisted&&cwWorkflowTestMode&&cwMoveWorkspaceId===area.id&&cwDraftMoveEdits.size){
+   const actions=document.createElement('div');actions.className='cw-draft-move-actions';
+   actions.setAttribute('role','group');actions.setAttribute('aria-label','Сохранение расположения');
+   actions.addEventListener('pointerdown',e=>e.stopPropagation());
+   const count=document.createElement('span');count.textContent='Не сохранено: '+cwDraftMoveEdits.size;
+   const save=document.createElement('button');save.type='button';save.textContent='Сохранить расположение';
+   save.disabled=cwAcceptanceBusy||cwMoveStale||cwMoveReview?.attempted;
+   save.addEventListener('click',e=>{e.stopPropagation();void cwPrepareDraftMove()});
+   const discard=document.createElement('button');discard.type='button';discard.textContent='Сбросить';
+   discard.disabled=cwAcceptanceBusy||cwMoveReview?.attempted;
+   discard.addEventListener('click',e=>{e.stopPropagation();cwClearDraftMoves();renderCreativeWorkspacePreview()});
+   actions.append(count,save,discard);box.append(actions);
+  }
   if(persisted&&cwWorkflowTestMode&&cwSelectedWorkspaceId===area.id&&cwSelectedDraftIds.size){
    const actions=document.createElement('div');actions.className='cw-draft-selection-actions';
    actions.setAttribute('role','group');actions.setAttribute('aria-label','Групповое принятие');
@@ -531,7 +548,7 @@ function renderCreativeWorkspacePreview(){
    const count=document.createElement('span');count.textContent='Выбрано: '+cwSelectedDraftIds.size;
    const accept=document.createElement('button');accept.type='button';
    accept.textContent='В сюжет ('+cwSelectedDraftIds.size+')';
-   accept.disabled=cwAcceptanceBusy;
+   accept.disabled=cwAcceptanceBusy||cwDraftMoveEdits.size>0;
    accept.addEventListener('click',e=>{
     e.stopPropagation();void cwPrepareAccept([...cwSelectedDraftIds],area.id)
    });
@@ -552,24 +569,25 @@ function renderCreativeWorkspacePreview(){
    if(n.description){const d=document.createElement('p');d.textContent=n.description;card.append(d)}
    if(persisted){
     card.classList.add('cw-persisted-card');
+    if(cwWorkflowTestMode)card.classList.add('cw-movable-draft');
     if(cwSelectedDraftIds.has(n.id)&&cwSelectedWorkspaceId===area.id)card.classList.add('cw-draft-selected');
     // Canvas pointerdown normally starts a drag and may rerender the world,
     // destroying a button before its click can be dispatched.
-    card.addEventListener('pointerdown',e=>e.stopPropagation());
+    card.addEventListener('pointerdown',e=>cwBeginDraftDrag(e,card,n,area,svg,internals,nodeById));
     card.addEventListener('click',e=>e.stopPropagation());
     if(cwWorkflowTestMode){
      const pick=document.createElement('label');pick.className='cw-draft-pick';
      const check=document.createElement('input');check.type='checkbox';
      check.className='cw-draft-check';
      check.checked=cwSelectedWorkspaceId===area.id&&cwSelectedDraftIds.has(n.id);
-     check.disabled=cwAcceptanceBusy;
+     check.disabled=cwAcceptanceBusy||cwDraftMoveEdits.size>0;
      check.setAttribute('aria-label','Выбрать черновик: '+n.title);
      check.addEventListener('change',e=>{e.stopPropagation();cwToggleDraftSelection(n.id,area.id)});
      const hint=document.createElement('span');hint.textContent='Выбрать';
      pick.append(check,hint);card.append(pick);
      const accept=document.createElement('button');
      accept.type='button';accept.className='cw-accept-trigger';accept.textContent='В сюжет';
-     accept.disabled=cwAcceptanceBusy;
+     accept.disabled=cwAcceptanceBusy||cwDraftMoveEdits.size>0;
      accept.setAttribute('aria-label','Проверить принятие события: '+n.title);
      accept.addEventListener('click',e=>{e.stopPropagation();void cwPrepareAccept([n.id],area.id)});
      card.append(accept);
@@ -603,6 +621,24 @@ function renderCreativeWorkspacePreview(){
     card.addEventListener('pointermove',move);card.addEventListener('pointerup',end);card.addEventListener('pointercancel',cancel);
    });
    box.append(card);
+  }
+  if(persisted&&cwWorkflowTestMode&&cwMoveReview?.command.workspaceId===area.id){
+   const review=cwMoveReview,panel=document.createElement('section');
+   panel.className='cw-move-review';panel.setAttribute('role','group');
+   panel.setAttribute('aria-label','Проверка расположения черновиков');
+   panel.addEventListener('pointerdown',e=>e.stopPropagation());
+   const summary=document.createElement('p');
+   summary.textContent='Изменить расположение: '+review.plan.positionChanges.length
+    +' карточек · затронуто внутренних стрелок: '+review.plan.affectedDraftEdgeIds.length
+    +' · сюжет и смысл связей не изменятся';
+   const confirm=document.createElement('button');confirm.type='button';
+   confirm.textContent=review.attempted?'Повторить сохранение':'Подтвердить расположение';
+   confirm.disabled=cwAcceptanceBusy||cwMoveStale;
+   confirm.addEventListener('click',e=>{e.stopPropagation();void cwApplyDraftMove()});
+   const back=document.createElement('button');back.type='button';back.textContent='Вернуться';
+   back.disabled=cwAcceptanceBusy||review.attempted;
+   back.addEventListener('click',e=>{e.stopPropagation();cwMoveReview=null;renderCreativeWorkspacePreview()});
+   panel.append(summary,confirm,back);box.append(panel);
   }
   if(persisted&&cwWorkflowTestMode&&cwAcceptanceReview?.workspaceId===area.id){
    const p=cwAcceptanceReview,review=document.createElement('section');
