@@ -113,6 +113,114 @@ let gapLinkFrom=null;
 const editorialInView=()=>state.editorialFields.filter(f=>f.parent===state.view);
 const visible=()=>state.nodes.filter(n=>n.parent===state.view);
 const currentEdges=()=>{const ids=new Set(visible().map(n=>n.id));return state.edges.filter(e=>ids.has(e.from)&&ids.has(e.to))};
+
+// CW-011: ephemeral visual proof on the SAME canvas. This is strictly a
+// synthetic preview, never saved into state, graph_json or ordinary MCP context.
+// The real editor must not hydrate persisted workspaces before server-side
+// canonical isolation and verified transition endpoints are connected.
+let creativeWorkspacePreview=null;
+const cwPreviewId=s=>typeof s==='string'&&/^[a-zA-Z0-9_-]{1,80}$/.test(s);
+const cwPreviewNumber=n=>typeof n==='number'&&Number.isFinite(n)&&Math.abs(n)<=1000000;
+function setCreativeWorkspacePreview(proposal){
+ if(proposal===null){creativeWorkspacePreview=null;render();return}
+ if(!proposal||!Array.isArray(proposal.workspaces)||!Array.isArray(proposal.nodes)||!Array.isArray(proposal.edges)
+    ||proposal.workspaces.length>12||proposal.nodes.length>128||proposal.edges.length>256)throw Error('Некорректный синтетический предпросмотр');
+ const scene=structuredClone(proposal),areaIds=new Set(),nodeIds=new Set(),nodeById=new Map();
+ for(const a of scene.workspaces){
+  if(!cwPreviewId(a.id)||areaIds.has(a.id)||![a.x,a.y,a.width,a.height].every(cwPreviewNumber)
+     ||a.width<250||a.height<140)throw Error('Некорректная рабочая область');
+  areaIds.add(a.id);
+ }
+ for(const n of scene.nodes){
+  if(!cwPreviewId(n.id)||nodeIds.has(n.id)||!areaIds.has(n.workspaceId)
+     ||typeof n.title!=='string'||n.title.length>300
+     ||typeof (n.description??'')!=='string'||(n.description??'').length>5000
+     ||![n.x,n.y].every(cwPreviewNumber))throw Error('Некорректная черновая карточка');
+  nodeIds.add(n.id);nodeById.set(n.id,n);
+ }
+ const edgeIds=new Set();
+ for(const e of scene.edges){
+  const from=nodeById.get(e.from),to=nodeById.get(e.to);
+  if(!cwPreviewId(e.id)||edgeIds.has(e.id)||!from||!to||from.id===to.id
+     ||from.workspaceId!==e.workspaceId||to.workspaceId!==e.workspaceId
+     ||e.draftRelation!=='internal')throw Error('Некорректная внутренняя связь черновика');
+  edgeIds.add(e.id);
+ }
+ creativeWorkspacePreview=scene;
+ render();
+}
+function renderCreativeWorkspacePreview(){
+ const host=$('cw-workspace-preview');if(!host)return;
+ host.replaceChildren();
+ const data=creativeWorkspacePreview;if(!data)return;
+ const namespace='http://www.w3.org/2000/svg';
+ const nodeById=new Map(data.nodes.map(n=>[n.id,n]));
+ for(const area of data.workspaces){
+  const box=document.createElement('section');box.className='cw-preview-area';
+  box.dataset.cwWorkspace=area.id;
+  box.style.cssText='left:'+area.x+'px;top:'+area.y+'px;width:'+area.width+'px;height:'+area.height+'px';
+  box.setAttribute('aria-label','Рабочая область. Черновики, не события сюжета');
+  const head=document.createElement('div');head.className='cw-preview-area-head';
+  head.textContent='Рабочая область · черновики';
+  const hint=document.createElement('span');hint.className='cw-preview-area-hint';
+  hint.textContent='Предпросмотр · не в сюжете';head.append(hint);box.append(head);
+  const internals=data.edges.filter(e=>e.workspaceId===area.id);
+  const svg=document.createElementNS(namespace,'svg');svg.setAttribute('class','cw-preview-arrows');
+  svg.setAttribute('width',String(area.width));svg.setAttribute('height',String(area.height));
+  svg.setAttribute('aria-hidden','true');
+  for(const edge of internals){
+   const from=nodeById.get(edge.from),to=nodeById.get(edge.to);
+   if(!from||!to)continue;
+   const path=document.createElementNS(namespace,'path');
+   const ax=from.x-area.x+208,ay=from.y-area.y+56,bx=to.x-area.x,by=to.y-area.y+56;
+   path.setAttribute('d','M '+ax+' '+ay+' L '+bx+' '+by);
+   path.setAttribute('class','cw-preview-link');svg.append(path);
+  }
+  box.append(svg);
+  const nodes=data.nodes.filter(n=>n.workspaceId===area.id);
+  const names=[...new Set(nodes.map(n=>n.draftBranchId||'single'))];
+  for(const n of nodes){
+   const card=document.createElement('article');card.className='cw-preview-card';
+   card.dataset.cwNode=n.id;card.style.left=(n.x-area.x)+'px';card.style.top=(n.y-area.y)+'px';
+   card.tabIndex=0;card.setAttribute('aria-label','Черновик: '+n.title);
+   const kind=document.createElement('div');kind.className='cw-preview-kind';
+   kind.textContent='Вариант '+(names.indexOf(n.draftBranchId||'single')+1)+' · черновик';
+   const title=document.createElement('strong');title.textContent=n.title;
+   card.append(kind,title);
+   if(n.description){const d=document.createElement('p');d.textContent=n.description;card.append(d)}
+   card.addEventListener('pointerdown',e=>{
+    if(e.button!==0)return;
+    e.stopPropagation();e.preventDefault();const x=e.clientX,y=e.clientY,ox=n.x,oy=n.y;
+    let moved=false;card.setPointerCapture(e.pointerId);
+    const move=ev=>{
+     ev.stopPropagation();
+     const dx=(ev.clientX-x)/pan.scale,dy=(ev.clientY-y)/pan.scale;
+     if(!moved&&Math.abs(dx)+Math.abs(dy)<4)return;
+     moved=true;
+     card.style.left=(ox+dx-area.x)+'px';card.style.top=(oy+dy-area.y)+'px';
+    };
+    const end=ev=>{
+     ev.stopPropagation();card.removeEventListener('pointermove',move);
+     card.removeEventListener('pointerup',end);card.removeEventListener('pointercancel',cancel);
+     if(moved){
+      n.x=Math.round(ox+(ev.clientX-x)/pan.scale);
+      n.y=Math.round(oy+(ev.clientY-y)/pan.scale);
+     }
+     renderCreativeWorkspacePreview(); // Transient geometry ONLY. No commit/save.
+    };
+    const cancel=ev=>{
+     ev.stopPropagation();card.removeEventListener('pointermove',move);
+     card.removeEventListener('pointerup',end);card.removeEventListener('pointercancel',cancel);
+     renderCreativeWorkspacePreview();
+    };
+    card.addEventListener('pointermove',move);card.addEventListener('pointerup',end);card.addEventListener('pointercancel',cancel);
+   });
+   box.append(card);
+  }
+  host.append(box);
+ }
+}
+
 function note(s){$('toast').textContent=s;$('toast').classList.add('on');clearTimeout(note.t);note.t=setTimeout(()=>$('toast').classList.remove('on'),2700)}
 const remote={connected:false,token:null,revision:0,dirty:false,busy:false,blocked:false,timer:null};
 // Only confirmed pins are persistent. Automatic memberships are recalculated from geometry on every load.
@@ -690,6 +798,7 @@ function contentBounds(){
  for(const n of gapInView())items.push({x:n.x,y:n.y,w:252,h:Math.max(115,document.querySelector(`[data-gap-note="${n.id}"]`)?.offsetHeight||115)});
  for(const n of nodes)items.push({x:n.x,y:n.y,w:widthOf(n),h:heightOf(n)|| (n.size==='mini'?75:n.size==='expanded'?220:170)});
  for(const f of fields)items.push({x:f.x,y:f.y-25,w:f.width,h:f.height+25});
+ for(const a of creativeWorkspacePreview?.workspaces||[])items.push({x:a.x,y:a.y,w:a.width,h:a.height});
  if(!items.length)return {x:0,y:0,w:1000,h:600};
  const minX=Math.min(...items.map(i=>i.x)),minY=Math.min(...items.map(i=>i.y));
  const maxX=Math.max(...items.map(i=>i.x+i.w)),maxY=Math.max(...items.map(i=>i.y+i.h));
@@ -850,7 +959,7 @@ function render(){
  $('guides').textContent='▧ Поля: '+(guide?'вкл.':'выкл.');
  $('focus').textContent=focusMode?'◎ Фокус: вкл.':'◎ Фокус';$('focus').setAttribute('aria-pressed',String(focusMode));
  $('overview-toggle').setAttribute('aria-pressed',String(overviewOn));
- renderGuides();renderFields();renderEditorialFields();renderNodes();renderGapNotes();renderEdges();renderInspector();positionInspector();renderOverviewTitles();showNotice();
+ renderGuides();renderFields();renderEditorialFields();renderNodes();renderGapNotes();renderEdges();renderCreativeWorkspacePreview();renderInspector();positionInspector();renderOverviewTitles();showNotice();
  $('breadcrumbs').innerHTML=state.view?`<button id="back">← Вся история</button><span style="align-self:center;color:#aaa">/ ${esc(nby(state.view)?.title||'Детали')}</span>`:'';
  if(state.view)$('back').onclick=()=>{state.view=null;selected=null;pan={x:105,y:45,scale:.82};render()};
  perfStats.lastNodes=visible().length;perfStats.lastEdges=currentEdges().length;perfStats.lastFields=fieldInView().length;
@@ -1138,7 +1247,7 @@ function validateImported(g){if(!g||!Array.isArray(g.nodes)||!Array.isArray(g.ed
  for(const [prefix,property,list] of [['n','nextNode',out.nodes],['e','nextEdge',out.edges],['f','nextField',out.fields],['l','nextLine',out.lanes]]){let max=0;for(const x of list){const match=new RegExp('^'+prefix+'(\\d+)$').exec(x.id);if(match)max=Math.max(max,Number(match[1]))}out[property]=Math.max(out[property]||1,max+1)}out.view=null;out.revision=Number.isSafeInteger(out.revision)?out.revision:0;return out}
 function downloadJson(data,filename){const u=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=u;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(u),2500)}
 function exportProject(){downloadJson({format:'plot-architect/project-1',exportedAt:new Date().toISOString(),project:{id:activeProjectId,name:projectName(),graph:persistentGraph()}},'plot-architect-'+projectName().replace(/[^a-zA-Zа-яА-Я0-9-]+/g,'-').slice(0,50)+'.json');note('Проект экспортирован')}
-async function openProject(id){
+async function openProject(id){creativeWorkspacePreview=null;
  if(remote.connected){if(remote.dirty||remote.busy)await flushRemote();if(remote.blocked)throw Error('Сохраните резервную копию: конфликт ревизий');const rec=await apiRequest('/api/projects/'+encodeURIComponent(id));remote.revision=rec.revision;
  let pending=false;try{pending=localStorage.getItem(PENDING_PREFIX+id)==='1'}catch{}
  const backup=pending?localStorage.getItem(KEY_PREFIX+id):null;
@@ -1147,7 +1256,7 @@ async function openProject(id){
  else{state=JSON.parse(localStorage.getItem(KEY_PREFIX+id)||'null')||blankGraph()}
  activeProjectId=id;KEY=KEY_PREFIX+id;registry.activeId=id;selected=null;linkFrom=null;history=[];focusMode=false;forceAllEdges=false;state.view=null;recomputeFieldTags();save(false);updateProjectLabel();render();fit();if(remote.blocked)$('saved').textContent='! Есть несинхронизированная копия · экспортируйте JSON';
 }
-async function createProject(name,graph){graph=validateImported(graph);for(const node of graph.nodes||[])delete node.autoFieldIds;graph.revision=0;
+async function createProject(name,graph){creativeWorkspacePreview=null;graph=validateImported(graph);for(const node of graph.nodes||[])delete node.autoFieldIds;graph.revision=0;
  let id;if(remote.connected){await flushRemote();const res=await apiRequest('/api/projects',{method:'POST',body:{name,graph}});id=res.id;remote.revision=res.revision}
  else id=newLocalId();
  if(remote.connected){clearTimeout(remote.timer);remote.timer=null;remote.blocked=false;remote.dirty=false;}
@@ -1189,6 +1298,6 @@ async function connectSite(silent=false){
 $('projects-open').onclick=showProjectManager;
 updateProjectLabel();
 if(location.protocol==='http:'||location.protocol==='https:')setTimeout(()=>connectSite(true).catch(e=>{note('Site пока недоступен: '+e.message);$('saved').textContent='! Работа локально · Site недоступен'}),150);
-window.__graphite={showPlotContextMenu,newGapNote,setGapNoteText,getGapNotes:()=>structuredClone(state.gapNotes),getGapLinks:()=>structuredClone(state.gapLinks),getEventRewrites:()=>structuredClone(state.eventRewrites||[]),beginEventRewrite,cancelEventRewrite,deletePlotNode,beginGapLink,completeGapLink,createEditorialField:newEditorialField,createEditorialFieldFromSelection,deleteEditorialField,addEditorialMembers,removeEditorialMembers,updateEditorialInstruction,getEditorialFields:()=>structuredClone(state.editorialFields),getEditorialNotes:()=>structuredClone(state.editorialNotes),getSelection:()=>groupIds(),selectNodes:ids=>setNodeSelection(ids),moveSelectedBy,previewNodeMove:(ids,dx,dy)=>previewNodeMove(ids.map(id=>{const n=nby(id);return n?{id,x:n.x,y:n.y}:null}).filter(Boolean),dx,dy),getContextMenuState:()=>({open:!plotContextMenu.hidden,items:[...plotContextMenu.querySelectorAll("[role=menuitem]")].map(b=>b.textContent.trim())}),showProjectManager,createProject,openProject,exportProject,validateImported,blankGraph,getProjectIndex:()=>structuredClone(registry),getStarterOrigin:()=>({...STARTER_ORIGIN,localProjectId:STARTER_LOCAL_ID}),getRemote:()=>({...remote,token:remote.token?'***':null,timer:null}),createField,deleteField,setFieldGeometry:(id,patch)=>commit(()=>{Object.assign(fby(id),patch);normalizeField(fby(id))}),moveField,selectField:id=>{selected={type:'field',id};render()},getFieldMembership:id=>fieldMembership(nby(id)),getState:()=>structuredClone(state),getPan:()=>({...pan}),getIssues:directionIssues,arrange,fit,addNode,undo,selectNode:id=>{selected={type:'node',id};render()},setPosition:(id,x,y)=>commit(()=>{let n=nby(id);n.x=x;n.y=y}),setNodeAppearance:(id,patch)=>commit(()=>{const n=nby(id);if(!n)throw Error("Unknown node");if(patch.width!==undefined)n.width=Math.max(180,Math.min(780,patch.width));if(patch.height!==undefined)n.height=Math.max(95,Math.min(640,patch.height));if(patch.color!==undefined){if(patch.color===null)delete n.color;else if(COLORS.includes(patch.color))n.color=patch.color;else throw Error("Invalid color")}}),setInspectorPinned:v=>{inspectorPinned=!!v;renderInspector();positionInspector()},getSelected:()=>selected,getNavigation:()=>({focusMode,overviewOn,forceAllEdges,routeMode,lodOverview,semanticMode:semanticZoomLevel()}),getSemanticZoom:()=>semanticZoomLevel(),setZoomForTest:(scale)=>setZoom(scale),getEdgePlan:()=>{const p=connectionPlan();return {overview:p.overview,bridges:p.bridges.map(g=>({key:g.key,edgeIds:g.edges.map(e=>e.id)})),displayed:p.visibleEdges.map(e=>e.id),suppressed:[...p.localSuppressed.entries()]};},setAllEdges,setRouteMode,getPerf:()=>({...perfStats}),jumpToNode,jumpToField,toggleFocus:focusToggle,toggleOverview:()=>{overviewOn=!overviewOn;render()},loadFixture:fixture=>{state=structuredClone(fixture);selected=null;history=[];recomputeFieldTags();save();render()},reset:()=>{state=seed();recomputeFieldTags();history=[];selected=null;save();render();fit()}};
+window.__graphite={setCreativeWorkspacePreview,getCreativeWorkspacePreview:()=>structuredClone(creativeWorkspacePreview),showPlotContextMenu,newGapNote,setGapNoteText,getGapNotes:()=>structuredClone(state.gapNotes),getGapLinks:()=>structuredClone(state.gapLinks),getEventRewrites:()=>structuredClone(state.eventRewrites||[]),beginEventRewrite,cancelEventRewrite,deletePlotNode,beginGapLink,completeGapLink,createEditorialField:newEditorialField,createEditorialFieldFromSelection,deleteEditorialField,addEditorialMembers,removeEditorialMembers,updateEditorialInstruction,getEditorialFields:()=>structuredClone(state.editorialFields),getEditorialNotes:()=>structuredClone(state.editorialNotes),getSelection:()=>groupIds(),selectNodes:ids=>setNodeSelection(ids),moveSelectedBy,previewNodeMove:(ids,dx,dy)=>previewNodeMove(ids.map(id=>{const n=nby(id);return n?{id,x:n.x,y:n.y}:null}).filter(Boolean),dx,dy),getContextMenuState:()=>({open:!plotContextMenu.hidden,items:[...plotContextMenu.querySelectorAll("[role=menuitem]")].map(b=>b.textContent.trim())}),showProjectManager,createProject,openProject,exportProject,validateImported,blankGraph,getProjectIndex:()=>structuredClone(registry),getStarterOrigin:()=>({...STARTER_ORIGIN,localProjectId:STARTER_LOCAL_ID}),getRemote:()=>({...remote,token:remote.token?'***':null,timer:null}),createField,deleteField,setFieldGeometry:(id,patch)=>commit(()=>{Object.assign(fby(id),patch);normalizeField(fby(id))}),moveField,selectField:id=>{selected={type:'field',id};render()},getFieldMembership:id=>fieldMembership(nby(id)),getState:()=>structuredClone(state),getPan:()=>({...pan}),getIssues:directionIssues,arrange,fit,addNode,undo,selectNode:id=>{selected={type:'node',id};render()},setPosition:(id,x,y)=>commit(()=>{let n=nby(id);n.x=x;n.y=y}),setNodeAppearance:(id,patch)=>commit(()=>{const n=nby(id);if(!n)throw Error("Unknown node");if(patch.width!==undefined)n.width=Math.max(180,Math.min(780,patch.width));if(patch.height!==undefined)n.height=Math.max(95,Math.min(640,patch.height));if(patch.color!==undefined){if(patch.color===null)delete n.color;else if(COLORS.includes(patch.color))n.color=patch.color;else throw Error("Invalid color")}}),setInspectorPinned:v=>{inspectorPinned=!!v;renderInspector();positionInspector()},getSelected:()=>selected,getNavigation:()=>({focusMode,overviewOn,forceAllEdges,routeMode,lodOverview,semanticMode:semanticZoomLevel()}),getSemanticZoom:()=>semanticZoomLevel(),setZoomForTest:(scale)=>setZoom(scale),getEdgePlan:()=>{const p=connectionPlan();return {overview:p.overview,bridges:p.bridges.map(g=>({key:g.key,edgeIds:g.edges.map(e=>e.id)})),displayed:p.visibleEdges.map(e=>e.id),suppressed:[...p.localSuppressed.entries()]};},setAllEdges,setRouteMode,getPerf:()=>({...perfStats}),jumpToNode,jumpToField,toggleFocus:focusToggle,toggleOverview:()=>{overviewOn=!overviewOn;render()},loadFixture:fixture=>{state=structuredClone(fixture);selected=null;history=[];recomputeFieldTags();save();render()},reset:()=>{state=seed();recomputeFieldTags();history=[];selected=null;save();render();fit()}};
 recomputeFieldTags();save();render();
 })();
