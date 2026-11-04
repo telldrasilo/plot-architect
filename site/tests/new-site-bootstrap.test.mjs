@@ -27,7 +27,12 @@ test('fresh D1 migration remains additive and provides revision storage',()=>{
   }
   for(const forbidden of ['DROP TABLE','DELETE FROM','TRUNCATE'])assert.ok(!sql.toUpperCase().includes(forbidden),forbidden);
   const journal=JSON.parse(read('../drizzle/meta/_journal.json'));
-  assert.deepEqual(journal.entries.map(x=>x.tag),['0001_initial']);
+  assert.deepEqual(journal.entries.map(x=>x.tag),['0001_initial','0002_cw_operation_receipts']);
+  const receipts=read('../drizzle/0002_cw_operation_receipts.sql');
+  assert.ok(receipts.includes('CREATE TABLE IF NOT EXISTS cw_operation_receipts ('));
+  assert.ok(receipts.includes('PRIMARY KEY (project_id, operation_id)'));
+  assert.ok(receipts.includes('FOREIGN KEY (project_id) REFERENCES plot_projects(id)'));
+  for(const forbidden of ['DROP TABLE','DELETE FROM','TRUNCATE','ALTER TABLE'])assert.ok(!receipts.toUpperCase().includes(forbidden),forbidden);
 });
 
 test('native Sites/Vite setup and existing MCP seven-tool contract stay intact',()=>{
