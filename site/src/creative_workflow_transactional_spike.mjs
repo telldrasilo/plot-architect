@@ -9,6 +9,7 @@
  */
 import {createHash} from 'node:crypto';
 import {validateGraph} from './graph_contract.mjs';
+import {applyStageNoteAlternatives} from './creative_workflow_note_staging.mjs';
 import {
   CreativeWorkflowContractError,
   validateCreativeWorkflowGraph,
@@ -26,6 +27,7 @@ const object=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);
 const validId=x=>typeof x==='string'&&/^[A-Za-z0-9_-]{1,80}$/.test(x);
 const validRevision=x=>Number.isSafeInteger(x)&&x>=0;
 const fields={
+  stage_note:['noteId','workspaceId','workspace','branches','expectedPreview'],
   accept_draft:['workspaceId','nodeIds','expectedPreview'],
   start_replacement:['replacementId','sourceNodeIds','expectedPreview'],
   reconnect:['replacementId','decisions','expectedPreview'],
@@ -64,6 +66,7 @@ function replay(receipt,requestHash){
 async function runDomain(db,projectId,graph,expectedRevision,command){
   const args={...command,expectedRevision};
   switch(command.kind){
+    case 'stage_note':return applyStageNoteAlternatives(graph,args);
     case 'accept_draft':return applyDraftAcceptance(graph,args);
     case 'start_replacement':return applyStartReplacement(graph,args);
     case 'reconnect':return applyReplacementReconnection(graph,args);
