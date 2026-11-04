@@ -64,6 +64,34 @@ export function validateCreativeWorkflowGraph(graph){
       if(e.draftRelation==='internal'&&from!==w&&to!==w)fail('STALE_INTERNAL_EDGE',e.id);
     }
   }
+  // Optional per-original-edge outcomes. Unlisted suspended edges remain unresolved.
+  // The old edge is never edited or removed; rewiring creates a distinct plot edge.
+  const newLinks=new Set();
+  for(const r of replacements){
+    const outcomes=r.edgeResolutions??[];
+    if(!Array.isArray(outcomes))fail('RESOLUTION_INVALID',r.id);
+    const seenOriginals=new Set(),owned=new Set(r.sourceNodeIds);
+    for(const result of outcomes){
+      if(!obj(result)||!id(result.edgeId)||!r.suspendedEdgeIds.includes(result.edgeId)||seenOriginals.has(result.edgeId)
+        ||!['rewire','drop'].includes(result.decision))fail('RESOLUTION_INVALID',r.id);
+      seenOriginals.add(result.edgeId);
+      if(result.decision==='drop'){
+        if(Object.keys(result).some(k=>!['edgeId','decision'].includes(k)))fail('RESOLUTION_INVALID',result.edgeId);
+        continue;
+      }
+      if(Object.keys(result).some(k=>!['edgeId','decision','newEdgeId'].includes(k))||!id(result.newEdgeId)
+        ||newLinks.has(result.newEdgeId)||result.edgeId===result.newEdgeId)fail('RESOLUTION_INVALID',result.edgeId);
+      newLinks.add(result.newEdgeId);
+      const original=edges.get(result.edgeId),newEdge=edges.get(result.newEdgeId);
+      if(!original||!newEdge||suspended.has(result.newEdgeId)||workspaceOf(newEdge)!==null
+        ||!['precedes','causes','enables','hinders'].includes(newEdge.type))fail('RESOLUTION_TARGET_INVALID',result.edgeId);
+      const from=nodes.get(newEdge.from),to=nodes.get(newEdge.to);
+      if(!from||!to||workspaceOf(from)!==null||workspaceOf(to)!==null
+        ||originalNodes.has(from.id)||originalNodes.has(to.id))fail('RESOLUTION_TARGET_INVALID',result.edgeId);
+      if((!owned.has(original.from)&&newEdge.from!==original.from)
+        ||(!owned.has(original.to)&&newEdge.to!==original.to))fail('EXTERNAL_ENDPOINT_CHANGED',result.edgeId);
+    }
+  }
   return graph;
 }
 
@@ -119,6 +147,8 @@ export function assertProtectedOriginalsUnchanged(previous,next){
     const match=replacements.get(r.id);
     if(!match)fail('REPLACEMENT_REMOVED',r.id+' requires explicit cancel operation');
     if(JSON.stringify(r.sourceNodeIds)!==JSON.stringify(match.sourceNodeIds)||JSON.stringify(r.suspendedEdgeIds)!==JSON.stringify(match.suspendedEdgeIds))fail('REPLACEMENT_CHANGED',r.id);
+    const past=r.edgeResolutions??[],now=match.edgeResolutions??[];
+    if(past.length>now.length||past.some((decision,i)=>JSON.stringify(decision)!==JSON.stringify(now[i])))fail('RESOLUTION_CHANGED',r.id);
     for(const nodeId of r.sourceNodeIds)if(JSON.stringify(a.nodes.get(nodeId))!==JSON.stringify(b.nodes.get(nodeId)))fail('ORIGINAL_CHANGED',nodeId);
     for(const edgeId of r.suspendedEdgeIds)if(JSON.stringify(a.edges.get(edgeId))!==JSON.stringify(b.edges.get(edgeId)))fail('ORIGINAL_CHANGED',edgeId);
   }
