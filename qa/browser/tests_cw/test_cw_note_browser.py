@@ -79,21 +79,12 @@ def main():
         )
         note_id = page.evaluate("() => __graphite.newGapNote({x:120,y:370})")
         assert note_id.startswith("gn")
-        page.wait_for_function("() => __graphite.getRemote().revision >= 1 && !__graphite.getRemote().dirty")
+        page.wait_for_function("() => __graphite.getRemote().revision >= 1 && !__graphite.getRemote().dirty && !__graphite.getRemote().busy")
         page.evaluate("([id, text]) => __graphite.setGapNoteText(id,text)", [note_id, task])
-        page.wait_for_timeout(1800)
-        diagnostic = {
-            "remote": page.evaluate("() => __graphite.getRemote()"),
-            "localNote": page.evaluate("id => __graphite.getGapNotes().find(n => n.id === id)", note_id),
-            "serverRevision": db["revision"],
-            "serverNote": (db["graph"].get("gapNotes") or [None])[0],
-            "pageErrors": errors,
-        }
-        print("CW-NOTE diagnostic " + json.dumps(diagnostic, ensure_ascii=False), flush=True)
-        page.wait_for_function("() => __graphite.getRemote().revision >= 2 && !__graphite.getRemote().dirty", timeout=3500)
+        page.wait_for_function("() => __graphite.getRemote().revision >= 2 && !__graphite.getRemote().dirty && !__graphite.getRemote().busy")
         page.evaluate("id => __graphite.beginGapLink('gap_note',id)", note_id)
         page.evaluate("() => __graphite.completeGapLink('plot_node','n2')")
-        page.wait_for_function("() => __graphite.getRemote().revision >= 3 && !__graphite.getRemote().dirty")
+        page.wait_for_function("() => __graphite.getRemote().revision >= 3 && !__graphite.getRemote().dirty && !__graphite.getRemote().busy")
 
         assert len(db["graph"]["gapNotes"]) == 1
         assert db["graph"]["gapNotes"][0]["text"] == task
