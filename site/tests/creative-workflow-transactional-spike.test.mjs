@@ -1,0 +1,197 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {DatabaseSync} from 'node:sqlite';
+import {validateGraph} from '../src/graph_contract.mjs';
+import {previewDraftAcceptance,previewReplacementStart,canonicalProjection} from '../src/creative_workflow_contract.mjs';
+import {previewReplacementReconnection} from '../src/creative_workflow_reconnection.mjs';
+import {previewCompleteReplacement,previewCancelReplacement} from '../src/creative_workflow_lifecycle.mjs';
+import {commitSyntheticWorkflowCommand} from '../src/creative_workflow_transactional_spike.mjs';
+
+const clone=x=>structuredClone(x);
+const fails=async(fn,code)=>await assert.rejects(fn,e=>e?.code===code);
+const fixture=()=>({
+  revision:0,version:1,view:null,
+  nodes:[{id:'n1',title:'Начало',description:'',x:0,y:0},{id:'n2',title:'Поворот',description:'Старый поворот сюжета',x:250,y:0},
+    {id:'n3',title:'Следствие',description:'',x:500,y:0},
+    ...['a','b','c'].map((id,i)=>({id,title:id,description:'',x:i*210,y:250,workspaceId:'w1'}))],
+  edges:[{id:'e1',from:'n1',to:'n2',type:'precedes'},{id:'e2',from:'n2',to:'n3',type:'causes'},
+    {id:'ea',from:'a',to:'b',type:'precedes',workspaceId:'w1',draftRelation:'internal'},
+    {id:'eb',from:'b',to:'c',type:'precedes',workspaceId:'w1',draftRelation:'internal'}],
+  workspaces:[{id:'w1',taskId:'task',x:100,y:200,width:950,height:270}],fields:[],lanes:[]
+});
+function syntheticDB({receipts=true,onBeforeBatch}={}){
+  const sqlite=new DatabaseSync(':memory:');
+  sqlite.exec('PRAGMA foreign_keys=ON;'+fs.readFileSync(new URL('../db/0001_initial.sql',import.meta.url),'utf8'));
+  if(receipts)sqlite.exec('CREATE TABLE cw_operation_receipts (project_id TEXT NOT NULL, operation_id TEXT NOT NULL, request_hash TEXT NOT NULL, response_json TEXT NOT NULL, revision INTEGER NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(project_id,operation_id), FOREIGN KEY(project_id) REFERENCES plot_projects(id))');
+  const wrap=sql=>({params:[],bind(...args){this.params=args;return this},
+    run(){const r=sqlite.prepare(sql).run(...this.params);return {meta:{changes:Number(r.changes)}}},
+    first(){return sqlite.prepare(sql).get(...this.params)??null},
+    all(){return {results:sqlite.prepare(sql).all(...this.params)}}
+  });
+  const db={prepare:wrap,async batch(statements){
+    if(onBeforeBatch){const callback=onBeforeBatch;onBeforeBatch=null;callback(sqlite)}
+    sqlite.exec('BEGIN IMMEDIATE');
+    try{const results=statements.map(s=>s.run());sqlite.exec('COMMIT');return results}
+    catch(e){sqlite.exec('ROLLBACK');throw e}
+  }};
+  return {db,sqlite};
+}
+function seed(sqlite,id='project-1'){
+  const graph=validateGraph(fixture()),now='2026-11-04T00:00:00Z',serialized=JSON.stringify(graph);
+  sqlite.prepare('INSERT INTO plot_projects (id,name,graph_json,revision,created_at,updated_at) VALUES (?,?,?,0,?,?)').run(id,'Синтетический сюжет',serialized,now,now);
+  sqlite.prepare('INSERT INTO plot_revisions (project_id,revision,graph_json,message,created_at) VALUES (?,?,?,?,?)').run(id,0,serialized,'Создание',now);
+}
+function current(sqlite,id='project-1'){
+  const r=sqlite.prepare('SELECT graph_json,revision FROM plot_projects WHERE id=?').get(id);
+  const g=validateGraph(JSON.parse(r.graph_json));g.revision=r.revision;return g;
+}
+function historical(sqlite,revision,id='project-1'){
+  const r=sqlite.prepare('SELECT graph_json FROM plot_revisions WHERE project_id=? AND revision=?').get(id,revision);
+  const g=validateGraph(JSON.parse(r.graph_json));g.revision=revision;return g;
+}
+function counts(sqlite,id='project-1'){
+  return {revision:sqlite.prepare('SELECT revision FROM plot_projects WHERE id=?').get(id).revision,
+    history:sqlite.prepare('SELECT COUNT(*) AS n FROM plot_revisions WHERE project_id=?').get(id).n,
+    receipts:sqlite.prepare('SELECT COUNT(*) AS n FROM cw_operation_receipts WHERE project_id=?').get(id).n};
+}
+function command(g,kind,extra={}){
+  if(kind==='accept_draft'){
+    const nodeIds=extra.nodeIds??['a','b'];return {kind,workspaceId:'w1',nodeIds,expectedPreview:previewDraftAcceptance(g,{workspaceId:'w1',nodeIds})};
+  }
+  if(kind==='start_replacement')return {kind,replacementId:'r1',sourceNodeIds:['n2'],expectedPreview:previewReplacementStart(g,['n2'])};
+  if(kind==='reconnect'){
+    const decisions=extra.decisions??[{edgeId:'e1',decision:'drop'}];
+    return {kind,replacementId:'r1',decisions,expectedPreview:previewReplacementReconnection(g,{replacementId:'r1',decisions})};
+  }
+  if(kind==='complete')return {kind,replacementId:'r1',expectedPreview:previewCompleteReplacement(g,{replacementId:'r1'}),acknowledgeUnresolved:true};
+  throw Error('unknown command');
+}
+const send=(db,command,revision=0,operationId='operation-1',projectId='project-1')=>commitSyntheticWorkflowCommand(db,{projectId,operationId,expectedRevision:revision,command});
+const start=(db,sqlite)=>send(db,command(current(sqlite),'start_replacement'),0,'start');
+const accept=(db,sqlite)=>send(db,command(current(sqlite),'accept_draft'),0,'accept');
+
+test('one atomic accept saves exactly one snapshot and one operation receipt',async()=>{
+  const {db,sqlite}=syntheticDB();seed(sqlite);
+  const r=await accept(db,sqlite);assert.equal(r.replayed,false);assert.equal(r.revision,1);
+  assert.deepEqual(counts(sqlite),{revision:1,history:2,receipts:1});
+  assert.deepEqual(canonicalProjection(current(sqlite)).nodes.map(n=>n.id),['n1','n2','n3','a','b']);
+  assert.deepEqual(canonicalProjection(current(sqlite)).edges.map(e=>e.id),['e1','e2','ea']);
+  assert.deepEqual(historical(sqlite,1),current(sqlite));
+});
+test('same request ID and content replay without new write, even after other revisions',async()=>{
+  const {db,sqlite}=syntheticDB();seed(sqlite);
+  const c=command(current(sqlite),'accept_draft',{nodeIds:['a']});
+  const first=await send(db,c,0,'one');const repeated=await send(db,clone(c),0,'one');
+  assert.deepEqual(repeated,{...first,replayed:true});
+  await send(db,command(current(sqlite),'accept_draft',{nodeIds:['b']}),1,'two');
+  assert.equal((await send(db,c,0,'one')).replayed,true);
+  assert.deepEqual(counts(sqlite),{revision:2,history:3,receipts:2});
+});
+test('canonical object key order does not change request identity',async()=>{
+  const {db,sqlite}=syntheticDB();seed(sqlite);
+  const c=command(current(sqlite),'accept_draft',{nodeIds:['a']});
+  await send(db,c,0,'same');
+  const c2={expectedPreview:clone(c.expectedPreview),nodeIds:['a'],workspaceId:'w1',kind:'accept_draft'};
+  assert.equal((await send(db,c2,0,'same')).replayed,true);
+});
+test('reuse operation ID with different content fails closed',async()=>{
+  const {db,sqlite}=syntheticDB();seed(sqlite);
+  await send(db,command(current(sqlite),'accept_draft',{nodeIds:['a']}),0,'same');
+  await fails(()=>send(db,command(current(sqlite),'accept_draft',{nodeIds:['b']}),0,'same'),'OPERATION_ID_REUSED');
+  assert.deepEqual(counts(sqlite),{revision:1,history:2,receipts:1});
+});
+test('stale project revision fails before any mutation or receipt',async()=>{
+  const {db,sqlite}=syntheticDB();seed(sqlite);await accept(db,sqlite);
+  await fails(()=>send(db,command(current(sqlite),'accept_draft',{nodeIds:['c']}),0,'stale'),'REVISION_CONFLICT');
+  assert.deepEqual(counts(sqlite),{revision:1,history:2,receipts:1});
+});
+test('start replacement records authoritative row revision, not stale JSON revision',async()=>{
+  const {db,sqlite}=syntheticDB();seed(sqlite);
+  const g=current(sqlite);g.revision=999;
+  sqlite.prepare('UPDATE plot_projects SET graph_json=?').run(JSON.stringify(g));
+  await start(db,sqlite);
+  assert.equal(current(sqlite).replacements[0].sourceGraphRevision,0);
+  assert.deepEqual(canonicalProjection(current(sqlite)).nodes.map(n=>n.id),['n1','n3']);
+});
+test('cancellation loads trusted baseline from project-specific revision history',async()=>{
+  const {db,sqlite}=syntheticDB();seed(sqlite);await start(db,sqlite);
+  const g=current(sqlite),baseline=historical(sqlite,0);
+  const expectedPreview=previewCancelReplacement(g,{replacementId:'r1',baselineGraph:baseline});
+  assert.equal(expectedPreview.canCancel,true);
+  const r=await send(db,{kind:'cancel',replacementId:'r1',expectedPreview},1,'cancel');
+  assert.equal(r.revision,2);assert.deepEqual(counts(sqlite),{revision:2,history:3,receipts:2});
+  assert.deepEqual(canonicalProjection(current(sqlite)).nodes.map(n=>n.id),['n1','n2','n3']);
+});
+test('client-provided baseline injection is rejected',async()=>{
+  const {db,sqlite}=syntheticDB();seed(sqlite);await start(db,sqlite);
+  const g=current(sqlite),expectedPreview=previewCancelReplacement(g,{replacementId:'r1',baselineGraph:historical(sqlite,0)});
+  await fails(()=>send(db,{kind:'cancel',replacementId:'r1',expectedPreview,baselineGraph:g},1,'inject'),'COMMAND_INVALID');
+  assert.deepEqual(counts(sqlite),{revision:1,history:2,receipts:1});
+});
+test('cancel after accepting a replacement scene blocks duplicate canon',async()=>{
+  const {db,sqlite}=syntheticDB();seed(sqlite);await start(db,sqlite);
+  await send(db,command(current(sqlite),'accept_draft',{nodeIds:['a']}),1,'accept-a');
+  const g=current(sqlite),expectedPreview=previewCancelReplacement(g,{replacementId:'r1',baselineGraph:historical(sqlite,0)});
+  assert.equal(expectedPreview.canCancel,false);
+  await fails(()=>send(db,{kind:'cancel',replacementId:'r1',expectedPreview},2,'cancel'),'RESTORE_CONFLICT');
+  assert.deepEqual(counts(sqlite),{revision:2,history:3,receipts:2});
+});
+test('full command chain: start, accept, rewire and complete',async()=>{
+  const {db,sqlite}=syntheticDB();seed(sqlite);await start(db,sqlite);
+  await send(db,command(current(sqlite),'accept_draft'),1,'accept');
+  const decisions=[{edgeId:'e1',decision:'rewire',newEdge:{id:'new1',from:'n1',to:'a',type:'precedes'}},{edgeId:'e2',decision:'drop'}];
+  await send(db,command(current(sqlite),'reconnect',{decisions}),2,'reconnect');
+  await send(db,command(current(sqlite),'complete'),3,'complete');
+  assert.deepEqual(counts(sqlite),{revision:4,history:5,receipts:4});
+  assert.equal(current(sqlite).replacements[0].state,'completed');
+  assert.deepEqual(canonicalProjection(current(sqlite)).edges.map(e=>e.id),['ea','new1']);
+});
+test('stale preview does not consume receipt or write',async()=>{
+  const {db,sqlite}=syntheticDB();seed(sqlite);const c=command(current(sqlite),'accept_draft');
+  c.expectedPreview.promoteEdgeIds.push('invented');
+  await fails(()=>send(db,c,0,'bad'),'PREVIEW_STALE');
+  assert.deepEqual(counts(sqlite),{revision:0,history:1,receipts:0});
+});
+test('missing receipt table fails before any story mutation',async()=>{
+  const {db,sqlite}=syntheticDB({receipts:false});seed(sqlite);
+  await assert.rejects(()=>send(db,command(current(sqlite),'accept_draft'),0,'bad'),/no such table|cw_operation_receipts/i);
+  assert.equal(sqlite.prepare('SELECT revision FROM plot_projects').get().revision,0);
+});
+test('receipt failure rolls back graph update and revision insert',async()=>{
+  const {db,sqlite}=syntheticDB();seed(sqlite);const before=current(sqlite);
+  sqlite.exec("CREATE TRIGGER reject_receipt BEFORE INSERT ON cw_operation_receipts BEGIN SELECT RAISE(ABORT,'blocked receipt'); END");
+  await assert.rejects(()=>send(db,command(current(sqlite),'accept_draft'),0,'bad'),/blocked receipt/);
+  assert.deepEqual(current(sqlite),before);assert.deepEqual(counts(sqlite),{revision:0,history:1,receipts:0});
+});
+test('revision history insertion failure rolls back entire transaction',async()=>{
+  const {db,sqlite}=syntheticDB();seed(sqlite);
+  sqlite.exec("CREATE TRIGGER reject_history BEFORE INSERT ON plot_revisions WHEN NEW.revision>0 BEGIN SELECT RAISE(ABORT,'blocked history'); END");
+  await assert.rejects(()=>send(db,command(current(sqlite),'accept_draft'),0,'bad'),/blocked history/);
+  assert.deepEqual(counts(sqlite),{revision:0,history:1,receipts:0});
+});
+test('a concurrent writer winning compare-and-swap leaves no orphan receipt',async()=>{
+  const {db,sqlite}=syntheticDB({onBeforeBatch:s=>{
+    s.prepare('UPDATE plot_projects SET revision=1 WHERE id=? AND revision=0').run('project-1');
+    const data=s.prepare('SELECT graph_json FROM plot_projects WHERE id=?').get('project-1').graph_json;
+    s.prepare('INSERT INTO plot_revisions (project_id,revision,graph_json,message,created_at) VALUES (?,?,?,?,?)').run('project-1',1,data,'other writer','2026-11-04T00:00:00Z');
+  }});seed(sqlite);
+  await fails(()=>send(db,command(current(sqlite),'accept_draft'),0,'lost'),'REVISION_CONFLICT');
+  assert.deepEqual(counts(sqlite),{revision:1,history:2,receipts:0});
+  assert.equal(current(sqlite).nodes.find(n=>n.id==='a').workspaceId,'w1');
+});
+test('receipts are project-scoped, not global story state',async()=>{
+  const {db,sqlite}=syntheticDB();seed(sqlite,'project-1');seed(sqlite,'project-2');
+  for(const id of ['project-1','project-2']){
+    const r=await send(db,command(current(sqlite,id),'accept_draft'),0,'same-id',id);
+    assert.equal(r.projectId,id);assert.equal(r.replayed,false);
+  }
+  assert.deepEqual(counts(sqlite,'project-1'),{revision:1,history:2,receipts:1});
+  assert.deepEqual(counts(sqlite,'project-2'),{revision:1,history:2,receipts:1});
+});
+test('unknown command, forged graph and disallowed fields are rejected',async()=>{
+  const {db,sqlite}=syntheticDB();seed(sqlite);
+  await fails(()=>send(db,{kind:'write_everything',expectedPreview:{}},0,'bad1'),'COMMAND_INVALID');
+  await fails(()=>send(db,{...command(current(sqlite),'accept_draft'),graph:{nodes:[]}},0,'bad2'),'COMMAND_INVALID');
+  assert.deepEqual(counts(sqlite),{revision:0,history:1,receipts:0});
+});
