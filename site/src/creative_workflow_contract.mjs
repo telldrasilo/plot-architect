@@ -31,6 +31,7 @@ export function validateCreativeWorkflowGraph(graph){
   for(const n of graph.nodes){
     const w=workspaceOf(n);
     if(w!==null&&!areaIds.has(w))fail('WORKSPACE_NOT_FOUND',n.id);
+    if(n.draftBranchId!==undefined&&(!id(n.draftBranchId)||w===null))fail('DRAFT_BRANCH_INVALID',n.id);
   }
   const originalNodes=new Set(),suspended=new Set(),replacementIds=new Set();
   for(const r of replacements){
@@ -54,6 +55,7 @@ export function validateCreativeWorkflowGraph(graph){
   for(const e of graph.edges){
     if(!nodes.has(e.from)||!nodes.has(e.to)||e.from===e.to)fail('EDGE_INVALID',e.id);
     const w=workspaceOf(e),from=workspaceOf(nodes.get(e.from)),to=workspaceOf(nodes.get(e.to));
+    if(e.draftBranchId!==undefined&&(!id(e.draftBranchId)||w===null))fail('DRAFT_BRANCH_INVALID',e.id);
     if(w===null){
       if(own(e,'draftRelation'))fail('EDGE_INVALID',e.id+' unowned draft relation');
       if(from!==null||to!==null)fail('CANON_DRAFT_EDGE',e.id);
@@ -174,10 +176,14 @@ export function applyDraftAcceptance(graph,{workspaceId,nodeIds,expectedPreview,
   if(expectedPreview!==undefined&&JSON.stringify(expectedPreview)!==JSON.stringify(plan))fail('PREVIEW_STALE','acceptance plan changed');
   const accepted=new Set(plan.acceptNodeIds),promoted=new Set(plan.promoteEdgeIds);
   const next=structuredClone(graph);
-  for(const n of next.nodes)if(accepted.has(n.id))delete n.workspaceId;
+  for(const n of next.nodes)if(accepted.has(n.id)){
+    delete n.workspaceId;
+    delete n.draftBranchId;
+  }
   for(const e of next.edges)if(promoted.has(e.id)){
     delete e.workspaceId;
     delete e.draftRelation;
+    delete e.draftBranchId;
   }
   validateCreativeWorkflowGraph(next);
   assertProtectedOriginalsUnchanged(graph,next);

@@ -6,6 +6,7 @@ import {validateGraph} from '../src/graph_contract.mjs';
 import {previewDraftAcceptance,previewReplacementStart,canonicalProjection} from '../src/creative_workflow_contract.mjs';
 import {previewReplacementReconnection} from '../src/creative_workflow_reconnection.mjs';
 import {previewCompleteReplacement,previewCancelReplacement} from '../src/creative_workflow_lifecycle.mjs';
+import {previewStageNoteAlternatives} from '../src/creative_workflow_note_staging.mjs';
 import {commitSyntheticWorkflowCommand} from '../src/creative_workflow_transactional_spike.mjs';
 
 const clone=x=>structuredClone(x);
@@ -37,8 +38,8 @@ function syntheticDB({receipts=true,onBeforeBatch}={}){
   }};
   return {db,sqlite};
 }
-function seed(sqlite,id='project-1'){
-  const graph=validateGraph(fixture()),now='2026-11-04T00:00:00Z',serialized=JSON.stringify(graph);
+function seed(sqlite,id='project-1',sourceGraph=fixture()){
+  const graph=validateGraph(sourceGraph),now='2026-11-04T00:00:00Z',serialized=JSON.stringify(graph);
   sqlite.prepare('INSERT INTO plot_projects (id,name,graph_json,revision,created_at,updated_at) VALUES (?,?,?,0,?,?)').run(id,'Синтетический сюжет',serialized,now,now);
   sqlite.prepare('INSERT INTO plot_revisions (project_id,revision,graph_json,message,created_at) VALUES (?,?,?,?,?)').run(id,0,serialized,'Создание',now);
 }
@@ -194,4 +195,73 @@ test('unknown command, forged graph and disallowed fields are rejected',async()=
   await fails(()=>send(db,{kind:'write_everything',expectedPreview:{}},0,'bad1'),'COMMAND_INVALID');
   await fails(()=>send(db,{...command(current(sqlite),'accept_draft'),graph:{nodes:[]}},0,'bad2'),'COMMAND_INVALID');
   assert.deepEqual(counts(sqlite),{revision:0,history:1,receipts:0});
+});
+
+
+function noteProject(){
+  const g=fixture();
+  g.gapNotes=[{id:'gn1',title:'Заметка',text:'Предложи два развития истории, не затрагивая исходную причинность',x:110,y:530,parent:null,status:'pending',offerVariants:true}];
+  g.gapLinks=[{id:'gl1',from:{kind:'gap_note',id:'gn1'},to:{kind:'plot_node',id:'n2'}}];
+  return g;
+}
+function noteCommand(g){
+  const workspace={x:100,y:580,width:1100,height:460};
+  const branches=[
+    {id:'first',title:'Первый путь',nodes:[
+      {id:'new-a',title:'Герой уходит',x:150,y:620},
+      {id:'new-b',title:'Теряет опору',x:380,y:620}
+    ],edges:[{id:'new-ab',from:'new-a',to:'new-b',type:'precedes'}]},
+    {id:'second',title:'Второй путь',nodes:[{id:'new-c',title:'Остаётся',x:150,y:820}],edges:[]}
+  ];
+  const spec={noteId:'gn1',workspaceId:'w-note',workspace,branches};
+  return {kind:'stage_note',...spec,expectedPreview:previewStageNoteAlternatives(g,spec)};
+}
+test('staging a real-shape standalone note through synthetic CAS keeps canon and context intact',async()=>{
+  const {db,sqlite}=syntheticDB();seed(sqlite,'project-1',noteProject());
+  const before=canonicalProjection(current(sqlite));
+  const r=await send(db,noteCommand(current(sqlite)),0,'stage-note');
+  assert.equal(r.revision,1);assert.equal(r.changes.stagedNodeIds.length,3);
+  assert.deepEqual(canonicalProjection(current(sqlite)),before);
+  assert.equal(current(sqlite).workspaces.find(w=>w.id==='w-note').taskId,'gn1');
+  assert.equal(current(sqlite).gapLinks[0].id,'gl1');
+  assert.deepEqual(counts(sqlite),{revision:1,history:2,receipts:1});
+});
+test('one synthetic history from note to alternatives, partial acceptance, replacement and reconnection',async()=>{
+  const {db,sqlite}=syntheticDB();seed(sqlite,'project-1',noteProject());
+  const stagedCommand=noteCommand(current(sqlite));
+  await send(db,stagedCommand,0,'stage-note');
+  assert.equal((await send(db,stagedCommand,0,'stage-note')).replayed,true);
+  const now=current(sqlite),nodeIds=['new-a','new-b'];
+  await send(db,{kind:'accept_draft',workspaceId:'w-note',nodeIds,
+    expectedPreview:previewDraftAcceptance(now,{workspaceId:'w-note',nodeIds})},1,'accept-subset');
+  const accepted=current(sqlite);
+  assert.ok(canonicalProjection(accepted).edges.some(e=>e.id==='new-ab'));
+  assert.equal(accepted.nodes.find(n=>n.id==='new-c').workspaceId,'w-note');
+  assert.equal(accepted.nodes.find(n=>n.id==='new-a').draftBranchId,undefined);
+  assert.deepEqual(canonicalProjection(accepted).edges.map(e=>e.id),['e1','e2','new-ab']);
+  await send(db,command(accepted,'start_replacement'),2,'start-replacement');
+  const started=current(sqlite);
+  assert.deepEqual(canonicalProjection(started).nodes.map(n=>n.id),['n1','n3','new-a','new-b']);
+  const choices=[
+    {edgeId:'e1',decision:'rewire',newEdge:{id:'edge-new-1',from:'n1',to:'new-a',type:'precedes'}},
+    {edgeId:'e2',decision:'rewire',newEdge:{id:'edge-new-2',from:'new-b',to:'n3',type:'causes'}}
+  ];
+  await send(db,command(started,'reconnect',{decisions:choices}),3,'choose-links');
+  await send(db,command(current(sqlite),'complete'),4,'complete-replacement');
+  assert.deepEqual(counts(sqlite),{revision:5,history:6,receipts:5});
+  const result=current(sqlite);
+  assert.equal(result.replacements[0].state,'completed');
+  assert.deepEqual(canonicalProjection(result).edges.map(e=>e.id),['new-ab','edge-new-1','edge-new-2']);
+  assert.equal(result.nodes.find(n=>n.id==='new-c').workspaceId,'w-note');
+  assert.equal(result.gapNotes[0].text,noteProject().gapNotes[0].text);
+  assert.equal(result.gapLinks[0].to.id,'n2','editorial note association is retained, not auto-rewired');
+});
+test('same note cannot be staged twice with different request ID, without a new story revision',async()=>{
+  const {db,sqlite}=syntheticDB();seed(sqlite,'project-1',noteProject());
+  const initialCommand=noteCommand(current(sqlite));
+  await send(db,initialCommand,0,'stage-one');
+  // A distinct operation ID attempts the old reviewed payload against the
+  // current project. The server must reject the occupied task/area.
+  await fails(()=>send(db,initialCommand,1,'stage-two'),'WORKSPACE_CONFLICT');
+  assert.deepEqual(counts(sqlite),{revision:1,history:2,receipts:1});
 });
