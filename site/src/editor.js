@@ -111,8 +111,12 @@ function cancelEventRewrite(id){if(!rewriteBy(id))return;commit(()=>{state.event
 const gapInView=()=>state.gapNotes.filter(n=>n.parent===state.view);
 let gapLinkFrom=null;
 const editorialInView=()=>state.editorialFields.filter(f=>f.parent===state.view);
-const visible=()=>state.nodes.filter(n=>n.parent===state.view);
-const currentEdges=()=>{const ids=new Set(visible().map(n=>n.id));return state.edges.filter(e=>ids.has(e.from)&&ids.has(e.to))};
+// Never conflate editorial node.status='proposed' with draft ownership.
+const cwRetiredNodeIds=()=>new Set((state.replacements||[]).flatMap(r=>r.sourceNodeIds||[]));
+const cwSuspendedEdgeIds=()=>new Set((state.replacements||[]).flatMap(r=>r.suspendedEdgeIds||[]));
+const cwActiveNodes=()=>{const retired=cwRetiredNodeIds();return state.nodes.filter(n=>!n.workspaceId&&!retired.has(n.id))};
+const visible=()=>cwActiveNodes().filter(n=>n.parent===state.view);
+const currentEdges=()=>{const ids=new Set(visible().map(n=>n.id)),suspended=cwSuspendedEdgeIds();return state.edges.filter(e=>!e.workspaceId&&!suspended.has(e.id)&&ids.has(e.from)&&ids.has(e.to))};
 
 // CW-011: ephemeral visual proof on the SAME canvas. This is strictly a
 // synthetic preview, never saved into state, graph_json or ordinary MCP context.
@@ -149,10 +153,21 @@ function setCreativeWorkspacePreview(proposal){
  creativeWorkspacePreview=scene;
  render();
 }
+function cwPersistedWorkspaceScene(){
+ if(state.view!==null||!Array.isArray(state.workspaces)||!state.workspaces.length)return null;
+ const workspaces=state.workspaces.filter(a=>a&&typeof a.id==='string');
+ const ownerIds=new Set(workspaces.map(a=>a.id));
+ const nodes=state.nodes.filter(n=>n.workspaceId&&ownerIds.has(n.workspaceId));
+ const ids=new Map(nodes.map(n=>[n.id,n]));
+ const edges=state.edges.filter(e=>e.workspaceId&&e.draftRelation==='internal'
+  &&ids.has(e.from)&&ids.has(e.to)&&ids.get(e.from).workspaceId===e.workspaceId&&ids.get(e.to).workspaceId===e.workspaceId);
+ return {workspaces,nodes,edges};
+}
 function renderCreativeWorkspacePreview(){
  const host=$('cw-workspace-preview');if(!host)return;
  host.replaceChildren();
- const data=creativeWorkspacePreview;if(!data)return;
+ const persisted=creativeWorkspacePreview===null;
+ const data=creativeWorkspacePreview||cwPersistedWorkspaceScene();if(!data)return;
  const namespace='http://www.w3.org/2000/svg';
  const nodeById=new Map(data.nodes.map(n=>[n.id,n]));
  for(const area of data.workspaces){
@@ -161,9 +176,9 @@ function renderCreativeWorkspacePreview(){
   box.style.cssText='left:'+area.x+'px;top:'+area.y+'px;width:'+area.width+'px;height:'+area.height+'px';
   box.setAttribute('aria-label','Рабочая область. Черновики, не события сюжета');
   const head=document.createElement('div');head.className='cw-preview-area-head';
-  head.textContent='Рабочая область · черновики';
+  head.textContent=persisted?'Рабочая область · сохранённые черновики':'Рабочая область · черновики';
   const hint=document.createElement('span');hint.className='cw-preview-area-hint';
-  hint.textContent='Предпросмотр · не в сюжете';head.append(hint);box.append(head);
+  hint.textContent=persisted?'Вне сюжета':'Предпросмотр · не в сюжете';head.append(hint);box.append(head);
   const internals=data.edges.filter(e=>e.workspaceId===area.id);
   const svg=document.createElementNS(namespace,'svg');svg.setAttribute('class','cw-preview-arrows');
   svg.setAttribute('width',String(area.width));svg.setAttribute('height',String(area.height));
@@ -188,7 +203,7 @@ function renderCreativeWorkspacePreview(){
    const title=document.createElement('strong');title.textContent=n.title;
    card.append(kind,title);
    if(n.description){const d=document.createElement('p');d.textContent=n.description;card.append(d)}
-   card.addEventListener('pointerdown',e=>{
+   if(!persisted)card.addEventListener('pointerdown',e=>{
     if(e.button!==0)return;
     e.stopPropagation();e.preventDefault();const x=e.clientX,y=e.clientY,ox=n.x,oy=n.y;
     let moved=false;card.setPointerCapture(e.pointerId);
@@ -481,7 +496,7 @@ function nodeCenter(n){const dimensions=itemDims(n);return {x:n.x+dimensions.w/2
 function insideField(n,f){if(n.parent!==f.parent)return false;const p=nodeCenter(n);return p.x>=f.x&&p.x<f.x+f.width&&p.y>=f.y&&p.y<f.y+f.height}
 // Geometry, not a manual tag, selects objects to carry. Capture once at gesture start.
 // Keep field and contained nodes in a single undoable transaction. Do not touch edges.
-function membersAtFieldStart(field){return state.nodes.filter(n=>n.parent===field.parent&&insideField(n,field)).map(n=>({id:n.id,x:n.x,y:n.y}))}
+function membersAtFieldStart(field){return cwActiveNodes().filter(n=>n.parent===field.parent&&insideField(n,field)).map(n=>({id:n.id,x:n.x,y:n.y}))}
 function translateFieldAndMembers(fieldId,dx,dy,carry=true,members=null){
  const field=fby(fieldId);if(!field)return;
  const moving=carry?(members||membersAtFieldStart(field)):[];
@@ -798,7 +813,7 @@ function contentBounds(){
  for(const n of gapInView())items.push({x:n.x,y:n.y,w:252,h:Math.max(115,document.querySelector(`[data-gap-note="${n.id}"]`)?.offsetHeight||115)});
  for(const n of nodes)items.push({x:n.x,y:n.y,w:widthOf(n),h:heightOf(n)|| (n.size==='mini'?75:n.size==='expanded'?220:170)});
  for(const f of fields)items.push({x:f.x,y:f.y-25,w:f.width,h:f.height+25});
- for(const a of creativeWorkspacePreview?.workspaces||[])items.push({x:a.x,y:a.y,w:a.width,h:a.height});
+ for(const a of (creativeWorkspacePreview||cwPersistedWorkspaceScene())?.workspaces||[])items.push({x:a.x,y:a.y,w:a.width,h:a.height});
  if(!items.length)return {x:0,y:0,w:1000,h:600};
  const minX=Math.min(...items.map(i=>i.x)),minY=Math.min(...items.map(i=>i.y));
  const maxX=Math.max(...items.map(i=>i.x+i.w)),maxY=Math.max(...items.map(i=>i.y+i.h));
