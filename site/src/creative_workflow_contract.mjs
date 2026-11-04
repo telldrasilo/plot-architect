@@ -150,3 +150,54 @@ export function applyDraftAcceptance(graph,{workspaceId,nodeIds,expectedPreview,
   assertProtectedOriginalsUnchanged(graph,next);
   return {graph:next,changes:plan};
 }
+
+
+/**
+ * Detailed review snapshot for an explicit replacement. Unlike the legacy
+ * ID-only preview, captures exact source content and affected arrow semantics,
+ * so changing an endpoint/type/text invalidates an outstanding review.
+ * Draft references are reported as blockers rather than silently discarded.
+ */
+export function previewReplacementStart(graph,sourceNodeIds){
+  const base=previewStartReplacement(graph,sourceNodeIds);
+  const selected=new Set(base.sourceNodeIds),{nodes,edges}=indexes(graph);
+  const affectedDraftEdgeIds=graph.edges
+    .filter(e=>workspaceOf(e)!==null&&(selected.has(e.from)||selected.has(e.to)))
+    .map(e=>e.id);
+  return {
+    ...base,
+    originalNodes:base.sourceNodeIds.map(id=>structuredClone(nodes.get(id))),
+    suspendedEdges:base.suspendedEdgeIds.map(id=>structuredClone(edges.get(id))),
+    affectedDraftEdgeIds
+  };
+}
+
+/**
+ * Begin a truly explicit replacement as one pure in-memory graph change.
+ * Original nodes and all incident plot edges remain byte-for-byte unchanged;
+ * a replacement record suspends them from the canonical projection.
+ *
+ * The review is mandatory. No D1 write, revision increment, recovery,
+ * cancellation, generation or external-edge rewiring occurs here. A future
+ * caller must use authoritative server-side CAS for durable atomicity.
+ */
+export function applyStartReplacement(graph,{replacementId,sourceNodeIds,expectedPreview,expectedRevision}={}){
+  if(expectedRevision!==undefined&&(!Number.isSafeInteger(expectedRevision)||expectedRevision<0||graph?.revision!==expectedRevision))
+    fail('REVISION_CONFLICT','graph revision differs from requested revision');
+  if(!id(replacementId))fail('REPLACEMENT_ID_INVALID','stable replacement ID required');
+  const current=previewReplacementStart(graph,sourceNodeIds);
+  if(expectedPreview===undefined)fail('PREVIEW_REQUIRED','explicit review required before replacement');
+  if(JSON.stringify(expectedPreview)!==JSON.stringify(current))fail('PREVIEW_STALE','source material or affected links changed');
+  if((graph.replacements??[]).some(r=>r.id===replacementId))fail('REPLACEMENT_ID_CONFLICT',replacementId);
+  if(current.affectedDraftEdgeIds.length)fail('DRAFT_REFERENCE_CONFLICT',current.affectedDraftEdgeIds.join(','));
+  const next=structuredClone(graph);
+  next.replacements??=[];
+  next.replacements.push({
+    id:replacementId,state:'open',
+    sourceNodeIds:[...current.sourceNodeIds],
+    suspendedEdgeIds:[...current.suspendedEdgeIds]
+  });
+  validateCreativeWorkflowGraph(next);
+  assertProtectedOriginalsUnchanged(graph,next);
+  return {graph:next,changes:{replacementId,sourceNodeIds:[...current.sourceNodeIds],suspendedEdgeIds:[...current.suspendedEdgeIds],autoRewiredEdgeIds:[]}};
+}
