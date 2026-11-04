@@ -124,3 +124,29 @@ export function assertProtectedOriginalsUnchanged(previous,next){
   }
   return true;
 }
+
+
+/**
+ * Apply an approved draft selection as one pure graph transformation.
+ * This does NOT persist or increment a revision: callers must perform a guarded
+ * single-snapshot save (or equivalent transactional CAS) on the server.
+ * expectedPreview guards against an outdated review of affected edges;
+ * expectedRevision, when supplied, checks this in-memory graph's revision only.
+ */
+export function applyDraftAcceptance(graph,{workspaceId,nodeIds,expectedPreview,expectedRevision}={}){
+  if(expectedRevision!==undefined){
+    if(!Number.isSafeInteger(expectedRevision)||expectedRevision<0||graph?.revision!==expectedRevision)fail('REVISION_CONFLICT','graph revision differs from requested revision');
+  }
+  const plan=previewDraftAcceptance(graph,{workspaceId,nodeIds});
+  if(expectedPreview!==undefined&&JSON.stringify(expectedPreview)!==JSON.stringify(plan))fail('PREVIEW_STALE','acceptance plan changed');
+  const accepted=new Set(plan.acceptNodeIds),promoted=new Set(plan.promoteEdgeIds);
+  const next=structuredClone(graph);
+  for(const n of next.nodes)if(accepted.has(n.id))delete n.workspaceId;
+  for(const e of next.edges)if(promoted.has(e.id)){
+    delete e.workspaceId;
+    delete e.draftRelation;
+  }
+  validateCreativeWorkflowGraph(next);
+  assertProtectedOriginalsUnchanged(graph,next);
+  return {graph:next,changes:plan};
+}
