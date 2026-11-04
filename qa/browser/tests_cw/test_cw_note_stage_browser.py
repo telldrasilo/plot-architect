@@ -210,12 +210,35 @@ def main():
         assert page.locator(".cw-note-stage-review").count() == 0
         assert db["applies"] == 0
 
-        # Review then one CAS apply; preserve original nodes, arrows and note.
+        # Concurrent revision invalidates the reviewed command; no draft
+        # should be staged or accepted, and no generic PUT may bypass CAS.
         page.get_by_role("button", name="Разместить варианты").click()
         page.locator(".cw-note-stage-review").wait_for()
+        db["force_conflict"] = True
+        page.locator("#cw-stage-confirm").click()
+        page.wait_for_function("() => !document.querySelector('.cw-note-stage-review')")
+        assert db["revision"] == 1
+        assert db["applies"] == 0
+        assert not db["graph"].get("workspaces")
+        assert db["generic_puts"] == 0
+
+        # Reload the authoritative graph, reattach the synthetic prepared
+        # input and explicitly review again at the new revision.
+        page.reload()
+        page.wait_for_function(
+            "() => window.__graphite && __graphite.getRemote().connected "
+            "&& __graphite.getRemote().revision === 1"
+        )
+        page.evaluate("() => __graphite.setCWWorkflowTestMode(true)")
+        page.locator('[data-gap-note="gn1"]').click()
+        page.evaluate("proposal => __graphite.setCWPreparedNoteAlternativesForTest('gn1',proposal)",
+                      prepared_branches())
+        page.get_by_role("button", name="Разместить варианты").click()
+        page.locator(".cw-note-stage-review").wait_for()
+        assert db["applies"] == 0
         page.locator("#cw-stage-confirm").click()
         page.wait_for_function(
-            "() => __graphite.getRemote().revision === 1 "
+            "() => __graphite.getRemote().revision === 2 "
             "&& document.querySelectorAll('.cw-preview-card').length === 7"
         )
         assert db["applies"] == 1
@@ -236,7 +259,7 @@ def main():
         page.reload()
         page.wait_for_function(
             "() => window.__graphite && __graphite.getRemote().connected "
-            "&& __graphite.getRemote().revision === 1 "
+            "&& __graphite.getRemote().revision === 2 "
             "&& document.querySelectorAll('.cw-preview-card').length === 7"
         )
         assert page.locator(".cw-preview-area").count() == 1
@@ -252,7 +275,8 @@ def main():
         "internal_edges": 3, "staging_writes": db["applies"],
         "generic_puts": db["generic_puts"],
         "cases": ["disabled by default", "prepared branches", "preview",
-                  "cancel", "explicit save", "canonical isolation", "reload"]
+                  "cancel", "concurrent conflict", "explicit save",
+                  "canonical isolation", "reload"]
     }, ensure_ascii=False))
 
 
