@@ -160,8 +160,9 @@ test('cancel rejects stale review and wrong in-memory revision without side effe
   assert.deepEqual(g,before);
 });
 test('a second replacement after the baseline blocks cancellation of first',()=>{
-  const {baseline,graph:g}=begin();
-  const prev=previewReplacementStart(g,['n4']),next=applyStartReplacement(g,{replacementId:'r2',sourceNodeIds:['n4'],expectedPreview:prev,expectedRevision:10}).graph;
+  const base=story();base.nodes.push({id:'n5',title:'Независимый эпизод',x:1000,y:0});
+  const {baseline,graph:g}=begin(base);
+  const prev=previewReplacementStart(g,['n5']),next=applyStartReplacement(g,{replacementId:'r2',sourceNodeIds:['n5'],expectedPreview:prev,expectedRevision:10}).graph;
   const p=cancelPreview(next,baseline);assert.equal(p.canCancel,false);assert.ok(p.blockers.includes('CANON_CHANGED_SINCE_REPLACEMENT'));
 });
 test('completion and cancellation are non-mutating, JSON-roundtrip validated',()=>{
