@@ -258,8 +258,10 @@ test('one synthetic history from note to alternatives, partial acceptance, repla
 });
 test('same note cannot be staged twice with different request ID, without a new story revision',async()=>{
   const {db,sqlite}=syntheticDB();seed(sqlite,'project-1',noteProject());
-  await send(db,noteCommand(current(sqlite)),0,'stage-one');
-  const alternate=noteCommand(current(sqlite));
-  await fails(()=>send(db,alternate,1,'stage-two'),'WORKSPACE_CONFLICT');
+  const initialCommand=noteCommand(current(sqlite));
+  await send(db,initialCommand,0,'stage-one');
+  // A distinct operation ID attempts the old reviewed payload against the
+  // current project. The server must reject the occupied task/area.
+  await fails(()=>send(db,initialCommand,1,'stage-two'),'WORKSPACE_CONFLICT');
   assert.deepEqual(counts(sqlite),{revision:1,history:2,receipts:1});
 });
