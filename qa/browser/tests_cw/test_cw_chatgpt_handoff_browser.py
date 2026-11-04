@@ -116,7 +116,7 @@ def main():
 
     with sync_playwright() as p:
         browser=p.chromium.launch(headless=True,args=["--no-sandbox","--disable-dev-shm-usage"])
-        context=p.chromium and browser.new_context(viewport={"width":1440,"height":920})
+        context=browser.new_context(viewport={"width":1440,"height":920})
         context.route("https://plot.local/**",serve)
         page=context.new_page()
         page.on("pageerror",lambda e:errors.append(str(e)))
@@ -146,14 +146,6 @@ def main():
 
         page.locator("#cw-handoff-answer").fill(answer())
         page.locator("#cw-handoff-import").click()
-        page.wait_for_timeout(200)
-        print("CW-HANDOFF DIAGNOSTIC "+json.dumps({
-            "toast":page.locator("#toast").inner_text(),
-            "inspector":page.locator("#inspector").inner_text()[:1600],
-            "remote":page.evaluate("() => __graphite.getRemote()"),
-            "qa":page.evaluate("() => __graphite.getCWWorkflowTestMode()"),
-            "stage_count":page.locator("#cw-stage-note").count()
-        },ensure_ascii=False),flush=True)
         assert page.locator("#cw-stage-note").count()==1
         assert "Подготовлено 4 ветвей" in page.locator('[data-gap-note="gn1"]').inner_text()
         assert db["graph"]==original
