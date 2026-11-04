@@ -565,6 +565,10 @@ function renderCreativeWorkspacePreview(){
    if(n.description){const d=document.createElement('p');d.textContent=n.description;card.append(d)}
    if(persisted){
     card.classList.add('cw-persisted-card');
+    // Canvas pointerdown normally starts a drag and may rerender the world,
+    // destroying a button before its click can be dispatched.
+    card.addEventListener('pointerdown',e=>e.stopPropagation());
+    card.addEventListener('click',e=>e.stopPropagation());
     if(cwWorkflowTestMode){
      const accept=document.createElement('button');
      accept.type='button';accept.className='cw-accept-trigger';accept.textContent='В сюжет';
@@ -606,6 +610,7 @@ function renderCreativeWorkspacePreview(){
   if(persisted&&cwWorkflowTestMode&&cwAcceptanceReview?.workspaceId===area.id){
    const p=cwAcceptanceReview,review=document.createElement('section');
    review.className='cw-accept-review';review.setAttribute('role','group');
+   review.addEventListener('pointerdown',e=>e.stopPropagation());
    review.setAttribute('aria-label','Проверка принятия черновика');
    const desc=document.createElement('p');
    desc.textContent='В сюжет: 1 событие · внутренних связей: '+p.plan.promoteEdgeIds.length
