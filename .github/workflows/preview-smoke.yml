@@ -32,6 +32,8 @@ jobs:
           node node_modules/wrangler/bin/wrangler.js --version
       - name: Build compiled Worker
         run: npm run build:legacy
+      - name: Verify bundled Worker exports and module initialization
+        run: node scripts/validate-artifact.mjs
       - name: Start isolated preview and smoke-test local D1
         shell: bash
         run: |
