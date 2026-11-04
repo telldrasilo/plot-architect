@@ -12,8 +12,8 @@
 
 ## GitHub release source
 
-- Repository: `telldrasilo/plot-architect`, branch `main` only **after** reviewed [PR #50](https://github.com/telldrasilo/plot-architect/pull/50) has **passed applicable CI and merged**. Do not deploy an unmerged branch.
-- PR #49 merged the internal note-handoff code and synthetic E2E. PR #51 merged the additive receipt schema and synthetic D1 migration tests (main commit `734a2427009be643335c03b4ac0ad1ca26b80f46`). PR #50 adds the MCP adapter and integration tests.
+- Repository: `telldrasilo/plot-architect`, branch `main` only **after** reviewed [PR #52](https://github.com/telldrasilo/plot-architect/pull/52) has **passed applicable CI and merged**. PR #52 supersedes closed PR #50. Do not deploy an unmerged branch.
+- PR #49 merged the internal note-handoff code and synthetic E2E. PR #51 merged the additive receipt schema and synthetic D1 migration tests (main commit `734a2427009be643335c03b4ac0ad1ca26b80f46`). PR #52 adds the MCP adapter, integration tests and local preview compatibility fix (superseding PR #50).
 - At release time pin the **actual post-merge main commit SHA**; do not assume the PR head SHA is the merge commit.
 - The latest known published *Graphite* base is the second bootstrap commit above, **not** the old Plot Architect v4 documented in RELEASE_POLICY. First verify actual saved/deployed hosted source to ensure a matching base.
 - Precomputed diff for review: `https://github.com/telldrasilo/plot-architect/compare/6b37744956a45d1c0707a54d53e882acd21760cb...<POST_MERGE_SHA>` (substitute the real SHA; this example is not an executable URL until then).
@@ -32,7 +32,7 @@ The approved creative model permits one or many events and a variable number of 
 
 ## Three independent release gates — do not silently cross them
 
-1. **Site source/private Save+Deploy:** requires its own clear owner authorization after PR #50 merge and successful CI. Existing Site only; never create another Site.
+1. **Site source/private Save+Deploy:** requires its own clear owner authorization after PR #52 merge and successful CI. Existing Site only; never create another Site.
 2. **Workflow persistence and D1 schema:** the server's `CW_WORKFLOW_ENABLED` is **off by default**, and `assertWorkflowReceiptStore()` needs a `cw_operation_receipts` table. The additive migration is prepared and tested in source (`site/drizzle/0002_cw_operation_receipts.sql`, merged PR #51), but **no production migration or workflow activation has been authorized or verified**. Do not assume the receipt table exists in production. Turning on the workflow or applying even an additive production schema migration requires a **separate explicit authorization**, approved/migration-tested schema plan and real native D1 safety checks. No manual SQL against production, no unsupported Wrangler deployment and no fabricated data restoration. If the table is absent or an unsafe migration warning appears, **STOP without enabling writes**.
 3. **Plugin registration/skills:** existing private Graphite plugin must be updated separately, using its authorized official tool/registration workflow. Do not change the old Plot Architect plugin or create a new plugin. Only report new MCP tools as *usable from ChatGPT* when registration and live discovery actually confirm them.
 
@@ -40,7 +40,7 @@ The approved creative model permits one or many events and a variable number of 
 
 ## Minimal Work execution — only AFTER the gates above have authorization
 
-1. Confirm exact **Graphite** Site identity, current owner-only access, current deployment and available native Edit checkout. Verify GitHub `main` SHA and PR #50 passing CI/merged. If checkout fails (`Unable to prepare the Site`), **STOP**; no alternative deploy path.
+1. Confirm exact **Graphite** Site identity, current owner-only access, current deployment and available native Edit checkout. Verify GitHub `main` SHA and PR #52 passing CI/merged. If checkout fails (`Unable to prepare the Site`), **STOP**; no alternative deploy path.
 2. Reconcile only changed hosted files from the pinned diff and their import closure. Preserve hosted-only auth, `DB`, REST/MCP and unrelated paths. Any unexplained conflict or binding change means **STOP**.
 3. For an authorized migration: use an already-reviewed, tested additive migration through supported native Site tools, and verify that existing tables/records are preserved; **do not use this handoff as migration authorization**. Otherwise do a source-only Save and leave workflow disabled.
 4. Native Sites **Save version**; record saved version ID. Private **Deploy version only if separately authorized**, after checking owner-only, unchanged `DB`, and actual warnings.
@@ -49,4 +49,4 @@ The approved creative model permits one or many events and a variable number of 
 
 ## Ready-to-paste Work task (after the owner grants the specific release gates)
 
-> Work on the **existing private Graphite Site** `appgprj_6ae84b2112e4819180b875a027acba36`, **not** old Plot Architect. Source: GitHub `telldrasilo/plot-architect`, current `main` after merged PR #50 and passing CI; pin its exact SHA. Execute `docs/GRAPHITE_NOTE_MCP_WORK_HANDOFF.md` strictly. Inspect only affected hosted source and the native deployment state; preserve owner-only/auth, existing D1 `DB`, and hosted-only changes. Use only native Sites Edit → Save version → (if explicitly authorized) private Deploy. Do not create another Site or plugin, read/migrate old plots, use Wrangler deploy, or make an unapproved D1 migration. If `cw_operation_receipts` or activation is required but not explicitly approved, STOP before production write. Update the **existing Graphite plugin** only with its separate explicit authorization. Report precisely what was done and not verified.
+> Work on the **existing private Graphite Site** `appgprj_6ae84b2112e4819180b875a027acba36`, **not** old Plot Architect. Source: GitHub `telldrasilo/plot-architect`, current `main` after merged PR #52 and passing CI; pin its exact SHA. Execute `docs/GRAPHITE_NOTE_MCP_WORK_HANDOFF.md` strictly. Inspect only affected hosted source and the native deployment state; preserve owner-only/auth, existing D1 `DB`, and hosted-only changes. Use only native Sites Edit → Save version → (if explicitly authorized) private Deploy. Do not create another Site or plugin, read/migrate old plots, use Wrangler deploy, or make an unapproved D1 migration. If `cw_operation_receipts` or activation is required but not explicitly approved, STOP before production write. Update the **existing Graphite plugin** only with its separate explicit authorization. Report precisely what was done and not verified.
