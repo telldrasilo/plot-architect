@@ -374,6 +374,22 @@ function renderCreativeWorkspacePreview(){
   }
   box.append(svg);
   const nodes=data.nodes.filter(n=>n.workspaceId===area.id);
+  if(persisted&&cwWorkflowTestMode&&cwSelectedWorkspaceId===area.id&&cwSelectedDraftIds.size){
+   const actions=document.createElement('div');actions.className='cw-draft-selection-actions';
+   actions.setAttribute('role','group');actions.setAttribute('aria-label','Групповое принятие');
+   actions.addEventListener('pointerdown',e=>e.stopPropagation());
+   const count=document.createElement('span');count.textContent='Выбрано: '+cwSelectedDraftIds.size;
+   const accept=document.createElement('button');accept.type='button';
+   accept.textContent='В сюжет ('+cwSelectedDraftIds.size+')';
+   accept.disabled=cwAcceptanceBusy;
+   accept.addEventListener('click',e=>{
+    e.stopPropagation();void cwPrepareAccept([...cwSelectedDraftIds],area.id)
+   });
+   const clear=document.createElement('button');clear.type='button';clear.textContent='Снять выбор';
+   clear.disabled=cwAcceptanceBusy;
+   clear.addEventListener('click',e=>{e.stopPropagation();cwClearDraftSelection();renderCreativeWorkspacePreview()});
+   actions.append(count,accept,clear);box.append(actions);
+  }
   const names=[...new Set(nodes.map(n=>n.draftBranchId||'single'))];
   for(const n of nodes){
    const card=document.createElement('article');card.className='cw-preview-card';
@@ -386,16 +402,26 @@ function renderCreativeWorkspacePreview(){
    if(n.description){const d=document.createElement('p');d.textContent=n.description;card.append(d)}
    if(persisted){
     card.classList.add('cw-persisted-card');
+    if(cwSelectedDraftIds.has(n.id)&&cwSelectedWorkspaceId===area.id)card.classList.add('cw-draft-selected');
     // Canvas pointerdown normally starts a drag and may rerender the world,
     // destroying a button before its click can be dispatched.
     card.addEventListener('pointerdown',e=>e.stopPropagation());
     card.addEventListener('click',e=>e.stopPropagation());
     if(cwWorkflowTestMode){
+     const pick=document.createElement('label');pick.className='cw-draft-pick';
+     const check=document.createElement('input');check.type='checkbox';
+     check.className='cw-draft-check';
+     check.checked=cwSelectedWorkspaceId===area.id&&cwSelectedDraftIds.has(n.id);
+     check.disabled=cwAcceptanceBusy;
+     check.setAttribute('aria-label','Выбрать черновик: '+n.title);
+     check.addEventListener('change',e=>{e.stopPropagation();cwToggleDraftSelection(n.id,area.id)});
+     const hint=document.createElement('span');hint.textContent='Выбрать';
+     pick.append(check,hint);card.append(pick);
      const accept=document.createElement('button');
      accept.type='button';accept.className='cw-accept-trigger';accept.textContent='В сюжет';
      accept.disabled=cwAcceptanceBusy;
      accept.setAttribute('aria-label','Проверить принятие события: '+n.title);
-     accept.addEventListener('click',e=>{e.stopPropagation();void cwPrepareAccept(n.id,area.id)});
+     accept.addEventListener('click',e=>{e.stopPropagation();void cwPrepareAccept([n.id],area.id)});
      card.append(accept);
     }
    }
@@ -434,7 +460,8 @@ function renderCreativeWorkspacePreview(){
    review.addEventListener('pointerdown',e=>e.stopPropagation());
    review.setAttribute('aria-label','Проверка принятия черновика');
    const desc=document.createElement('p');
-   desc.textContent='В сюжет: 1 событие · внутренних связей: '+p.plan.promoteEdgeIds.length
+   desc.textContent='В сюжет: '+p.nodeIds.length+' событие(ий) · внутренних связей: '+p.plan.promoteEdgeIds.length
+    +' · связей для отдельного решения: '+p.plan.reviewEdgeIds.length
     +' · внешние связи не подключаются автоматически';
    const approve=document.createElement('button');approve.type='button';approve.textContent='Принять в сюжет';
    approve.disabled=cwAcceptanceBusy;approve.addEventListener('click',e=>{e.stopPropagation();void cwConfirmAccept()});
