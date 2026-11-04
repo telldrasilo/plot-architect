@@ -274,6 +274,8 @@ function cwPrepareChatGPTAlternatives(noteId,raw){
   ||cwHandoffRevision!==remote.revision||cwHandoffNoteText!==n.text)
   throw Error('Запрос ChatGPT устарел. Подготовьте новый запрос');
  const parsed=cwParseChatGPTAlternatives(raw);
+ const nodeCount=parsed.reduce((sum,b)=>sum+b.events.length,0);
+ const edgeCount=parsed.reduce((sum,b)=>sum+b.relations.length,0);
  const maxSize=Math.max(...parsed.map(b=>b.events.length));
  const canonical=cwActiveNodes();
  const bottom=Math.max(n.y+170,...canonical.map(item=>item.y+220));
