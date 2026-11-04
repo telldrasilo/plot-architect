@@ -86,7 +86,9 @@ def main():
         page.locator("#ux014-task").fill(task)
         page.wait_for_function("() => __graphite.getRemote().revision >= 2 && !__graphite.getRemote().dirty")
         assert db["graph"]["eventRewrites"][0]["taskText"] == task
-        assert db["graph"]["eventRewrites"][0]["offerVariants"] is True  # legacy field retained for older data\n        assert page.locator("#ux014-offer").count() == 0\n        assert page.locator(".ux014-generate").inner_text() == "Подготовить решение"
+        assert db["graph"]["eventRewrites"][0]["offerVariants"] is True  # legacy field retained for older data
+        assert page.locator("#ux014-offer").count() == 0
+        assert page.locator(".ux014-generate").inner_text() == "Подготовить решение"
         assert db["graph"]["nodes"][0]["title"] == "Source"
         assert db["graph"]["nodes"][0]["description"] == "Original fact"
         assert db["graph"]["nodes"][0]["manualFieldIds"] == ["f1"]
@@ -104,7 +106,8 @@ def main():
         )
         page.evaluate("() => __graphite.selectNode('n1')")
         assert page.locator("#ux014-task").input_value() == task
-        assert page.locator("#ux014-offer").count() == 0\n        assert db["graph"]["eventRewrites"][0]["offerVariants"] is True
+        assert page.locator("#ux014-offer").count() == 0
+        assert db["graph"]["eventRewrites"][0]["offerVariants"] is True
 
         page.locator("#ux014-cancel").click()
         page.wait_for_function("() => __graphite.getRemote().revision >= 3 && !__graphite.getRemote().dirty")
