@@ -180,17 +180,7 @@ def main():
         assert page.locator(".cw-accept-trigger").count() == 3
 
         page.locator('[data-cw-node="a"] .cw-accept-trigger').click()
-        page.wait_for_timeout(900)
-        print("CW-ACCEPT debug " + json.dumps({
-            "remote": page.evaluate("() => __graphite.getRemote()"),
-            "testMode": page.evaluate("() => __graphite.getCWWorkflowTestMode()"),
-            "pageErrors": errors,
-            "toast": page.locator("#toast").inner_text(),
-            "previews": db["previews"],
-            "reviewCount": page.locator(".cw-accept-review").count(),
-            "cards": page.locator(".cw-preview-card").count()
-        }, ensure_ascii=False), flush=True)
-        page.locator(".cw-accept-review").wait_for(timeout=4500)
+        page.locator(".cw-accept-review").wait_for()
         assert db["previews"] == 1
         assert "1 событие" in page.locator(".cw-accept-review").inner_text()
         assert db["applies"] == 0
