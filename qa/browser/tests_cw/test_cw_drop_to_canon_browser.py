@@ -152,15 +152,18 @@ def main():
 
         # Leaving the fixed transition boundary creates only a ghost and a
         # review. Escape returns the original draft without changing the DB.
+        state_before=page.evaluate("() => __graphite.getState()")
         drag(page,"a",20,-178)
         page.locator(".cw-accept-review.cw-drop-review").wait_for()
         assert page.locator(".cw-drop-ghost").count()==1
+        assert page.evaluate("() => __graphite.getState()")==state_before, "ghost preview must not mutate any plot node"
         assert "1 событие" in page.locator(".cw-accept-review").inner_text()
         assert db["previews"]==1 and db["applies"]==0 and db["put"]==0
         assert page.evaluate("() => __graphite.getState().nodes.find(n=>n.id==='a').workspaceId")=="w1"
         page.keyboard.press("Escape")
         assert page.locator(".cw-drop-ghost").count()==0
         assert page.locator(".cw-accept-review").count()==0
+        assert page.evaluate("() => __graphite.getState()")==state_before
         assert db["graph"]==before
 
         # A selected pair moves together. Preview reports internal edges,
@@ -176,6 +179,7 @@ def main():
         assert len(db["reviewed"]["positionChanges"])==2
         assert db["applies"]==0 and db["put"]==0
         assert db["graph"]==before
+        assert page.evaluate("() => __graphite.getState()")==state_before
         old_pos={n["id"]:(n["x"],n["y"]) for n in before["nodes"]}
         placements={v["nodeId"]:(v["after"]["x"],v["after"]["y"])
                     for v in db["reviewed"]["positionChanges"]}
