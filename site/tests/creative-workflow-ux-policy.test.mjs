@@ -23,3 +23,11 @@ test('CW-006: note MCP structure is content-driven and preserves free branch len
   assert.match(proposalCompiler,/Количество альтернатив определяется только намерением автора/);
   assert.match(proposalCompiler,/proposal\.groups\.length<1\|\|proposal\.groups\.length>32/);
 });
+
+test('CW local drafts: direct manipulation has no per-card checkbox or move review',()=>{
+  assert.doesNotMatch(editor,/cw-draft-check|cw-draft-pick|cw-accept-trigger|cw-move-review/);
+  assert.match(editor,/function cwBeginDraftDrag/);
+  assert.match(editor,/cwScheduleDraftSave\(\)/);
+  assert.match(editor,/cwToggleDraftSelection/);
+  assert.match(editor,/cwEnsureDraftsSynced/);
+});

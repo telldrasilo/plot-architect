@@ -40,8 +40,7 @@ def main():
             node=by_id[move["nodeId"]]
             assert node["workspaceId"]==area["id"]
             assert set(move)=={"nodeId","x","y"}
-            assert area["x"]<=move["x"]<=area["x"]+area["width"]-208
-            assert area["y"]<=move["y"]<=area["y"]+area["height"]-105
+            assert abs(move["x"])<=1_000_000 and abs(move["y"])<=1_000_000
             assert (move["x"],move["y"])!=(node["x"],node["y"])
             change.append({"nodeId":node["id"],"before":{"x":node["x"],"y":node["y"]},
                            "after":{"x":move["x"],"y":move["y"]}})
@@ -136,96 +135,80 @@ def main():
         )
         page.evaluate("() => __graphite.fit()")
         assert page.locator(".cw-movable-draft").count()==0
+        assert page.locator(".cw-draft-check").count()==0
+        assert page.locator(".cw-accept-trigger").count()==0
         assert page.locator('[data-node="n2"]').count()==0
         assert page.locator('[data-edge="e1"]').count()==0
         assert page.locator('[data-edge="e2"]').count()==0
-        assert page.locator('[data-edge="e3"]').count()==1
         assert db["put"]==0
 
         page.evaluate("() => __graphite.setCWWorkflowTestMode(true)")
         assert page.locator(".cw-movable-draft").count()==4
         drag(page,"a",85,45)
-        pending=page.evaluate("() => __graphite.getCWPendingDraftMoves()")
-        assert len(pending)==1 and pending[0]["nodeId"]=="a",pending
-        assert pending[0]["x"]>150 and pending[0]["y"]>510
-        assert page.evaluate("() => __graphite.getState().nodes.find(n=>n.id==='a').x")==150
-        assert db["graph"]==original
-        assert db["applies"]==0
-        assert db["put"]==0
-
-        # Another area cannot be silently included in the pending move batch.
-        drag(page,"d",65,35)
-        assert page.evaluate("() => __graphite.getCWPendingDraftMoves()")==pending
-        assert db["put"]==0
-        assert page.locator('[data-cw-workspace="w1"] .cw-draft-move-actions').count()==1
-        page.get_by_role("button",name="Сохранить расположение").click()
-        page.locator(".cw-move-review").wait_for()
-        assert db["previews"]==1 and db["applies"]==0
-        assert "сюжет и смысл связей не изменятся" in page.locator(".cw-move-review").inner_text()
-        page.get_by_role("button",name="Вернуться").click()
-        assert page.locator(".cw-move-review").count()==0
-        assert len(page.evaluate("() => __graphite.getCWPendingDraftMoves()"))==1
-
-        # Accumulate another card in the same area, then approve both in one
-        # revision. The internal arrow keeps exactly the same semantic type.
-        drag(page,"b",65,42)
-        pending=page.evaluate("() => __graphite.getCWPendingDraftMoves()")
-        assert {m["nodeId"] for m in pending}=={"a","b"},pending
-        page.get_by_role("button",name="Сохранить расположение").click()
-        page.locator(".cw-move-review").wait_for()
-        assert "2 карточек" in page.locator(".cw-move-review").inner_text()
-        assert db["last_preview"]["affectedDraftEdgeIds"]==["ea"]
-        page.get_by_role("button",name="Подтвердить расположение").click()
-        page.wait_for_function(
-            "() => __graphite.getRemote().revision===2"
-            "&&!document.querySelector('.cw-draft-move-actions')"
-            "&&document.querySelectorAll('.cw-preview-card').length===4"
-        )
-        assert db["applies"]==1 and db["put"]==0
-        assert len(db["receipts"])==1
+        page.wait_for_function("() => __graphite.getRemote().revision===2")
+        first=next(n for n in db["graph"]["nodes"] if n["id"]=="a")
+        assert first["x"]>150 and first["y"]>510
+        assert db["applies"]==1 and db["previews"]==1 and db["put"]==0
         assert page.evaluate("() => __graphite.getCWPendingDraftMoves()")==[]
-        for target in pending:
-            saved=next(n for n in db["graph"]["nodes"] if n["id"]==target["nodeId"])
-            assert (saved["x"],saved["y"])==(target["x"],target["y"])
+        assert page.locator(".cw-move-review").count()==0
+        assert page.locator(".cw-draft-move-actions").count()==0
+
+        # Direct selection, Ctrl-click grouping and drag operate on the same
+        # two cards; no checkbox or explicit save is part of the workflow.
+        page.locator('[data-cw-node="a"]').click()
+        page.locator('[data-cw-node="b"]').click(modifiers=["Control"])
+        assert set(page.evaluate("() => __graphite.getCWSelectedDraftIds()"))=={"a","b"}
+        before={n["id"]:(n["x"],n["y"]) for n in db["graph"]["nodes"] if n["id"] in ("a","b")}
+        drag(page,"a",65,42)
+        page.wait_for_function("() => __graphite.getRemote().revision===3")
+        after={n["id"]:(n["x"],n["y"]) for n in db["graph"]["nodes"] if n["id"] in ("a","b")}
+        assert after["a"]!=before["a"] and after["b"]!=before["b"]
+        assert (after["a"][0]-before["a"][0],after["a"][1]-before["a"][1])==(
+            after["b"][0]-before["b"][0],after["b"][1]-before["b"][1])
+        assert db["last_preview"]["affectedDraftEdgeIds"]==["ea"]
+        assert db["applies"]==2 and db["put"]==0
         assert db["graph"]["edges"]==original["edges"]
         assert db["graph"]["replacements"]==original["replacements"]
-        assert db["graph"]["nodes"][1]["title"]==original["nodes"][1]["title"]
 
-        # Reload proves these coordinates are persisted, not just an overlay.
+        # Switching to another area is allowed; batches remain individually
+        # scoped by workspace ID and cannot merge unrelated drafts.
+        page.evaluate("() => __graphite.fit()")
+        drag(page,"d",50,30)
+        page.wait_for_function("() => __graphite.getRemote().revision===4")
+        assert db["last_preview"]["workspaceId"]=="w2"
+        assert db["applies"]==3 and db["put"]==0
+
+        # Reload confirms server persistence, not only transient drag pixels.
         page.reload()
         page.wait_for_function(
-            "() => window.__graphite&&__graphite.getRemote().connected"
-            "&&__graphite.getRemote().revision===2"
+            "() => __graphite.getRemote().connected"
+            "&&__graphite.getRemote().revision===4"
             "&&document.querySelectorAll('.cw-preview-card').length===4"
         )
-        for target in pending:
-            node=page.evaluate("(id) => __graphite.getState().nodes.find(n=>n.id===id)",target["nodeId"])
-            assert (node["x"],node["y"])==(target["x"],target["y"])
+        for node_id,xy in after.items():
+            stored=page.evaluate("(id) => __graphite.getState().nodes.find(n=>n.id===id)",node_id)
+            assert (stored["x"],stored["y"])==xy
         assert page.locator(".cw-movable-draft").count()==0
         assert page.locator('[data-node="a"]').count()==0
 
-        # A server-side concurrent revision change rejects a later movement
-        # as a unit, without promoting or moving any stored graph node.
+        # A concurrent server-side revision must fail closed and preserve
+        # pending positions for diagnosis, not update the canonical story.
         page.evaluate("() => __graphite.setCWWorkflowTestMode(true)")
         page.evaluate("() => __graphite.fit()")
-        drag(page,"c",55,25)
-        assert len(page.evaluate("() => __graphite.getCWPendingDraftMoves()"))==1
-        page.get_by_role("button",name="Сохранить расположение").click()
-        page.locator(".cw-move-review").wait_for()
         db["force_conflict"]=True
-        page.get_by_role("button",name="Подтвердить расположение").click()
-        page.wait_for_function("() => !document.querySelector('.cw-move-review')")
-        assert db["applies"]==1 and db["put"]==0
-        assert next(n for n in db["graph"]["nodes"] if n["id"]=="c")["x"]==150
-        assert page.locator('[data-node="c"]').count()==0
-        page.get_by_role("button",name="Сбросить").click()
-        assert page.evaluate("() => __graphite.getCWPendingDraftMoves()")==[]
+        original_c=next(n for n in db["graph"]["nodes"] if n["id"]=="c")["x"]
+        drag(page,"c",45,25)
+        page.locator(".cw-draft-move-actions[role=alert]").wait_for()
+        assert db["applies"]==3 and db["put"]==0
+        assert next(n for n in db["graph"]["nodes"] if n["id"]=="c")["x"]==original_c
+        assert any(m["nodeId"]=="c" for m in page.evaluate("() => __graphite.getCWPendingDraftMoves()"))
+        assert page.locator(".cw-draft-check").count()==0
         assert not errors,errors
         context.close();browser.close()
-    print(json.dumps({"result":"PASS","saved_cards":2,"revisions_written":1,
+    print(json.dumps({"result":"PASS","revisions_written":db["applies"],
       "draft_arrows_unchanged":True,"generic_puts":db["put"],
-      "cases":["ephemeral drag","same-area guard","explicit review","cancel",
-        "one CAS","reload","stale conflict","preserve original"]},ensure_ascii=False))
+      "cases":["direct drag autosave","Ctrl-click group","cross-workspace moves",
+        "one CAS per batch","reload","stale conflict","original preserved"]},ensure_ascii=False))
 
 if __name__=="__main__":
     main()

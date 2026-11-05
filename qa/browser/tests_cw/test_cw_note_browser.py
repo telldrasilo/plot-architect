@@ -81,7 +81,19 @@ def main():
         assert note_id.startswith("gn")
         page.wait_for_function("() => __graphite.getRemote().revision >= 1 && !__graphite.getRemote().dirty && !__graphite.getRemote().busy")
         page.evaluate("([id, text]) => __graphite.setGapNoteText(id,text)", [note_id, task])
-        page.wait_for_function("() => __graphite.getRemote().revision >= 2 && !__graphite.getRemote().dirty && !__graphite.getRemote().busy")
+        try:
+            page.wait_for_function("() => __graphite.getRemote().revision >= 2 && !__graphite.getRemote().dirty && !__graphite.getRemote().busy", timeout=7000)
+        except Exception:
+            print(json.dumps({
+                "debug": "note save stalled",
+                "db_revision": db["revision"],
+                "db_writes": db["writes"],
+                "remote": page.evaluate("() => __graphite.getRemote()"),
+                "editor_note": page.evaluate("(id) => __graphite.getGapNotes().find(n=>n.id===id)", note_id),
+                "page_errors": errors,
+                "toast": page.locator("#toast").inner_text(),
+            }, ensure_ascii=False), flush=True)
+            raise
         page.evaluate("id => __graphite.beginGapLink('gap_note',id)", note_id)
         page.evaluate("() => __graphite.completeGapLink('plot_node','n2')")
         page.wait_for_function("() => __graphite.getRemote().revision >= 3 && !__graphite.getRemote().dirty && !__graphite.getRemote().busy")

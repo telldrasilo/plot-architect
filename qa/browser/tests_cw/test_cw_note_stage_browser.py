@@ -288,13 +288,13 @@ def main():
         local_page.goto("http://127.0.0.1:8788/")
         local_page.wait_for_function(
             "() => __graphite.getRemote().connected "
-            "&& document.querySelectorAll('.cw-accept-trigger').length === 7"
+            "&& document.querySelectorAll('.cw-movable-draft').length === 7"
         )
         assert local_page.evaluate("() => __graphite.getCWWorkflowTestMode()") is False
         assert local_page.locator(".cw-movable-draft").count() == 7
-        assert local_page.locator(".cw-draft-check").count() == 7
+        assert local_page.locator(".cw-draft-check").count() == 0
         assert local_page.locator('[data-gap-note="gn1"]').count() == 0
-        local_page.locator(".cw-draft-check").first.check()
+        local_page.locator(".cw-movable-draft").first.click()
         assert local_page.locator(".cw-draft-selection-actions").count() == 1
         assert db["applies"] == 1 and db["generic_puts"] == 0
         assert not errors, errors

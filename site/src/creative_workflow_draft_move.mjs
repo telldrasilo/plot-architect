@@ -15,8 +15,8 @@ const own=(x,k)=>Object.hasOwn(x,k);
 const isObj=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);
 const validId=x=>typeof x==='string'&&x.length>0&&x.length<=80;
 const coordinate=x=>typeof x==='number'&&Number.isFinite(x)&&Math.abs(x)<=1_000_000;
-// Same minimum draft card footprint as the CW visual layer.
-const CARD_WIDTH=208,CARD_HEIGHT=105;
+// Workspaces are visual groupings, not movement cages. The existing
+// coordinate guard protects storage against NaN, infinity and huge values.
 
 /** Read-only preview, snapshots exact before and after geometry. */
 export function previewMoveDraftNodes(graph,{workspaceId,moves}={}){
@@ -36,10 +36,6 @@ export function previewMoveDraftNodes(graph,{workspaceId,moves}={}){
       fail('MOVE_TARGET_INVALID',move.nodeId);
     if(!coordinate(move.x)||!coordinate(move.y))
       fail('MOVE_COORDINATES_INVALID',move.nodeId);
-    if(move.x<area.x||move.y<area.y
-      ||move.x+CARD_WIDTH>area.x+area.width
-      ||move.y+CARD_HEIGHT>area.y+area.height)
-      fail('MOVE_OUT_OF_AREA',move.nodeId);
     if(move.x===n.x&&move.y===n.y)
       fail('MOVE_UNCHANGED',move.nodeId);
     positionChanges.push({

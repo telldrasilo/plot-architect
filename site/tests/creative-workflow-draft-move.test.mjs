@@ -79,13 +79,15 @@ test('no external arrow or replacement can be created as a side effect',()=>{
   assert.equal(result.graph.replacements.length,g.replacements.length);
   assert.deepEqual(result.graph.edges,g.edges);
 });
-test('workspace borders include draft footprint, and out-of-area coordinates fail closed',()=>{
+test('workspace frame is not a movement cage; ownership and canon remain isolated',()=>{
   const g=graph();
   for(const target of [move('a',99,600),move('a',200,479),move('a',1100,600),move('a',200,1080)]){
-    error(()=>previewMoveDraftNodes(g,{workspaceId:'w1',moves:[target]}),'MOVE_OUT_OF_AREA');
+    const result=apply(g,[target]);
+    assert.equal(result.graph.nodes.find(n=>n.id==='a').x,target.x);
+    assert.equal(result.graph.nodes.find(n=>n.id==='a').y,target.y);
+    assert.deepEqual(result.graph.workspaces,g.workspaces);
+    assert.deepEqual(result.graph.edges,g.edges);
   }
-  const p=previewMoveDraftNodes(g,{workspaceId:'w1',moves:[move('a',942,1025)]});
-  assert.equal(p.positionChanges.length,1);
 });
 test('review refuses nonfinite coordinates, oversize numbers and nonnumeric strings',()=>{
   const g=graph();
