@@ -181,7 +181,9 @@ def main():
         page.once("dialog", lambda dialog: dialog.accept())
         with page.expect_download():
             page.locator("#pm-save-note-positions").click()
-        page.locator("#pm-error").wait_for(state="visible")
+        page.wait_for_function(
+            "() => document.querySelector('#pm-error')?.textContent.includes('SQLite изменилась')"
+        )
         assert "SQLite изменилась" in page.locator("#pm-error").inner_text()
         assert db["writes"] == 1
         assert page.evaluate("() => __graphite.getRemote().blocked") is True
