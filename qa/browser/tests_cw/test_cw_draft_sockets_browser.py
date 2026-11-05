@@ -18,6 +18,19 @@ def snap(page):
         id:p.dataset.cwEdge,d:p.getAttribute('d'),className:p.getAttribute('class'),
         marker:p.getAttribute('marker-end')
       })),
+      directions:[...document.querySelectorAll('[data-cw-edge-direction]')].map(arrow=>{
+        const path=[...document.querySelectorAll('[data-cw-edge]')]
+          .find(p=>p.dataset.cwEdge===arrow.dataset.cwEdgeDirection);
+        const mid=path?.getPointAtLength(path.getTotalLength()/2);
+        const transform=arrow.transform.baseVal.consolidate()?.matrix;
+        return {id:arrow.dataset.cwEdgeDirection,
+          centered:!!mid&&!!transform&&Math.hypot(transform.e-mid.x,transform.f-mid.y)<.01,
+          x:transform?.e,y:transform?.f,
+          pointer:getComputedStyle(arrow).pointerEvents,
+          length:path?.getTotalLength()};
+      }),
+      hitPaths:[...document.querySelectorAll('[data-cw-edge-hit]')]
+        .map(p=>({id:p.dataset.cwEdgeHit,d:p.getAttribute('d')})),
       cards:[...document.querySelectorAll('[data-cw-node]')].map(p=>({
         id:p.dataset.cwNode,height:p.offsetHeight
       }))
@@ -60,6 +73,9 @@ def main():
         assert all(delta<1.5 for delta in alignment),alignment
         assert len(result["paths"])==3,result
         assert len(result["ports"])==6,result
+        assert len(result["directions"])==len(result["paths"])==3,result
+        assert all(a["centered"] and a["pointer"]=="none" and a["length"]>0
+                   for a in result["directions"]),result["directions"]
         ports={v["key"]:v for v in result["ports"]}
         box=next(c for c in result["cards"] if c["id"]=="b")
         assert box["height"]>105,box
@@ -68,7 +84,13 @@ def main():
             path=next(p for p in result["paths"] if p["id"]==e)
             assert path["d"].startswith(f'M {begin["x"]} {begin["y"]} '),path
             assert path["d"].endswith(f'{end["x"]} {end["y"]}'),path
-            assert path["marker"].startswith("url(#cw-draft-arrow-")
+            assert path["marker"] is None, "full path must not terminate in an SVG arrow"
+            arrow=next(a for a in result["directions"] if a["id"]==e)
+            assert arrow["centered"],arrow
+            # The hit-path only exists while draft editing is enabled.
+            hit=next((h for h in result["hitPaths"] if h["id"]==e),None)
+            if hit is not None:
+                assert hit["d"]==path["d"],"an editable hit path must cover the full connection"
             assert begin["hit"]=="none" and end["hit"]=="none"
         assert len({ports[e+":target"]["y"] for e in ("ea","eb","ec")})==3
         assert "causes" in next(p for p in result["paths"] if p["id"]=="eb")["className"]
@@ -81,11 +103,22 @@ def main():
         page.evaluate("()=>__graphite.setZoomForTest(1)")
         assert {(v["key"],v["x"],v["y"]) for v in snap(page)["ports"]}==initial
         assert page.evaluate("()=>__graphite.getState().edges.length")==6
+        # Reflow from measured positions must move the arrow, not detach it.
+        before_direction={a["id"]:(a["x"],a["y"]) for a in snap(page)["directions"]}
+        moved_graph=json.loads(json.dumps(g))
+        next(n for n in moved_graph["nodes"] if n["id"]=="b")["x"]+=120
+        page.evaluate("(graph)=>__graphite.loadFixture(graph)",moved_graph)
+        moved_snap=snap(page)
+        assert {a["id"] for a in moved_snap["directions"]}==set(before_direction)
+        assert all(a["centered"] for a in moved_snap["directions"]),moved_snap
+        assert any((a["x"],a["y"])!=before_direction[a["id"]]
+                   for a in moved_snap["directions"]),moved_snap
+        assert page.evaluate("()=>__graphite.getState().revision")==g["revision"]
         assert not errors,errors
         browser.close()
     print(json.dumps({"result":"PASS","ports":6,
       "checks":["measured tall card","three independent inbound sockets",
-        "directed and typed draft arrows","zoom invariance","no changes to graph"]}))
+        "full socket-to-socket drafts with real path midpoint arrows","zoom invariance","no changes to graph"]}))
 
 if __name__=="__main__":
     main()

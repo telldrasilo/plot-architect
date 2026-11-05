@@ -34,7 +34,16 @@ def socket_snapshot(page):
       const d=Object.fromEntries([...document.querySelectorAll('[data-edge]')].map(el=>[
        el.dataset.edge,el.querySelector('path.edge').getAttribute('d')
       ]));
-      return {ports,d,mode:__graphite.getSemanticZoom()};
+      const directions=Object.fromEntries([...document.querySelectorAll('[data-edge]')].map(el=>{
+       const path=el.querySelector('path.edge'),arrow=el.querySelector('[data-edge-direction]');
+       const length=path.getTotalLength(),mid=path.getPointAtLength(length/2);
+       const matrix=arrow?.transform.baseVal.consolidate()?.matrix;
+       return [el.dataset.edge,{visible:!!arrow,
+        centered:!!matrix&&Math.hypot(matrix.e-mid.x,matrix.f-mid.y)<.01,
+        pointer:arrow?getComputedStyle(arrow).pointerEvents:null,
+        terminal:path.hasAttribute('marker-end'),length}];
+      }));
+      return {ports,d,directions,mode:__graphite.getSemanticZoom()};
     }""")
 
 def main():
@@ -101,6 +110,9 @@ def main():
             path=result["d"][e["id"]]
             assert path.startswith(f'M{source["x"]},{source["y"]} '),path
             assert path.endswith(f'{target["x"]},{target["y"]}'),path
+            arrow=result["directions"][e["id"]]
+            assert arrow["visible"] and arrow["centered"] and arrow["length"]>0,arrow
+            assert arrow["pointer"]=="none" and not arrow["terminal"],arrow
         assert len({ports[f'e{i}:target']["y"] for i in (1,2,3)})==3
         initial={v["key"]:(v["x"],v["y"]) for v in result["ports"]}
         page.evaluate("()=>__graphite.setZoomForTest(.27)")
@@ -121,7 +133,7 @@ def main():
         browser.close()
     print(json.dumps({"result":"PASS","ports":8,
       "checks":["individual anchors","separate incoming","zoom hides sockets",
-       "identity after resize and reload","no pointer interception"]}))
+       "identity after resize and reload","mid-route arrows", "no pointer interception"]}))
 
 if __name__=="__main__":
     main()
