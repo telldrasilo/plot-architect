@@ -2346,8 +2346,16 @@ function cwPendingNotePositions(localRaw,serverRaw){
 function cwEquivalentPersistedGraphs(local,server){
  return cwPendingNotePositions(local,server)?.length===0;
 }
-async function openProject(id){await cwEnsureDraftsSynced();creativeWorkspacePreview=null;cwClearDraftSelection();cwClearDraftMoves();cwStageReview=null;cwPreparedNoteAlternatives.clear();cwHandoffClear();cwPendingNoteReconcile=null;
- if(remote.connected){if(remote.dirty||remote.busy)await flushRemote();if(remote.blocked)throw Error('Сохраните резервную копию: конфликт ревизий');const rec=await apiRequest('/api/projects/'+encodeURIComponent(id));remote.revision=rec.revision;
+async function openProject(id){
+ await cwEnsureDraftsSynced();
+ if(remote.connected){
+  if(remote.dirty||remote.busy)await flushRemote();
+  if(remote.blocked)throw Error('Сохраните резервную копию: конфликт ревизий');
+ }
+ creativeWorkspacePreview=null;cwClearDraftSelection();cwClearDraftMoves();
+ cwStageReview=null;cwPreparedNoteAlternatives.clear();cwHandoffClear();
+ cwPendingNoteReconcile=null;
+ if(remote.connected){const rec=await apiRequest('/api/projects/'+encodeURIComponent(id));remote.revision=rec.revision;
  let pending=false;try{pending=localStorage.getItem(PENDING_PREFIX+id)==='1'}catch{}
  const backup=pending?localStorage.getItem(KEY_PREFIX+id):null;
  const serverGraph=validateImported(rec.graph);
