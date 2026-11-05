@@ -648,6 +648,30 @@ async function cwRunDraftMoveSave(){
 // During a drag existing ports are frozen and merely translate with their
 // endpoint card; reflow happens only after the completed movement is rendered.
 // CW-003/004: visual ports and pointer targets share one screen-space metric policy.
+// An external overflow rail is explicit: regular socket centers stay on the
+// measured card boundary; densely packed sockets remain individually addressable.
+function cwRailGeometry(layout,bounds){
+ const result=[];
+ for(const warning of layout?.warnings||[]){
+  if(warning.code!=='SOCKET_RAIL')continue;
+  const rect=bounds[warning.nodeId];
+  const ports=layout.byNode.get(warning.nodeId)?.[
+   warning.role==='source'?'outgoing':'incoming']||[];
+  if(!rect||ports.length<2)continue;
+  const y=ports.map(p=>p.y);
+  result.push({nodeId:warning.nodeId,role:warning.role,x:ports[0].x,
+   boundaryX:ports[0].boundaryX,y1:Math.min(...y),y2:Math.max(...y),
+   middleY:rect.y+rect.height/2});
+ }
+ return result;
+}
+function cwRailPath(r,originX=0,originY=0){
+ return 'M '+(r.x-originX)+' '+(r.y1-originY)+
+  ' L '+(r.x-originX)+' '+(r.y2-originY)+
+  ' M '+(r.boundaryX-originX)+' '+(r.middleY-originY)+
+  ' L '+(r.x-originX)+' '+(r.middleY-originY);
+}
+
 function cwPortSeparation(port,layout){
  const group=layout?.byNode?.get(port.nodeId)?.[port.role==='source'?'outgoing':'incoming']||[];
  let nearest=Infinity;
@@ -674,6 +698,10 @@ function cwRefreshSocketVisuals(){
  for(const handle of document.querySelectorAll(
   '.cw-free-source,.cw-rewire-handle,.cw-draft-source,.cw-draft-rewire'))
   cwApplySocketControlSize(handle);
+ const edgeHit=socketUiMetrics({scale:pan.scale}).hitDiameterPx/pan.scale;
+ for(const handle of document.querySelectorAll('.cw-draft-edge-select')){
+  handle.style.width=edgeHit+'px';handle.style.height=edgeHit+'px';
+ }
  cwSyncEdgeToolbar();
 }
 
@@ -781,7 +809,7 @@ function cwBeginDraftLinkDrag(event,source,area,handle,svg,getSockets,getBounds,
 
 let cwEdgeToolbar=null;
 function cwActiveEdgeSelection(){
- if(cwSelectedDraftEdge){
+ if(cwSelectedDraftEdge&&semanticZoomLevel()==='full'){
   const {edgeId,workspaceId}=cwSelectedDraftEdge;
   const edge=state.edges.find(e=>e.id===edgeId&&e.workspaceId===workspaceId&&e.draftRelation==='internal');
   const path=[...document.querySelectorAll('[data-cw-edge]')].find(el=>el.dataset.cwEdge===edgeId);
@@ -1341,7 +1369,7 @@ function renderCreativeWorkspacePreview(){
   let drawnSockets=null;
   const svg=document.createElementNS(namespace,'svg');svg.setAttribute('class','cw-preview-arrows');
   svg.setAttribute('width',String(area.width));svg.setAttribute('height',String(area.height));
-  const edgeEditable=persisted&&cwWorkflowEnabled()&&!cwDragDropReview;
+  const edgeEditable=persisted&&cwWorkflowEnabled()&&!cwDragDropReview&&semanticZoomLevel()==='full';
   svg.setAttribute('aria-hidden',edgeEditable?'false':'true');
   if(edgeEditable)svg.setAttribute('aria-label','Черновые сюжетные связи');
   const markerId='cw-draft-arrow-'+area.id;
@@ -1517,7 +1545,14 @@ function renderCreativeWorkspacePreview(){
     height:card?.offsetHeight||105}];
   }));
   drawnSockets=layoutEdgeSockets({nodes,edges:internals,bounds:socketBounds,mode:'full'});
-  if(persisted&&cwWorkflowEnabled()&&!cwDragDropReview){
+  for(const rail of cwRailGeometry(drawnSockets,socketBounds)){
+   const line=document.createElementNS(namespace,'path');
+   line.setAttribute('class','cw-socket-rail');
+   line.dataset.cwSocketRail=rail.nodeId+':'+rail.role;
+   line.setAttribute('d',cwRailPath(rail,area.x,area.y));
+   svg.insertBefore(line,svg.querySelector('.cw-preview-link'));
+  }
+  if(edgeEditable){
    for(const n of nodes){
     const card=[...box.querySelectorAll('[data-cw-node]')]
       .find(el=>el.dataset.cwNode===n.id);
@@ -1537,7 +1572,7 @@ function renderCreativeWorkspacePreview(){
     card.append(handle);
    }
   }
-  for(const port of drawnSockets.ports.values()){
+  if(semanticZoomLevel()==='full')for(const port of drawnSockets.ports.values()){
    const dot=document.createElementNS(namespace,'circle');
    dot.setAttribute('class','cw-preview-socket');
    dot.dataset.cwSocket=port.key;dot.dataset.cwSocketRole=port.role;
@@ -1545,7 +1580,7 @@ function renderCreativeWorkspacePreview(){
    dot.setAttribute('r',String(socketUiMetrics({scale:pan.scale}).visualRadiusWorld));
    svg.append(dot);
   }
-  if(persisted&&cwWorkflowEnabled()&&!cwDragDropReview){
+  if(edgeEditable){
    for(const edge of internals){
     const target=nodeById.get(edge.to),source=nodeById.get(edge.from);
     const port=drawnSockets.ports.get(socketKey(edge.id,'target'));
@@ -1939,7 +1974,9 @@ function renderEdges(){
   cwSizeSocketControl(handle,free,sockets);
  }
  const marker='<defs><marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#93908b" stroke-width="1.8"/></marker><marker id="arrOn" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#e4c78c" stroke-width="1.8"/></marker></defs>';
- let c=marker;
+ let c=marker+cwRailGeometry(sockets,bounds).map(rail=>
+  '<path class="cw-socket-rail" data-socket-rail="'+esc(rail.nodeId+':'+rail.role)+
+  '" d="'+cwRailPath(rail)+'"/>').join('');
  for(const e of plan.visibleEdges){
    const q=routeMode==='smart'?smartConnector(e,sockets):connector(e,sockets);if(!q)continue;
    const active=e.id===selectedEdge||e.from===selectedId||e.to===selectedId||plan.reveal.has(e.id);
@@ -2694,6 +2731,7 @@ function updateCamera(){
  $('world').style.transform=`translate(${pan.x}px,${pan.y}px) scale(${pan.scale})`;
  $('zoom-label').textContent=Math.round(pan.scale*100)+'%';positionInspector();renderOverviewTitles();
  if(prior!==mode||lodOverview!==useOverview()){renderEdges();showNotice();}
+ if(prior!==mode)renderCreativeWorkspacePreview();
  cwRefreshSocketVisuals();
  renderOverview();
 }
