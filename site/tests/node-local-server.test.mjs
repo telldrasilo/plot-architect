@@ -41,7 +41,10 @@ async function harness(t, {workflowEnabled = false} = {}) {
       authorization, cookie, originHeader,
       json: {jsonrpc: '2.0', id: 12, method, ...(params ? {params} : {})}
     });
-    return {status: res.status, data: await res.json()};
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); } catch { data = text; }
+    return {status: res.status, data};
   };
   return {dir, key, call, mcp, get origin() {return origin;},
     get sqlite() {return sqlite;}, get server() {return server;},
