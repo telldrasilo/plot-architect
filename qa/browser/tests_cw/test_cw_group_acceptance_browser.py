@@ -128,23 +128,25 @@ def main():
             assert page.locator('[data-node="'+node_id+'"]').count()==0
 
         page.evaluate("() => __graphite.setCWWorkflowTestMode(true)")
-        assert page.locator(".cw-draft-check").count()==4
+        assert page.locator(".cw-draft-check").count()==0
 
-        def pick(node_id):
-            page.locator('[data-cw-node="'+node_id+'"] .cw-draft-check').check()
+        def pick(node_id,extend=False):
+            page.locator('[data-cw-node="'+node_id+'"]').click(
+                modifiers=["Control"] if extend else []
+            )
         # A selection made in a different workspace replaces, never mixes,
         # the prior selection. No generic state/REST writes occur.
         pick("a")
         assert page.evaluate("() => __graphite.getCWSelectedDraftIds()")==["a"]
         pick("d")
         assert page.evaluate("() => __graphite.getCWSelectedDraftIds()")==["d"]
-        assert page.locator('[data-cw-node="a"] .cw-draft-check').is_checked() is False
+        assert page.locator('[data-cw-node="a"]').get_attribute("aria-selected")=="false"
         assert page.locator('[data-cw-workspace="w1"] .cw-draft-selection-actions').count()==0
         assert page.locator('[data-cw-workspace="w2"] .cw-draft-selection-actions').count()==1
         page.locator('[data-cw-workspace="w2"] .cw-draft-selection-actions button').last.click()
         assert page.evaluate("() => __graphite.getCWSelectedDraftIds()")==[]
 
-        pick("a");pick("b")
+        pick("a");pick("b",True)
         assert page.evaluate("() => __graphite.getCWSelectedDraftIds()")==["a","b"]
         assert page.locator('[data-cw-workspace="w1"] .cw-draft-selection-actions').inner_text().find("Выбрано: 2")>=0
         assert db["applies"]==0 and db["put"]==0
@@ -185,7 +187,7 @@ def main():
         )
         assert page.evaluate("() => __graphite.getCWSelectedDraftIds()")==[]
         page.evaluate("() => __graphite.setCWWorkflowTestMode(true)")
-        pick("a");pick("b")
+        pick("a");pick("b",True)
         page.locator('[data-cw-workspace="w1"] .cw-draft-selection-actions button').first.click()
         page.locator(".cw-accept-review").wait_for()
         page.get_by_role("button",name="Принять в сюжет").click()
@@ -210,7 +212,7 @@ def main():
     print(json.dumps({
         "result":"PASS","accepted":2,"remaining":2,
         "accepted_links":1,"batches":db["applies"],"generic_writes":db["put"],
-        "cases":["single-area grouping","cross-workspace reset","review and cancel",
+        "cases":["direct Ctrl-click grouping","cross-workspace reset","review and cancel",
                  "atomic conflict","one batch","reload","original preserved"]
     },ensure_ascii=False))
 
