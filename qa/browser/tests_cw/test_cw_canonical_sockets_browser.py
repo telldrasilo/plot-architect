@@ -49,6 +49,15 @@ def main():
         page.evaluate("()=>__graphite.setZoomForTest(1)")
         result=socket_snapshot(page)
         assert result["mode"]=="full",result["mode"]
+        # Canonical selection gets a viewport-space relation toolbar.
+        page.locator('[data-edge-target="e1"]').click(force=True)
+        toolbar=page.locator('[data-cw-edge-toolbar="canon:e1"]')
+        assert toolbar.count()==1
+        assert toolbar.locator('select').input_value()=="precedes"
+        assert toolbar.get_by_text("Сохранить").is_disabled()
+        toolbar.get_by_text("Отмена").click()
+        assert page.locator('[data-cw-edge-toolbar]').count()==0
+        page.evaluate("()=>__graphite.setZoomForTest(1)")
         visual=page.evaluate("""() => [...document.querySelectorAll('[data-edge-socket]')].map(
           el=>el.getBoundingClientRect().width)""")
         assert all(abs(d-10)<1.5 for d in visual),visual

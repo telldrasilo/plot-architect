@@ -362,6 +362,26 @@ body.pa-multi-modifier .inspector{pointer-events:none;opacity:.35}/* allows Ctrl
  background:#463a2a;border-color:#e1c99a
 }
 
+
+/* Variant C: action panel follows the rendered SVG route in screen coordinates. */
+.cw-edge-toolbar{position:fixed;z-index:35;display:flex;flex-direction:column;gap:5px;
+ width:max-content;max-width:min(300px,calc(100vw - 24px));padding:10px 12px;
+ background:#29272e;border:1px solid #776c79;border-radius:10px;
+ box-shadow:0 8px 26px #0008;color:#efefed}
+.cw-edge-toolbar label{display:flex;align-items:center;gap:9px;font-weight:600;font-size:12px}
+.cw-edge-toolbar select{min-width:138px;max-width:210px;flex:1;padding:6px 7px;
+ background:#242329;border:1px solid #62596d;border-radius:7px;color:#efefed}
+.cw-edge-toolbar-hint{font-size:11px;line-height:1.3;color:#aaa6b1;white-space:normal}
+.cw-edge-toolbar-actions{display:flex;gap:6px}
+.cw-edge-toolbar-actions button{padding:6px 9px;white-space:nowrap}
+.cw-draft-edge-select{position:absolute;z-index:7;transform:translate(-50%,-50%);
+ width:26px;height:26px;min-height:0;padding:0;border:0;background:transparent;
+ color:#d6c69e;opacity:.02;pointer-events:auto}
+.cw-draft-edge-select:hover,.cw-draft-edge-select:focus-visible{
+ opacity:1;background:#393137;border:1px solid #8d7f84;border-radius:8px}
+.cw-draft-edge-select:hover::after,.cw-draft-edge-select:focus-visible::after{
+ content:'Связь';font-size:9px}
+
 .cw-preview-card.cw-draft-link-target{outline:2px solid #d2bded;outline-offset:3px}
 .cw-draft-link-guide{fill:none;stroke:#bcb0d8;stroke-width:2;stroke-dasharray:8 5;
  vector-effect:non-scaling-stroke}
@@ -1099,6 +1119,7 @@ function cwRefreshSocketVisuals(){
  for(const handle of document.querySelectorAll(
   '.cw-free-source,.cw-rewire-handle,.cw-draft-source,.cw-draft-rewire'))
   cwApplySocketControlSize(handle);
+ cwSyncEdgeToolbar();
 }
 
 function cwDrawDraftConnections(svg,area,links,sockets,moves=new Map()){
@@ -1202,6 +1223,113 @@ function cwBeginDraftLinkDrag(event,source,area,handle,svg,getSockets,getBounds,
  handle.addEventListener('pointerup',end);
  handle.addEventListener('pointercancel',cancel);
 }
+
+let cwEdgeToolbar=null;
+function cwActiveEdgeSelection(){
+ if(cwSelectedDraftEdge){
+  const {edgeId,workspaceId}=cwSelectedDraftEdge;
+  const edge=state.edges.find(e=>e.id===edgeId&&e.workspaceId===workspaceId&&e.draftRelation==='internal');
+  const path=[...document.querySelectorAll('[data-cw-edge]')].find(el=>el.dataset.cwEdge===edgeId);
+  if(edge&&path)return {scope:'draft',edge,path,workspaceId};
+ }
+ if(selected?.type==='edge'&&semanticZoomLevel()==='full'){
+  const edge=currentEdges().find(e=>e.id===selected.id);
+  const group=[...document.querySelectorAll('[data-edge]')].find(el=>el.dataset.edge===selected.id);
+  const path=group?.querySelector('path.edge');
+  if(edge&&path)return {scope:'canon',edge,path,workspaceId:null};
+ }
+ return null;
+}
+function cwPositionEdgeToolbar(target){
+ if(!cwEdgeToolbar?.isConnected||!target?.path?.isConnected)return;
+ const len=target.path.getTotalLength();if(!Number.isFinite(len)||len<=0)return;
+ const p=target.path.getPointAtLength(len/2),m=target.path.getScreenCTM();
+ if(!m)return;
+ const x=m.a*p.x+m.c*p.y+m.e,y=m.b*p.x+m.d*p.y+m.f;
+ const w=cwEdgeToolbar.offsetWidth,h=cwEdgeToolbar.offsetHeight,g=12,o=16;
+ const candidates=[
+  [x-w/2,y-h-o],[x-w/2,y+o],[x-w-o,y-h/2],[x+o,y-h/2]
+ ];
+ const obstacles=[...document.querySelectorAll('.node,.cw-preview-card')].map(el=>el.getBoundingClientRect());
+ const inspect=$('inspector');
+ if(inspect&&!inspect.hidden)obstacles.push(inspect.getBoundingClientRect());
+ let best=null;
+ for(let i=0;i<candidates.length;i++){
+  const [xx,yy]=candidates[i],left=Math.max(g,Math.min(window.innerWidth-w-g,xx));
+  const top=Math.max(g,Math.min(window.innerHeight-h-g,yy));
+  const collision=obstacles.reduce((sum,r)=>sum+
+   Math.max(0,Math.min(left+w,r.right)-Math.max(left,r.left))*
+   Math.max(0,Math.min(top+h,r.bottom)-Math.max(top,r.top)),0);
+  const score=collision*100+Math.abs(left-xx)+Math.abs(top-yy)+i;
+  if(!best||score<best.score)best={x:left,y:top,score};
+ }
+ if(best){cwEdgeToolbar.style.left=best.x+'px';cwEdgeToolbar.style.top=best.y+'px'}
+}
+function cwCloseEdgeToolbar(){
+ if(cwSelectedDraftEdge){cwSelectedDraftEdge=null;renderCreativeWorkspacePreview()}
+ else if(selected?.type==='edge'){selected=null;render()}
+ else{cwEdgeToolbar?.remove();cwEdgeToolbar=null}
+}
+function cwSyncEdgeToolbar(){
+ const target=cwActiveEdgeSelection();
+ if(!target){cwEdgeToolbar?.remove();cwEdgeToolbar=null;return}
+ const key=target.scope+':'+target.edge.id;
+ if(cwEdgeToolbar?.isConnected&&cwEdgeToolbar.dataset.cwEdgeToolbar===key
+    &&cwEdgeToolbar.dataset.edgeType===target.edge.type){
+  cwPositionEdgeToolbar(target);return;
+ }
+ cwEdgeToolbar?.remove();
+ const panel=document.createElement('section');panel.className='cw-edge-toolbar';
+ panel.dataset.cwEdgeToolbar=key;panel.dataset.edgeType=target.edge.type;
+ panel.setAttribute('role','group');panel.setAttribute('aria-label','Редактирование сюжетной связи');
+ panel.addEventListener('pointerdown',e=>e.stopPropagation());
+ panel.addEventListener('click',e=>e.stopPropagation());
+ const label=document.createElement('label');label.textContent='Связь';
+ const select=document.createElement('select');select.dataset.cwEdgeType=target.edge.id;
+ select.setAttribute('aria-label','Смысл связи');
+ const choices=[...cwDraftRelationOptions];
+ if(!choices.some(opt=>opt[0]===target.edge.type))
+  choices.push([target.edge.type,edgeLabels[target.edge.type]||target.edge.type,'Существующий тип']);
+ for(const [value,title] of choices){
+  const option=document.createElement('option');option.value=value;option.textContent=title;
+  select.append(option);
+ }
+ select.value=target.edge.type;
+ const help=document.createElement('small');help.className='cw-edge-toolbar-hint';
+ const actions=document.createElement('div');actions.className='cw-edge-toolbar-actions';
+ const save=document.createElement('button');save.type='button';save.textContent='Сохранить';
+ const reconnect=document.createElement('button');reconnect.type='button';
+ reconnect.textContent='Перенести конец';reconnect.title='Переподключить стрелку перетаскиванием';
+ const cancel=document.createElement('button');cancel.type='button';cancel.textContent='Отмена';
+ const update=()=>{
+  help.textContent=choices.find(c=>c[0]===select.value)?.[2]||'';
+  save.disabled=select.value===target.edge.type||cwAcceptanceBusy||
+    (target.scope==='draft'&&!cwCleanForOperation());
+ };
+ select.addEventListener('change',update);
+ save.addEventListener('click',e=>{
+  e.stopPropagation();if(save.disabled)return;
+  const newType=select.value;
+  if(target.scope==='draft'){
+   save.disabled=true;
+   void cwCommitDraftEdge({kind:'set_draft_edge_type',workspaceId:target.workspaceId,
+    edgeId:target.edge.id,newType}).finally(()=>{if(save.isConnected)update()});
+  }else commit(()=>{const edge=eby(target.edge.id);if(edge)edge.type=newType},'Тип связи изменён');
+ });
+ reconnect.addEventListener('click',e=>{
+  e.stopPropagation();
+  const selector=target.scope==='draft'?'[data-cw-rewire-edge]':'#cw-rewire-handle';
+  const handle=[...document.querySelectorAll(selector)].find(el=>
+   target.scope==='canon'||el.dataset.cwRewireEdge===target.edge.id);
+  if(handle){handle.focus({preventScroll:true});note('Перетащите конечное гнездо к другой карточке')}
+  else note('Выберите конечное гнездо стрелки');
+ });
+ cancel.addEventListener('click',e=>{e.stopPropagation();cwCloseEdgeToolbar()});
+ actions.append(save,reconnect,cancel);label.append(select);
+ panel.append(label,help,actions);document.body.append(panel);
+ cwEdgeToolbar=panel;update();cwPositionEdgeToolbar(target);
+}
+
 const cwDraftRelationOptions=[
  ['precedes','Предшествует','А происходит раньше Б, не обязательно вызывает Б'],
  ['causes','Вызывает','А является причиной Б'],
@@ -1882,64 +2010,23 @@ function renderCreativeWorkspacePreview(){
       e,source,area,handle,svg,()=>drawnSockets,()=>socketBounds,edge));
     handle.addEventListener('click',e=>e.stopPropagation());
     card.append(handle);
-    // A separate type button keeps drag-to-rewire independent of mouse editing.
-    const changeType=document.createElement('button');changeType.type='button';
-    changeType.className='cw-draft-type-trigger';changeType.dataset.cwEdgeTypeTrigger=edge.id;
-    changeType.textContent='≡';
-    changeType.title='Изменить смысл черновой связи';
-    changeType.setAttribute('aria-label','Изменить тип черновой стрелки от «'+
-      source.title+'» к «'+target.title+'»');
-    changeType.style.left=(port.x-target.x-29)+'px';
-    changeType.style.top=(port.y-target.y)+'px';
-    changeType.addEventListener('pointerdown',e=>e.stopPropagation());
-    changeType.addEventListener('click',e=>{
-     e.stopPropagation();cwSelectDraftEdge(area.id,edge.id)
-    });
-    card.append(changeType);
    }
   }
   cwDrawDraftConnections(svg,area,internals,drawnSockets);
-  if(edgeEditable&&cwSelectedDraftEdge?.workspaceId===area.id){
-   const edge=internals.find(e=>e.id===cwSelectedDraftEdge.edgeId&&e.draftRelation==='internal');
-   const from=edge&&drawnSockets.ports.get(socketKey(edge.id,'source'));
-   const to=edge&&drawnSockets.ports.get(socketKey(edge.id,'target'));
-   if(edge&&from&&to){
-    const panel=document.createElement('section');
-    panel.className='cw-draft-type-panel';panel.dataset.cwEdgeTypePanel=edge.id;
-    panel.setAttribute('role','group');panel.setAttribute('aria-label','Тип черновой стрелки');
-    panel.addEventListener('pointerdown',e=>e.stopPropagation());
-    panel.addEventListener('click',e=>e.stopPropagation());
-    panel.style.left=Math.max(8,Math.min(Math.max(8,area.width-314),
-     (from.x+to.x)/2-area.x-155))+'px';
-    panel.style.top=Math.max(8,Math.min(Math.max(8,area.height-150),
-     (from.y+to.y)/2-area.y+20))+'px';
-    const label=document.createElement('label');label.textContent='Смысл связи';
-    label.setAttribute('for','cw-type-'+edge.id);
-    const select=document.createElement('select');select.id='cw-type-'+edge.id;
-    select.dataset.cwEdgeType=edge.id;
-    for(const [value,title] of cwDraftRelationOptions){
-     const opt=document.createElement('option');opt.value=value;opt.textContent=title;select.append(opt);
-    }
-    select.value=edge.type;
-    const help=document.createElement('small');
-    const actions=document.createElement('div');actions.className='cw-draft-type-actions';
-    const approve=document.createElement('button');approve.type='button';approve.textContent='Сохранить';
-    const cancel=document.createElement('button');cancel.type='button';cancel.textContent='Отмена';
-    const update=()=>{
-     help.textContent=cwDraftRelationOptions.find(x=>x[0]===select.value)?.[2]||'';
-     approve.disabled=select.value===edge.type||cwAcceptanceBusy||!cwCleanForOperation();
-    };
-    select.addEventListener('change',update);
-    approve.addEventListener('click',e=>{
-     e.stopPropagation();if(approve.disabled)return;
-     void cwCommitDraftEdge({kind:'set_draft_edge_type',workspaceId:area.id,
-      edgeId:edge.id,newType:select.value});
-    });
-    cancel.addEventListener('click',e=>{
-     e.stopPropagation();cwSelectedDraftEdge=null;renderCreativeWorkspacePreview();
-    });
-    actions.append(approve,cancel);label.append(select);
-    panel.append(label,help,actions);box.append(panel);update();
+  if(edgeEditable){
+   for(const edge of internals.filter(e=>e.draftRelation==='internal')){
+    const path=[...svg.querySelectorAll('[data-cw-edge]')].find(el=>el.dataset.cwEdge===edge.id);
+    if(!path)continue;
+    const length=path.getTotalLength();if(!Number.isFinite(length)||length<=0)continue;
+    const pos=path.getPointAtLength(length/2);
+    const selectEdge=document.createElement('button');selectEdge.type='button';
+    selectEdge.className='cw-draft-edge-select';selectEdge.dataset.cwEdgeSelect=edge.id;
+    selectEdge.setAttribute('aria-label','Выбрать смысл черновой стрелки');
+    selectEdge.title='Изменить смысл связи';
+    selectEdge.style.left=pos.x+'px';selectEdge.style.top=pos.y+'px';
+    selectEdge.addEventListener('pointerdown',e=>e.stopPropagation());
+    selectEdge.addEventListener('click',e=>{e.stopPropagation();cwSelectDraftEdge(area.id,edge.id)});
+    box.append(selectEdge);
    }
   }
   if(dropReviewPanel)cwPositionDropReview(dropReviewPanel,box,dropReviewIds);
@@ -3303,6 +3390,7 @@ document.addEventListener('keydown',e=>{
    e.preventDefault();cwCancelDropReview();return;
   }
   if(interaction){e.preventDefault();cancelGesture();return}
+  if(cwEdgeToolbar){e.preventDefault();cwCloseEdgeToolbar();return}
   if(!$('tools-menu').hidden){$('tools-menu').hidden=true;$('tools-more').setAttribute('aria-expanded','false')}
   if(gapLinkFrom){gapLinkFrom=null;note('Редакторская связь отменена');return}if(linkFrom){linkFrom=null;render();return}
   if(!modalOpen&&selected?.type==='node'){setNodeSelection([]);return}

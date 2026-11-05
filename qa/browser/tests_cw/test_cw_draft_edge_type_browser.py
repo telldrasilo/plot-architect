@@ -122,7 +122,7 @@ def main():
         # The relation can be selected by keyboard without dragging a node.
         hit.focus()
         page.keyboard.press("Enter")
-        panel=page.locator('[data-cw-edge-type-panel="ea"]')
+        panel=page.locator('[data-cw-edge-toolbar="draft:ea"]')
         assert panel.count()==1
         picker=panel.locator('[data-cw-edge-type="ea"]')
         assert set(picker.locator("option").evaluate_all(
@@ -134,13 +134,13 @@ def main():
         assert data["apply"]==0 and data["put"]==0
         assert data["graph"]["edges"]==baseline["edges"]
         panel.get_by_text("Отмена").click()
-        assert page.locator('[data-cw-edge-type-panel="ea"]').count()==0
+        assert page.locator('[data-cw-edge-toolbar="draft:ea"]').count()==0
         assert data["apply"]==0
 
-        # Real mouse selection on a dedicated accessible handle next to the socket.
-        page.locator('[data-cw-node="b"]').hover(position={"x":44,"y":24})
-        page.locator('[data-cw-edge-type-trigger="ea"]').click()
-        panel=page.locator('[data-cw-edge-type-panel="ea"]')
+        # Real mouse selection at line midpoint (no button on node border).
+        assert page.locator('[data-cw-edge-type-trigger]').count()==0
+        page.locator('[data-cw-edge-select="ea"]').click(force=True)
+        panel=page.locator('[data-cw-edge-toolbar="draft:ea"]')
         assert panel.count()==1
         panel.locator("select").select_option("enables")
         panel.get_by_text("Сохранить").click()
@@ -165,7 +165,7 @@ def main():
 
         page.locator('[data-cw-edge-hit="ea"]').focus()
         page.keyboard.press("Enter")
-        panel=page.locator('[data-cw-edge-type-panel="ea"]')
+        panel=page.locator('[data-cw-edge-toolbar="draft:ea"]')
         assert panel.locator("select").input_value()=="enables"
         panel.locator("select").select_option("causes")
         data["force_conflict"]=True
