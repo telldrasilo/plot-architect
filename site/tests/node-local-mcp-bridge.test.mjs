@@ -4,10 +4,10 @@ import {spawn} from 'node:child_process';
 import {PassThrough} from 'node:stream';
 import {createInterface} from 'node:readline';
 import {readFileSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
 import {DatabaseSync} from 'node:sqlite';
 import test from 'node:test';
 import {createGraphiteLoopbackServer} from '../src/node_local_server.mjs';
-import {openGraphiteLocalStorage} from '../src/node_local_storage.mjs';
 import {assertLocalMcpUrl,createLocalMcpStdioBridge} from '../src/node_local_mcp_stdio_bridge.mjs';
 import {localTunnelLaunchOptions} from '../src/node_local_tunnel_launch.mjs';
 
@@ -75,7 +75,7 @@ test('tunnel launcher protects key in env and cannot inherit wrong profile or de
 test('real stdio child bridges Graphite MCP read/write and REST without a second SQLite connection', async t => {
   const h = local(t);
   const origin = await h.server.listen(0);
-  const child = spawn(process.execPath, [new URL('../scripts/mcp-local-stdio.mjs', import.meta.url).pathname], {
+  const child = spawn(process.execPath, [fileURLToPath(new URL('../scripts/mcp-local-stdio.mjs', import.meta.url))], {
     cwd: new URL('..', import.meta.url),
     stdio: ['pipe','pipe','pipe'],
     env: {
@@ -152,7 +152,7 @@ test('bridge never forwards unauthenticated or public URL MCP traffic', async t 
 });
 
 test('local tunnel stdio entry refuses to start without an ephemeral key', async () => {
-  const child = spawn(process.execPath, [new URL('../scripts/mcp-local-stdio.mjs', import.meta.url).pathname], {
+  const child = spawn(process.execPath, [fileURLToPath(new URL('../scripts/mcp-local-stdio.mjs', import.meta.url))], {
     cwd: new URL('..', import.meta.url),
     stdio: ['ignore','pipe','pipe'],
     env: {...process.env,GRAPHITE_LOCAL_MCP_URL:'http://127.0.0.1:8788/mcp',
