@@ -71,7 +71,11 @@ def main():
         page = context.new_page()
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto("https://plot.local/")
-        page.wait_for_function("window.__graphite && __graphite.getRemote().connected")
+        page.wait_for_function(
+            "() => window.__graphite && __graphite.getRemote().connected "
+            "&& __graphite.getProjectIndex().activeId === 'qa-synthetic-ux014' "
+            "&& __graphite.getState().nodes[0]?.title === 'Source'"
+        )
         assert page.evaluate("() => __graphite.getRemote().connected")
         page.evaluate("() => __graphite.selectNode('n1')")
         page.locator("#i-rewrite").click()
