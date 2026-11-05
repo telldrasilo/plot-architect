@@ -48,6 +48,8 @@ jobs:
         run: python qa/browser/tests_cw/test_cw_draft_sockets_browser.py
       - name: Verify canonical socket drag-to-connect, cancel and server CAS
         run: python qa/browser/tests_cw/test_cw_drag_create_canonical_browser.py
+      - name: Verify safe canonical endpoint reconnection without early deletion
+        run: python qa/browser/tests_cw/test_cw_reconnect_canonical_browser.py
       - name: Verify pending note geometry recovery in synthetic Chromium
         run: python qa/browser/tests_cw/test_cw_pending_geometry_browser.py
       - name: Verify ChatGPT manual JSON handoff and isolated staging
