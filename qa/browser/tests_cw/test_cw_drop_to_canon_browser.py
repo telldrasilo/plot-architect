@@ -245,11 +245,18 @@ def main():
 
         # Concurrent update stops acceptance; no partial graph mutation.
         page.evaluate("() => __graphite.setCWWorkflowTestMode(true)")
+        # Give the downward scene enough real screen space: the test pointer
+        # must stay inside Chromium throughout the upward drag.
+        page.set_viewport_size({"width":1440,"height":1450})
         page.evaluate("() => __graphite.fit()")
-        # Use a fixed world-space displacement despite viewport/zoom changes
-        # caused by the tall-card fixture. Crossing the static border matters.
+        # Cross the fixed transition boundary in world coordinates.
         scale=page.evaluate("() => __graphite.getPan().scale")
-        drag(page,"c",0,-round(380*scale))
+        card_box=page.locator('[data-cw-node="c"]').bounding_box()
+        dy=-round(380*scale)
+        assert card_box and card_box["y"]+25+dy>15, {
+            "card":card_box, "scale":scale, "drag":dy
+        }
+        drag(page,"c",0,dy)
         page.locator(".cw-accept-review.cw-drop-review").wait_for()
         assert_review_next_to_card(page,"c")
         db["force_conflict"]=True
