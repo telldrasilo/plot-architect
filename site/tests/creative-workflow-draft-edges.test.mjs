@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
  previewAddDraftEdge,applyAddDraftEdge,
- previewRewireDraftEdge,applyRewireDraftEdge
+ previewRewireDraftEdge,applyRewireDraftEdge,
+ previewSetDraftEdgeType,applySetDraftEdgeType
 } from '../src/creative_workflow_draft_edges.mjs';
 import {canonicalProjection,previewDraftAcceptance,applyDraftAcceptance}
  from '../src/creative_workflow_contract.mjs';
@@ -118,4 +119,48 @@ test('newly created draft arrow is promoted only when both ends are accepted',()
  assert.equal(after.edges.find(e=>e.id==='ec').workspaceId,undefined);
  assert.equal(after.edges.find(e=>e.id==='ea').workspaceId,'w1');
  assert.equal(after.nodes.find(n=>n.id==='b').workspaceId,'w1');
+});
+
+test('type edit retains both endpoints and does not infer cause from geometry',()=>{
+ const original=graph(),before=structuredClone(original);
+ const plan=previewSetDraftEdgeType(original,{
+  workspaceId:'w1',edgeId:'ea',newType:'hinders'
+ });
+ assert.equal(plan.before.type,'causes');
+ assert.equal(plan.after.type,'hinders');
+ assert.equal(plan.after.from,'a');
+ assert.equal(plan.after.to,'b');
+ assert.deepEqual(original,before,'preview must never mutate source');
+ const {graph:after}=applySetDraftEdgeType(original,{
+  workspaceId:'w1',edgeId:'ea',newType:'hinders',
+  expectedPreview:plan,expectedRevision:12
+ });
+ assert.equal(after.edges[0].type,'hinders');
+ assert.equal(after.edges[0].id,'ea');
+ assert.equal(after.edges[0].workspaceId,'w1');
+ assert.deepEqual(canonicalProjection(after),canonicalProjection(original));
+ assert.deepEqual(original,before);
+});
+test('type review rejects foreign, unchanged, illegal and stale changes',()=>{
+ const g=graph(),p=previewSetDraftEdgeType(g,{
+  workspaceId:'w1',edgeId:'ea',newType:'enables'
+ });
+ assert.throws(()=>previewSetDraftEdgeType(g,{
+  workspaceId:'w2',edgeId:'ea',newType:'enables'
+ }),error('DRAFT_EDGE_NOT_FOUND'));
+ assert.throws(()=>previewSetDraftEdgeType(g,{
+  workspaceId:'w1',edgeId:'ea',newType:'causes'
+ }),error('DRAFT_EDGE_UNCHANGED'));
+ assert.throws(()=>previewSetDraftEdgeType(g,{
+  workspaceId:'w1',edgeId:'ea',newType:'new-unknown'
+ }),error('DRAFT_EDGE_INVALID'));
+ assert.throws(()=>applySetDraftEdgeType(g,{
+  workspaceId:'w1',edgeId:'ea',newType:'hinders',
+  expectedPreview:p,expectedRevision:12
+ }),error('PREVIEW_STALE'));
+ assert.throws(()=>applySetDraftEdgeType(g,{
+  workspaceId:'w1',edgeId:'ea',newType:'enables',
+  expectedPreview:p,expectedRevision:11
+ }),error('REVISION_CONFLICT'));
+ assert.equal(g.edges[0].type,'causes');
 });
