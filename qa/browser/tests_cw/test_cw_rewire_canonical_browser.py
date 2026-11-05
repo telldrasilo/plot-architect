@@ -138,6 +138,12 @@ def main():
             {"id":"e1","from":"n1","to":"n2","type":"enables"}
         ]
         assert page.locator('[data-edge-socket="e1:target"]').count()==1
+        # The same direct target remains ready after the successful readback.
+        same_socket=page.locator('[data-canon-edge-port="e1"]')
+        assert same_socket.count()==1
+        same_socket.click()
+        assert page.locator('[data-cw-edge-toolbar="canon:e1"]').count()==1
+        assert db["put"]==1
 
         page.reload()
         page.wait_for_function(
