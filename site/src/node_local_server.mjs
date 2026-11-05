@@ -166,7 +166,7 @@ export function createGraphiteLoopbackServer({database, editorHtml, token,
       return reply(res, 200, JSON.stringify({
         ok: true, requiresAuthorization: true,
         version: 'graphite-node-local-dev', authMode: 'node-loopback',
-        authenticated: true
+        authenticated: true, workflowEnabled: workflowEnabled === true
       }), {'Content-Type': 'application/json; charset=utf-8'});
     }
 
