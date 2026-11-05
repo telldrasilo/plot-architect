@@ -130,6 +130,7 @@ let cwLocalWorkflowEnabled=false;
 // the QA switch remains synthetic. The REST server validates every operation.
 function cwWorkflowEnabled(){return cwWorkflowTestMode||cwLocalWorkflowEnabled}
 const cwDraftMoveEdits=new Map();
+let cwDraftDragging=0;
 function cwClearDraftMoves(){
  if(cwMoveSaveTimer!==null){clearTimeout(cwMoveSaveTimer);cwMoveSaveTimer=null}
  cwDraftMoveEdits.clear();cwMoveRetry=null;cwMoveFailure=null;
@@ -439,7 +440,7 @@ async function cwRunDraftMoveSave(){
     if(pending?.x===move.x&&pending?.y===move.y)cwDraftMoveEdits.delete(move.nodeId);
    }
    cwMoveRetry=null;cwMoveFailure=null;
-   recomputeFieldTags();save(false);renderCreativeWorkspacePreview();
+   recomputeFieldTags();save(false);if(!cwDraftDragging)renderCreativeWorkspacePreview();
   }
   $('saved').textContent='✓ Сохранено локально · '+remote.revision;
  }catch(err){
@@ -449,7 +450,7 @@ async function cwRunDraftMoveSave(){
   throw err;
  }finally{
   cwAcceptanceBusy=false;
-  renderCreativeWorkspacePreview();
+  if(!cwDraftDragging)renderCreativeWorkspacePreview();
  }
 }
 function cwBeginDraftDrag(event,card,node,area,svg,links,byId){
@@ -476,6 +477,7 @@ function cwBeginDraftDrag(event,card,node,area,svg,links,byId){
  const startX=event.clientX,startY=event.clientY;
  let dx=0,dy=0,moved=false;
  card.setPointerCapture(event.pointerId);
+ cwDraftDragging++;
  const draw=()=>{
   const movedNodes=new Map(initial.map(n=>[n.id,{x:n.x+dx,y:n.y+dy}]));
   for(const n of initial){
@@ -503,6 +505,7 @@ function cwBeginDraftDrag(event,card,node,area,svg,links,byId){
   draw();
  };
  const cleanup=()=>{
+  cwDraftDragging=Math.max(0,cwDraftDragging-1);
   card.removeEventListener('pointermove',move);
   card.removeEventListener('pointerup',end);
   card.removeEventListener('pointercancel',cancel);
@@ -1913,7 +1916,7 @@ function validateImported(g){if(!g||!Array.isArray(g.nodes)||!Array.isArray(g.ed
  for(const [prefix,property,list] of [['n','nextNode',out.nodes],['e','nextEdge',out.edges],['f','nextField',out.fields],['l','nextLine',out.lanes]]){let max=0;for(const x of list){const match=new RegExp('^'+prefix+'(\\d+)$').exec(x.id);if(match)max=Math.max(max,Number(match[1]))}out[property]=Math.max(out[property]||1,max+1)}out.view=null;out.revision=Number.isSafeInteger(out.revision)?out.revision:0;return out}
 function downloadJson(data,filename){const u=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=u;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(u),2500)}
 function exportProject(){downloadJson({format:'plot-architect/project-1',exportedAt:new Date().toISOString(),project:{id:activeProjectId,name:projectName(),graph:persistentGraph()}},'plot-architect-'+projectName().replace(/[^a-zA-Zа-яА-Я0-9-]+/g,'-').slice(0,50)+'.json');note('Проект экспортирован')}
-async function openProject(id){creativeWorkspacePreview=null;cwClearDraftSelection();cwClearDraftMoves();cwStageReview=null;cwPreparedNoteAlternatives.clear();cwHandoffClear();
+async function openProject(id){await cwEnsureDraftsSynced();creativeWorkspacePreview=null;cwClearDraftSelection();cwClearDraftMoves();cwStageReview=null;cwPreparedNoteAlternatives.clear();cwHandoffClear();
  if(remote.connected){if(remote.dirty||remote.busy)await flushRemote();if(remote.blocked)throw Error('Сохраните резервную копию: конфликт ревизий');const rec=await apiRequest('/api/projects/'+encodeURIComponent(id));remote.revision=rec.revision;
  let pending=false;try{pending=localStorage.getItem(PENDING_PREFIX+id)==='1'}catch{}
  const backup=pending?localStorage.getItem(KEY_PREFIX+id):null;
@@ -1922,13 +1925,14 @@ async function openProject(id){creativeWorkspacePreview=null;cwClearDraftSelecti
  else{state=JSON.parse(localStorage.getItem(KEY_PREFIX+id)||'null')||blankGraph()}
  activeProjectId=id;KEY=KEY_PREFIX+id;registry.activeId=id;selected=null;linkFrom=null;history=[];focusMode=false;forceAllEdges=false;state.view=null;recomputeFieldTags();save(false);updateProjectLabel();render();fit();if(remote.blocked)$('saved').textContent='! Есть несинхронизированная копия · экспортируйте JSON';
 }
-async function createProject(name,graph){creativeWorkspacePreview=null;cwClearDraftSelection();cwClearDraftMoves();cwStageReview=null;cwPreparedNoteAlternatives.clear();cwHandoffClear();graph=validateImported(graph);for(const node of graph.nodes||[])delete node.autoFieldIds;graph.revision=0;
+async function createProject(name,graph){await cwEnsureDraftsSynced();creativeWorkspacePreview=null;cwClearDraftSelection();cwClearDraftMoves();cwStageReview=null;cwPreparedNoteAlternatives.clear();cwHandoffClear();graph=validateImported(graph);for(const node of graph.nodes||[])delete node.autoFieldIds;graph.revision=0;
  let id;if(remote.connected){await flushRemote();const res=await apiRequest('/api/projects',{method:'POST',body:{name,graph}});id=res.id;remote.revision=res.revision}
  else id=newLocalId();
  if(remote.connected){clearTimeout(remote.timer);remote.timer=null;remote.blocked=false;remote.dirty=false;}
  registry.projects.unshift({id,name,revision:0});registry.activeId=id;activeProjectId=id;KEY=KEY_PREFIX+id;state=graph;selected=null;linkFrom=null;history=[];state.view=null;recomputeFieldTags();save(false);updateProjectLabel();render();fit();
 }
 async function deleteProject(){
+ await cwEnsureDraftsSynced();
  if(remote.connected){await flushRemote();const r=await apiRequest('/api/projects/'+encodeURIComponent(activeProjectId),{method:'DELETE',body:{expectedRevision:remote.revision}});if(!r.deleted)throw Error('Удаление не подтверждено')}
  else try{localStorage.removeItem(KEY)}catch{}
  registry.projects=registry.projects.filter(p=>p.id!==activeProjectId);
