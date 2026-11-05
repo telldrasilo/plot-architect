@@ -144,6 +144,7 @@ let cwAcceptanceReview=null;
 // external drafts are included once, but dragging never expands this border.
 const cwDropRects=new Map();
 let cwDragDropReview=null;
+let cwActiveDraftDragCancel=null;
 function cwDropRectFor(area){
  const key=activeProjectId+'::'+area.id;
  if(!cwDropRects.has(key)){
@@ -499,7 +500,7 @@ function cwBeginDraftDrag(event,card,node,area,svg,links,byId){
  if(remote.blocked){
   note('Запись заблокирована: есть несинхронизированная копия. Откройте «Мои истории»');return;
  }
- if(cwAcceptanceBusy&&!cwMoveSavePromise)return;
+ if(cwDragDropReview||cwAcceptanceBusy&&!cwMoveSavePromise)return;
  event.preventDefault();
  if(cwSelectedWorkspaceId!==area.id||!cwSelectedDraftIds.has(node.id)){
   cwSelectedDraftIds.clear();cwSelectedDraftIds.add(node.id);
@@ -512,6 +513,7 @@ function cwBeginDraftDrag(event,card,node,area,svg,links,byId){
   .map(el=>[el.dataset.cwNode,el]));
  const startX=event.clientX,startY=event.clientY;
  let dx=0,dy=0,moved=false;
+ let hover='inside';
  card.setPointerCapture(event.pointerId);
  cwDraftDragging++;
  const draw=()=>{
@@ -539,8 +541,14 @@ function cwBeginDraftDrag(event,card,node,area,svg,links,byId){
   dy=Math.max(-1000000-Math.min(...initial.map(n=>n.y)),
    Math.min(1000000-Math.max(...initial.map(n=>n.y)),nextY));
   draw();
+  const lead=initial.find(n=>n.id===node.id);
+  hover=cwDropClassification(area.id,lead.x+dx+104,lead.y+dy+52);
+  card.classList.toggle('cw-drop-target',hover==='plot');
+  card.classList.toggle('cw-drop-invalid',hover==='invalid');
+  card.parentElement.classList.toggle('cw-drop-hover',hover==='plot');
  };
  const cleanup=()=>{
+  cwActiveDraftDragCancel=null;
   cwDraftDragging=Math.max(0,cwDraftDragging-1);
   card.removeEventListener('pointermove',move);
   card.removeEventListener('pointerup',end);
@@ -548,6 +556,20 @@ function cwBeginDraftDrag(event,card,node,area,svg,links,byId){
  };
  const end=e=>{
   e.stopPropagation();cleanup();
+  if(moved&&hover==='invalid'){
+   renderCreativeWorkspacePreview();
+   note('Сюжетную ноду нельзя перенести в другую рабочую область');
+   return;
+  }
+  if(moved&&hover==='plot'){
+   const placements=initial.map(n=>({nodeId:n.id,x:n.x+dx,y:n.y+dy}));
+   cwDragDropReview={projectId:activeProjectId,workspaceId:area.id,
+    nodeIds:initial.map(n=>n.id),placements,phase:'checking'};
+   cwAcceptanceReview=null;
+   renderCreativeWorkspacePreview();
+   void cwPrepareAccept(initial.map(n=>n.id),area.id,placements);
+   return;
+  }
   if(moved){
    for(const n of initial){
     const original=state.nodes.find(x=>x.id===n.id),x=n.x+dx,y=n.y+dy;
@@ -558,7 +580,10 @@ function cwBeginDraftDrag(event,card,node,area,svg,links,byId){
   renderCreativeWorkspacePreview();
   if(moved&&cwDraftMoveEdits.size)cwScheduleDraftSave();
  };
- const cancel=e=>{e.stopPropagation();cleanup();renderCreativeWorkspacePreview()};
+ const cancel=e=>{
+  e?.stopPropagation();cleanup();renderCreativeWorkspacePreview();
+ };
+ cwActiveDraftDragCancel=cancel;
  card.addEventListener('pointermove',move);
  card.addEventListener('pointerup',end);
  card.addEventListener('pointercancel',cancel);
@@ -1892,6 +1917,12 @@ $('export').onclick=()=>exportProject();
 document.addEventListener('keydown',e=>{
  if(e.code==='Space'&&!modalOpen&&!e.target.closest('input,textarea,select,button')){spacePan=true;e.preventDefault()}
  if(e.key==='Escape'){
+  if(cwActiveDraftDragCancel){
+   e.preventDefault();cwActiveDraftDragCancel();return;
+  }
+  if(cwDragDropReview){
+   e.preventDefault();cwCancelDropReview();return;
+  }
   if(interaction){e.preventDefault();cancelGesture();return}
   if(!$('tools-menu').hidden){$('tools-menu').hidden=true;$('tools-more').setAttribute('aria-expanded','false')}
   if(gapLinkFrom){gapLinkFrom=null;note('Редакторская связь отменена');return}if(linkFrom){linkFrom=null;render();return}
@@ -1909,7 +1940,11 @@ document.addEventListener('keydown',e=>{
 });
 document.addEventListener('keyup',e=>{if(e.code==='Space')spacePan=false;if(!e.ctrlKey&&!e.metaKey)document.body.classList.remove('pa-multi-modifier')});
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&!modalOpen)document.body.classList.add('pa-multi-modifier')},true);
-window.addEventListener('blur',()=>{spacePan=false;document.body.classList.remove('pa-multi-modifier');if(interaction)cancelGesture()});
+window.addEventListener('blur',()=>{
+ spacePan=false;document.body.classList.remove('pa-multi-modifier');
+ if(cwActiveDraftDragCancel)cwActiveDraftDragCancel();
+ if(interaction)cancelGesture();
+});
 
 // Context help: only appears on hover/focus and never captures pointer events.
 let tipTimer=null,tipTarget=null;
