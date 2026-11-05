@@ -33,7 +33,7 @@ const validRevision=x=>Number.isSafeInteger(x)&&x>=0;
 const fields={
   stage_note:['noteId','workspaceId','workspace','branches','expectedPreview'],
   move_drafts:['workspaceId','moves','expectedPreview'],
-  accept_draft:['workspaceId','nodeIds','expectedPreview'],
+  accept_draft:['workspaceId','nodeIds','placements','expectedPreview'],
   start_replacement:['replacementId','sourceNodeIds','expectedPreview'],
   reconnect:['replacementId','decisions','expectedPreview'],
   complete:['replacementId','expectedPreview','acknowledgeUnresolved'],

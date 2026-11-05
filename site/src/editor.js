@@ -140,10 +140,43 @@ function cwServerReady(){
   &&!cwAcceptanceBusy&&state.view===null;
 }
 let cwAcceptanceReview=null;
+// One stable transition border per workspace per editor session. Existing
+// external drafts are included once, but dragging never expands this border.
+const cwDropRects=new Map();
+let cwDragDropReview=null;
+let cwActiveDraftDragCancel=null;
+function cwDropRectFor(area){
+ const key=activeProjectId+'::'+area.id;
+ if(!cwDropRects.has(key)){
+  const existing=state.nodes.filter(n=>n.workspaceId===area.id),margin=34;
+  const left=Math.min(area.x,...existing.map(n=>n.x-margin));
+  const top=Math.min(area.y,...existing.map(n=>n.y-margin));
+  const right=Math.max(area.x+area.width,...existing.map(n=>n.x+208+margin));
+  const bottom=Math.max(area.y+area.height,...existing.map(n=>n.y+105+margin));
+  cwDropRects.set(key,{x:left,y:top,width:right-left,height:bottom-top});
+ }
+ return cwDropRects.get(key);
+}
+function cwDropClassification(workspaceId,x,y){
+ const source=state.workspaces.find(w=>w.id===workspaceId);
+ if(!source)return 'invalid';
+ const own=cwDropRectFor(source);
+ const inside=(r,padding=0)=>x>=r.x-padding&&x<=r.x+r.width+padding
+  &&y>=r.y-padding&&y<=r.y+r.height+padding;
+ if(inside(own,24))return 'inside';
+ if(state.workspaces.some(w=>w.id!==workspaceId&&inside(cwDropRectFor(w))))return 'invalid';
+ return 'plot';
+}
+function cwCancelDropReview(){
+ if(!cwDragDropReview)return;
+ cwDragDropReview=null;cwAcceptanceReview=null;
+ renderCreativeWorkspacePreview();
+}
 let cwSelectedWorkspaceId=null;
 const cwSelectedDraftIds=new Set();
 function cwClearDraftSelection(){
  cwSelectedWorkspaceId=null;cwSelectedDraftIds.clear();cwAcceptanceReview=null;
+ cwDragDropReview=null;
 }
 function cwToggleDraftSelection(nodeId,workspaceId){
  if(!cwWorkflowEnabled())return;
@@ -151,6 +184,7 @@ function cwToggleDraftSelection(nodeId,workspaceId){
  if(cwSelectedWorkspaceId!==workspaceId){
   cwSelectedDraftIds.clear();cwSelectedWorkspaceId=workspaceId;
  }
+ if(cwDragDropReview)return;
  if(cwSelectedDraftIds.has(nodeId))cwSelectedDraftIds.delete(nodeId);
  else cwSelectedDraftIds.add(nodeId);
  if(!cwSelectedDraftIds.size)cwSelectedWorkspaceId=null;
@@ -466,7 +500,7 @@ function cwBeginDraftDrag(event,card,node,area,svg,links,byId){
  if(remote.blocked){
   note('Запись заблокирована: есть несинхронизированная копия. Откройте «Мои истории»');return;
  }
- if(cwAcceptanceBusy&&!cwMoveSavePromise)return;
+ if(cwDragDropReview||cwAcceptanceBusy&&!cwMoveSavePromise)return;
  event.preventDefault();
  if(cwSelectedWorkspaceId!==area.id||!cwSelectedDraftIds.has(node.id)){
   cwSelectedDraftIds.clear();cwSelectedDraftIds.add(node.id);
@@ -479,6 +513,7 @@ function cwBeginDraftDrag(event,card,node,area,svg,links,byId){
   .map(el=>[el.dataset.cwNode,el]));
  const startX=event.clientX,startY=event.clientY;
  let dx=0,dy=0,moved=false;
+ let hover='inside';
  card.setPointerCapture(event.pointerId);
  cwDraftDragging++;
  const draw=()=>{
@@ -506,8 +541,14 @@ function cwBeginDraftDrag(event,card,node,area,svg,links,byId){
   dy=Math.max(-1000000-Math.min(...initial.map(n=>n.y)),
    Math.min(1000000-Math.max(...initial.map(n=>n.y)),nextY));
   draw();
+  const lead=initial.find(n=>n.id===node.id);
+  hover=cwDropClassification(area.id,lead.x+dx+104,lead.y+dy+52);
+  card.classList.toggle('cw-drop-target',hover==='plot');
+  card.classList.toggle('cw-drop-invalid',hover==='invalid');
+  card.parentElement.classList.toggle('cw-drop-hover',hover==='plot');
  };
  const cleanup=()=>{
+  cwActiveDraftDragCancel=null;
   cwDraftDragging=Math.max(0,cwDraftDragging-1);
   card.removeEventListener('pointermove',move);
   card.removeEventListener('pointerup',end);
@@ -515,6 +556,20 @@ function cwBeginDraftDrag(event,card,node,area,svg,links,byId){
  };
  const end=e=>{
   e.stopPropagation();cleanup();
+  if(moved&&hover==='invalid'){
+   renderCreativeWorkspacePreview();
+   note('Сюжетную ноду нельзя перенести в другую рабочую область');
+   return;
+  }
+  if(moved&&hover==='plot'){
+   const placements=initial.map(n=>({nodeId:n.id,x:n.x+dx,y:n.y+dy}));
+   cwDragDropReview={projectId:activeProjectId,workspaceId:area.id,
+    nodeIds:initial.map(n=>n.id),placements,phase:'checking'};
+   cwAcceptanceReview=null;
+   renderCreativeWorkspacePreview();
+   void cwPrepareAccept(initial.map(n=>n.id),area.id,placements);
+   return;
+  }
   if(moved){
    for(const n of initial){
     const original=state.nodes.find(x=>x.id===n.id),x=n.x+dx,y=n.y+dy;
@@ -525,7 +580,10 @@ function cwBeginDraftDrag(event,card,node,area,svg,links,byId){
   renderCreativeWorkspacePreview();
   if(moved&&cwDraftMoveEdits.size)cwScheduleDraftSave();
  };
- const cancel=e=>{e.stopPropagation();cleanup();renderCreativeWorkspacePreview()};
+ const cancel=e=>{
+  e?.stopPropagation();cleanup();renderCreativeWorkspacePreview();
+ };
+ cwActiveDraftDragCancel=cancel;
  card.addEventListener('pointermove',move);
  card.addEventListener('pointerup',end);
  card.addEventListener('pointercancel',cancel);
@@ -592,30 +650,53 @@ async function cwConfirmNoteStage(){
  }finally{cwAcceptanceBusy=false;renderInspector()}
 }
 
-async function cwPrepareAccept(nodeIds,workspaceId){
+async function cwPrepareAccept(nodeIds,workspaceId,placements){
+ const dropRef=placements===undefined?null:cwDragDropReview;
+ if(placements!==undefined&&!dropRef)return;
+ if(placements===undefined)cwDragDropReview=null;
  try{
   await cwEnsureDraftsSynced();
   if(remote.connected&&(remote.dirty||remote.busy))await flushRemote();
- }catch(err){note('Принятие пока недоступно: '+err.message);return}
- if(!cwCleanForOperation()){note(remote.blocked?'Конфликт сохранения проекта: проверьте локальную копию':'Проект изменился. Повторите действие');return}
+ }catch(err){if(dropRef&&cwDragDropReview===dropRef)cwCancelDropReview();note('Принятие пока недоступно: '+err.message);return}
+ if(dropRef&&cwDragDropReview!==dropRef)return;
+ if(!cwCleanForOperation()){
+  if(dropRef)cwCancelDropReview();
+  note(remote.blocked?'Конфликт сохранения проекта: проверьте локальную копию':'Проект изменился. Повторите действие');return
+ }
  if(!Array.isArray(nodeIds)||!nodeIds.length||new Set(nodeIds).size!==nodeIds.length
    ||nodeIds.some(id=>!state.nodes.some(n=>n.id===id&&n.workspaceId===workspaceId))){
+  if(dropRef)cwCancelDropReview();
   note('Выберите черновики одной рабочей области');return
  }
  const id=activeProjectId,revision=remote.revision,selection=[...nodeIds];
  cwAcceptanceBusy=true;
  try{
-  const command={kind:'accept_draft',workspaceId,nodeIds:selection};
+  const command={kind:'accept_draft',workspaceId,nodeIds:selection,
+   ...(placements===undefined?{}:{placements})};
   const reviewed=await cwWorkflowRequest(id,'preview',{expectedRevision:revision,command});
+  if(dropRef&&cwDragDropReview!==dropRef)return;
   if(activeProjectId!==id||remote.revision!==revision||remote.dirty||remote.blocked)
    throw Error('Проект изменился во время проверки. Повторите действие');
   const plan=reviewed.preview;
   if(!plan||JSON.stringify(plan.acceptNodeIds)!==JSON.stringify(selection)
     ||plan.workspaceId!==workspaceId||!Array.isArray(plan.promoteEdgeIds)
-    ||!Array.isArray(plan.reviewEdgeIds)||plan.autoRewiredEdgeIds?.length)
+    ||!Array.isArray(plan.reviewEdgeIds)||plan.autoRewiredEdgeIds?.length
+    ||(placements!==undefined&&(!Array.isArray(plan.positionChanges)
+      ||plan.positionChanges.length!==selection.length
+      ||plan.positionChanges.some((p,i)=>p.nodeId!==selection[i]
+        ||p.after?.x!==placements.find(v=>v.nodeId===p.nodeId)?.x
+        ||p.after?.y!==placements.find(v=>v.nodeId===p.nodeId)?.y))))
    throw Error('Проверка вернула неожиданный состав изменений');
-  cwAcceptanceReview={projectId:id,revision,nodeIds:selection,workspaceId,plan,operationId:crypto.randomUUID()};
- }catch(err){cwAcceptanceReview=null;note('Не удалось проверить принятие: '+err.message)}
+  cwAcceptanceReview={projectId:id,revision,nodeIds:selection,workspaceId,plan,
+   ...(placements===undefined?{}:{placements}),operationId:crypto.randomUUID()};
+  if(dropRef)dropRef.phase='ready';
+ }catch(err){
+  if(!dropRef||cwDragDropReview===dropRef){
+   cwAcceptanceReview=null;
+   if(dropRef)cwDragDropReview=null;
+   note('Не удалось проверить принятие: '+err.message);
+  }
+ }
  finally{cwAcceptanceBusy=false;renderCreativeWorkspacePreview()}
 }
 async function cwConfirmAccept(){
@@ -624,7 +705,8 @@ async function cwConfirmAccept(){
  if(review.projectId!==activeProjectId||review.revision!==remote.revision)return note('Ревизия проекта изменилась');
  cwAcceptanceBusy=true;
  try{
-  const command={kind:'accept_draft',workspaceId:review.workspaceId,nodeIds:[...review.nodeIds],expectedPreview:review.plan};
+  const command={kind:'accept_draft',workspaceId:review.workspaceId,nodeIds:[...review.nodeIds],
+   ...(review.placements===undefined?{}:{placements:review.placements}),expectedPreview:review.plan};
   const committed=await cwWorkflowRequest(review.projectId,'apply',{
    expectedRevision:review.revision,operationId:review.operationId,command
   });
@@ -635,11 +717,17 @@ async function cwConfirmAccept(){
    throw Error('Локальная версия изменилась — выполните проверку синхронизации');
   if(!Number.isSafeInteger(latest.revision)||latest.revision<committed.revision)
    throw Error('Сервер вернул устаревшее состояние после принятия');
+  if(review.nodeIds.some(id=>{
+   const node=latest.graph?.nodes?.find(n=>n.id===id);
+   const target=review.placements?.find(p=>p.nodeId===id);
+   return !node||node.workspaceId!=null||(target&&(node.x!==target.x||node.y!==target.y));
+  }))throw Error('Принятие и координаты не подтверждены повторным чтением');
   state=validateImported(latest.graph);
   remote.revision=latest.revision;
   remote.dirty=false;
   selected=null;selectedNodeIds.clear();linkFrom=null;history=[];
   cwClearDraftSelection();
+  cwDragDropReview=null;
   recomputeFieldTags();
   save(false);render();
   $('saved').textContent='✓ '+(cwLocalWorkflowEnabled?'Сохранено локально':'Сохранено в Site')+' · '+remote.revision;
@@ -648,7 +736,7 @@ async function cwConfirmAccept(){
   // Keep the same operationId for retry after an ambiguous network failure.
   // Never silently mint a second write after a possibly committed request.
   if(err.code==='REVISION_CONFLICT'||err.code==='PREVIEW_STALE'){
-   cwAcceptanceReview=null;
+   cwAcceptanceReview=null;cwDragDropReview=null;
    note('Конфликт ревизий. Обновите проект и повторите проверку');
   }else note('Принятие не подтверждено: '+err.message);
  }finally{cwAcceptanceBusy=false;renderCreativeWorkspacePreview()}
@@ -690,17 +778,21 @@ function cwPersistedWorkspaceScene(){
  const ownerIds=new Set(owned.map(a=>a.id));
  const nodes=state.nodes.filter(n=>n.workspaceId&&ownerIds.has(n.workspaceId)).map(n=>{
   const position=cwDraftMoveEdits.get(n.id);
-  return position?{...n,x:position.x,y:position.y}:n;
+  // All canvas previews must work on copies. Never change state.nodes
+  // before the reviewed server acceptance has been confirmed.
+  return {...n,...(position?{x:position.x,y:position.y}:{})};
  });
  // Frame expands around moved drafts without altering stored workspace bounds.
- const workspaces=owned.map(area=>{
-  const members=nodes.filter(n=>n.workspaceId===area.id),padding=34;
-  const left=Math.min(area.x,...members.map(n=>n.x-padding));
-  const top=Math.min(area.y,...members.map(n=>n.y-padding));
-  const right=Math.max(area.x+area.width,...members.map(n=>n.x+208+padding));
-  const bottom=Math.max(area.y+area.height,...members.map(n=>n.y+105+padding));
-  return {...area,x:left,y:top,width:right-left,height:bottom-top};
- });
+ const workspaces=owned.map(area=>({...area,...cwDropRectFor(area)}));
+ // The draft never changes membership until the atomic acceptance succeeds.
+ // Preview coordinates are only for rendering while the user decides.
+ if(cwDragDropReview?.projectId===activeProjectId){
+  const positions=new Map(cwDragDropReview.placements.map(p=>[p.nodeId,p]));
+  for(const n of nodes){
+   const p=positions.get(n.id);
+   if(p){n.x=p.x;n.y=p.y}
+  }
+ }
  const ids=new Map(nodes.map(n=>[n.id,n]));
  const edges=state.edges.filter(e=>e.workspaceId&&e.draftRelation==='internal'
   &&ids.has(e.from)&&ids.has(e.to)&&ids.get(e.from).workspaceId===e.workspaceId&&ids.get(e.to).workspaceId===e.workspaceId);
@@ -721,7 +813,10 @@ function renderCreativeWorkspacePreview(){
   const head=document.createElement('div');head.className='cw-preview-area-head';
   head.textContent=persisted?'Рабочая область · сохранённые черновики':'Рабочая область · черновики';
   const hint=document.createElement('span');hint.className='cw-preview-area-hint';
-  hint.textContent=persisted?'Вне сюжета':'Предпросмотр · не в сюжете';head.append(hint);box.append(head);
+  hint.textContent=persisted&&cwDragDropReview?.workspaceId===area.id
+   ?'Перенос в сюжет · ещё не сохранено'
+   :persisted?'Вне сюжета':'Предпросмотр · не в сюжете';
+  head.append(hint);box.append(head);
   const internals=data.edges.filter(e=>e.workspaceId===area.id);
   const svg=document.createElementNS(namespace,'svg');svg.setAttribute('class','cw-preview-arrows');
   svg.setAttribute('width',String(area.width));svg.setAttribute('height',String(area.height));
@@ -746,7 +841,7 @@ function renderCreativeWorkspacePreview(){
    retry.addEventListener('click',e=>{e.stopPropagation();void cwSaveDraftMoves().catch(()=>{})});
    actions.append(status,retry);box.append(actions);
   }
-  if(persisted&&cwWorkflowEnabled()&&cwSelectedWorkspaceId===area.id&&cwSelectedDraftIds.size){
+  if(persisted&&!cwDragDropReview&&cwWorkflowEnabled()&&cwSelectedWorkspaceId===area.id&&cwSelectedDraftIds.size){
    const actions=document.createElement('div');actions.className='cw-draft-selection-actions';
    actions.setAttribute('role','group');actions.setAttribute('aria-label','Групповое принятие');
    actions.addEventListener('pointerdown',e=>e.stopPropagation());
@@ -772,6 +867,8 @@ function renderCreativeWorkspacePreview(){
    const title=document.createElement('strong');title.textContent=n.title;
    card.append(kind,title);
    if(n.description){const d=document.createElement('p');d.textContent=n.description;card.append(d)}
+   if(cwDragDropReview?.workspaceId===area.id&&cwDragDropReview.nodeIds.includes(n.id))
+    card.classList.add('cw-drop-ghost');
    if(persisted){
     card.classList.add('cw-persisted-card');
     if(cwWorkflowEnabled())card.classList.add('cw-movable-draft');
@@ -821,6 +918,15 @@ function renderCreativeWorkspacePreview(){
    });
    box.append(card);
   }
+  if(persisted&&cwDragDropReview?.workspaceId===area.id&&cwDragDropReview.phase==='checking'){
+   const pending=document.createElement('div');
+   pending.className='cw-drop-checking';pending.setAttribute('role','status');
+   pending.textContent='Проверяем перенос в сюжет…';
+   const cancel=document.createElement('button');cancel.type='button';
+   cancel.textContent='Отмена';
+   cancel.addEventListener('click',e=>{e.stopPropagation();cwCancelDropReview()});
+   pending.append(cancel);box.append(pending);
+  }
   if(persisted&&cwWorkflowEnabled()&&cwAcceptanceReview?.workspaceId===area.id){
    const p=cwAcceptanceReview,review=document.createElement('section');
    review.className='cw-accept-review';review.setAttribute('role','group');
@@ -830,10 +936,21 @@ function renderCreativeWorkspacePreview(){
    desc.textContent='В сюжет: '+p.nodeIds.length+' событие(ий) · внутренних связей: '+p.plan.promoteEdgeIds.length
     +' · связей для отдельного решения: '+p.plan.reviewEdgeIds.length
     +' · внешние связи не подключаются автоматически';
+   if(p.placements){
+    const lead=p.placements.find(v=>v.nodeId===p.nodeIds[0])||p.placements[0];
+    review.classList.add('cw-drop-review');
+    review.style.right='auto';review.style.transform='none';
+    review.style.left=Math.max(0,lead.x-area.x)+'px';
+    review.style.top=(lead.y-area.y+125)+'px';
+   }
    const approve=document.createElement('button');approve.type='button';approve.textContent='Принять в сюжет';
    approve.disabled=cwAcceptanceBusy;approve.addEventListener('click',e=>{e.stopPropagation();void cwConfirmAccept()});
    const back=document.createElement('button');back.type='button';back.textContent='Отмена';
-   back.disabled=cwAcceptanceBusy;back.addEventListener('click',e=>{e.stopPropagation();cwAcceptanceReview=null;renderCreativeWorkspacePreview()});
+   back.disabled=cwAcceptanceBusy;back.addEventListener('click',e=>{
+    e.stopPropagation();
+    if(cwDragDropReview)cwCancelDropReview();
+    else{cwAcceptanceReview=null;renderCreativeWorkspacePreview()}
+   });
    review.append(desc,approve,back);box.append(review);
   }
   host.append(box);
@@ -1832,6 +1949,12 @@ $('export').onclick=()=>exportProject();
 document.addEventListener('keydown',e=>{
  if(e.code==='Space'&&!modalOpen&&!e.target.closest('input,textarea,select,button')){spacePan=true;e.preventDefault()}
  if(e.key==='Escape'){
+  if(cwActiveDraftDragCancel){
+   e.preventDefault();cwActiveDraftDragCancel();return;
+  }
+  if(cwDragDropReview){
+   e.preventDefault();cwCancelDropReview();return;
+  }
   if(interaction){e.preventDefault();cancelGesture();return}
   if(!$('tools-menu').hidden){$('tools-menu').hidden=true;$('tools-more').setAttribute('aria-expanded','false')}
   if(gapLinkFrom){gapLinkFrom=null;note('Редакторская связь отменена');return}if(linkFrom){linkFrom=null;render();return}
@@ -1849,7 +1972,11 @@ document.addEventListener('keydown',e=>{
 });
 document.addEventListener('keyup',e=>{if(e.code==='Space')spacePan=false;if(!e.ctrlKey&&!e.metaKey)document.body.classList.remove('pa-multi-modifier')});
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&!modalOpen)document.body.classList.add('pa-multi-modifier')},true);
-window.addEventListener('blur',()=>{spacePan=false;document.body.classList.remove('pa-multi-modifier');if(interaction)cancelGesture()});
+window.addEventListener('blur',()=>{
+ spacePan=false;document.body.classList.remove('pa-multi-modifier');
+ if(cwActiveDraftDragCancel)cwActiveDraftDragCancel();
+ if(interaction)cancelGesture();
+});
 
 // Context help: only appears on hover/focus and never captures pointer events.
 let tipTimer=null,tipTarget=null;
