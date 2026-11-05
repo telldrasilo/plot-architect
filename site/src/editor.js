@@ -604,7 +604,28 @@ async function cwRunDraftMoveSave(){
   if(!cwDraftDragging)renderCreativeWorkspacePreview();
  }
 }
-function cwBeginDraftDrag(event,card,node,area,svg,links,byId){
+// Convert the common world-space port layout to each workspace-local SVG.
+// During a drag existing ports are frozen and merely translate with their
+// endpoint card; reflow happens only after the completed movement is rendered.
+function cwDrawDraftConnections(svg,area,links,sockets,moves=new Map()){
+ if(!sockets)return;
+ const paths=new Map([...svg.querySelectorAll('[data-cw-edge]')].map(el=>[el.dataset.cwEdge,el]));
+ const circles=new Map([...svg.querySelectorAll('[data-cw-socket]')].map(el=>[el.dataset.cwSocket,el]));
+ for(const edge of links){
+  const from=sockets.ports.get(socketKey(edge.id,'source'));
+  const to=sockets.ports.get(socketKey(edge.id,'target'));
+  if(!from||!to)continue;
+  const a=moves.get(edge.from)??{dx:0,dy:0},b=moves.get(edge.to)??{dx:0,dy:0};
+  const ax=from.x+a.dx-area.x,ay=from.y+a.dy-area.y;
+  const bx=to.x+b.dx-area.x,by=to.y+b.dy-area.y;
+  const path=paths.get(edge.id);
+  if(path)path.setAttribute('d','M '+ax+' '+ay+' L '+bx+' '+by);
+  const left=circles.get(from.key),right=circles.get(to.key);
+  if(left){left.setAttribute('cx',ax);left.setAttribute('cy',ay)}
+  if(right){right.setAttribute('cx',bx);right.setAttribute('cy',by)}
+ }
+}
+function cwBeginDraftDrag(event,card,node,area,svg,links,byId,getSockets){
  event.stopPropagation();
  if(event.button!==0)return;
  if(!cwWorkflowEnabled())return;
@@ -637,13 +658,8 @@ function cwBeginDraftDrag(event,card,node,area,svg,links,byId){
    const el=cardMap.get(n.id);
    if(el){el.style.left=(n.x+dx-area.x)+'px';el.style.top=(n.y+dy-area.y)+'px'}
   }
-  for(const edge of links){
-   const from=movedNodes.get(edge.from)||byId.get(edge.from);
-   const to=movedNodes.get(edge.to)||byId.get(edge.to);
-   const path=[...svg.querySelectorAll('.cw-preview-link')].find(p=>p.dataset.cwEdge===edge.id);
-   if(path&&from&&to)path.setAttribute('d','M '+(from.x-area.x+208)+' '+(from.y-area.y+56)+
-    ' L '+(to.x-area.x)+' '+(to.y-area.y+56));
-  }
+  const movements=new Map(initial.map(n=>[n.id,{dx,dy}]));
+  cwDrawDraftConnections(svg,area,links,getSockets(),movements);
  };
  const move=e=>{
   e.stopPropagation();
@@ -976,16 +992,30 @@ function renderCreativeWorkspacePreview(){
    :persisted?'Вне сюжета':'Предпросмотр · не в сюжете';
   head.append(hint);box.append(head);
   const internals=data.edges.filter(e=>e.workspaceId===area.id);
+  let drawnSockets=null;
   const svg=document.createElementNS(namespace,'svg');svg.setAttribute('class','cw-preview-arrows');
   svg.setAttribute('width',String(area.width));svg.setAttribute('height',String(area.height));
   svg.setAttribute('aria-hidden','true');
+  const markerId='cw-draft-arrow-'+area.id;
+  const defs=document.createElementNS(namespace,'defs');
+  const arrow=document.createElementNS(namespace,'marker');
+  for(const [k,v] of Object.entries({id:markerId,viewBox:'0 0 10 10',refX:'8',refY:'5',
+   markerWidth:'5',markerHeight:'5',orient:'auto-start-reverse'}))arrow.setAttribute(k,v);
+  const tip=document.createElementNS(namespace,'path');
+  tip.setAttribute('d','M1 1 L9 5 L1 9');tip.setAttribute('stroke','currentColor');
+  tip.setAttribute('stroke-width','1.8');tip.setAttribute('fill','none');
+  arrow.append(tip);defs.append(arrow);svg.append(defs);
   for(const edge of internals){
    const from=nodeById.get(edge.from),to=nodeById.get(edge.to);
    if(!from||!to)continue;
    const path=document.createElementNS(namespace,'path');
    const ax=from.x-area.x+208,ay=from.y-area.y+56,bx=to.x-area.x,by=to.y-area.y+56;
    path.setAttribute('d','M '+ax+' '+ay+' L '+bx+' '+by);
-   path.setAttribute('class','cw-preview-link');path.dataset.cwEdge=edge.id;svg.append(path);
+   const style= ['precedes','causes','enables','hinders'].includes(edge.type)
+    ?edge.type:'precedes';
+   path.setAttribute('class','cw-preview-link cw-preview-link-'+style);
+   path.setAttribute('marker-end','url(#'+markerId+')');
+   path.dataset.cwEdge=edge.id;svg.append(path);
   }
   box.append(svg);
   const nodes=data.nodes.filter(n=>n.workspaceId===area.id);
@@ -1033,7 +1063,7 @@ function renderCreativeWorkspacePreview(){
     if(cwSelectedDraftIds.has(n.id)&&cwSelectedWorkspaceId===area.id)card.classList.add('cw-draft-selected');
     // Canvas pointerdown normally starts a drag and may rerender the world,
     // destroying a button before its click can be dispatched.
-    card.addEventListener('pointerdown',e=>cwBeginDraftDrag(e,card,n,area,svg,internals,nodeById));
+    card.addEventListener('pointerdown',e=>cwBeginDraftDrag(e,card,n,area,svg,internals,nodeById,()=>drawnSockets));
     card.addEventListener('click',e=>{
      e.stopPropagation();
      if(cwWorkflowEnabled()&&(e.ctrlKey||e.metaKey))cwToggleDraftSelection(n.id,area.id);
@@ -1112,6 +1142,23 @@ function renderCreativeWorkspacePreview(){
    review.append(desc,approve,back);box.append(review);
   }
   host.append(box);
+  // Measure cards only after attaching to DOM: descriptions can make each
+  // draft taller than the old fixed 105px/56px assumptions.
+  const socketBounds=Object.fromEntries(nodes.map(n=>{
+   const card=[...box.querySelectorAll('[data-cw-node]')].find(el=>el.dataset.cwNode===n.id);
+   return [n.id,{x:n.x,y:n.y,width:card?.offsetWidth||208,
+    height:card?.offsetHeight||105}];
+  }));
+  drawnSockets=layoutEdgeSockets({nodes,edges:internals,bounds:socketBounds,mode:'full'});
+  for(const port of drawnSockets.ports.values()){
+   const dot=document.createElementNS(namespace,'circle');
+   dot.setAttribute('class','cw-preview-socket');
+   dot.dataset.cwSocket=port.key;dot.dataset.cwSocketRole=port.role;
+   dot.dataset.cwSocketNode=port.nodeId;
+   dot.setAttribute('r','5');
+   svg.append(dot);
+  }
+  cwDrawDraftConnections(svg,area,internals,drawnSockets);
   if(dropReviewPanel)cwPositionDropReview(dropReviewPanel,box,dropReviewIds);
  }
 }
