@@ -1331,12 +1331,47 @@ function widthOf(n){return Number.isFinite(n.width)?Math.max(180,Math.min(780,n.
 function heightOf(n){return Number.isFinite(n.height)?Math.max(95,Math.min(640,n.height)):null}
 let inspectorPinned=false;
 function positionInspector(){
- const el=$('inspector'); if(!el||el.hidden)return;
+ const el=$('inspector');if(!el||el.hidden)return;
  const n=selected?.type==='node'?nby(selected.id):null;
- if(!n||inspectorPinned||groupIds().length>1||!visible().some(v=>v.id===n.id)){
-  el.classList.remove('near-node');el.style.left='';el.style.top='';el.style.right='';return;
+ const note=selected?.type==='gapNote'?gnby(selected.id):null;
+ const reset=()=>{el.classList.remove('near-node');el.style.left='';el.style.top='';el.style.right=''};
+ if(inspectorPinned||(!n&&!note)||(n&&(groupIds().length>1||!visible().some(v=>v.id===n.id)))){
+  reset();return;
  }
  const bounds=canvasRect(),w=el.offsetWidth||360,h=el.offsetHeight||420;
+ if(note){
+  // Notes use real rendered bounds: their height depends on the task text.
+  // A fixed world-space offset can hide the card at other zoom levels.
+  const card=[...document.querySelectorAll('[data-gap-note]')].find(e=>e.dataset.gapNote===note.id);
+  if(!card){reset();return}
+  const rect=card.getBoundingClientRect();
+  const anchor={left:rect.left-bounds.left,top:rect.top-bounds.top,
+   right:rect.right-bounds.left,bottom:rect.bottom-bounds.top};
+  if(anchor.right<0||anchor.left>bounds.width||anchor.bottom<0||anchor.top>bounds.height){
+   reset();return;
+  }
+  const gap=16,pad=12;
+  const clamp=(v,min,max)=>Math.max(min,Math.min(v,Math.max(min,max)));
+  const candidates=[
+   {left:anchor.right+gap,top:anchor.top},
+   {left:anchor.left-w-gap,top:anchor.top},
+   {left:anchor.left,top:anchor.bottom+gap},
+   {left:anchor.left,top:anchor.top-h-gap}
+  ];
+  let best=null;
+  for(const [rank,c] of candidates.entries()){
+   const left=clamp(c.left,pad,bounds.width-w-pad);
+   const top=clamp(c.top,pad,bounds.height-h-pad);
+   const overlap=Math.max(0,Math.min(left+w,anchor.right)-Math.max(left,anchor.left))
+    *Math.max(0,Math.min(top+h,anchor.bottom)-Math.max(top,anchor.top));
+   const moved=Math.abs(left-c.left)+Math.abs(top-c.top);
+   const score=overlap*100+moved+rank*2;
+   if(!best||score<best.score)best={left,top,score};
+  }
+  el.classList.add('near-node');el.style.right='auto';
+  el.style.left=Math.round(best.left)+'px';el.style.top=Math.round(best.top)+'px';
+  return;
+ }
  const nodeX=n.x*pan.scale+pan.x,nodeY=n.y*pan.scale+pan.y;
  const nodeW=widthOf(n)*pan.scale;
  const rightX=nodeX+nodeW+18;
@@ -1549,12 +1584,17 @@ function renderGapInspector(el,n){
    '<button id="cw-handoff-import" type="button">Проверить варианты</button>':'')+
   '</section>':'';
  el.hidden=false;
- el.innerHTML='<div class="inspect-head"><b>▤ Заметка · придумать новое</b><button id="close-inspect">×</button></div>'+
+ el.innerHTML='<div class="inspect-head"><b>▤ Заметка · придумать новое</b><span class="inspect-top-tools">'+
+  '<button id="pin-inspect" type="button" title="'+(inspectorPinned?'Вернуть окно к заметке':'Закрепить окно справа')+'">'+
+  (inspectorPinned?'↗ Рядом':'▣ Справа')+'</button><button id="close-inspect">×</button></span></div>'+
  '<div class="field"><label>Задание ChatGPT</label><textarea id="gap-text" class="gap-note-editor" placeholder="Что нужно придумать?">'+esc(n.text)+'</textarea></div>'+
  '<div class="muted">Отдельная временная нода. Не событие и не канонический факт. Стрелки к ней задают редакторский контекст.</div>'+
  existing+handoff+'<hr><div class="inspect-actions">'+stageButton+
  '<button id="gap-link">Связать</button><button id="gap-delete">Удалить заметку…</button></div>'+stageReview;
  $('close-inspect').onclick=()=>{selected=null;render()};
+ $('pin-inspect').onclick=()=>{
+  inspectorPinned=!inspectorPinned;renderInspector();positionInspector();
+ };
  $('gap-text').onchange=e=>setGapNoteText(n.id,e.target.value);
  $('gap-link').onclick=()=>beginGapLink('gap_note',n.id);
  $('gap-delete').onclick=()=>deleteGapNote(n.id);
@@ -1567,7 +1607,7 @@ function renderGapInspector(el,n){
    cwHandoffPrompt=cwBuildChatGPTPrompt(n.id);
    cwHandoffNoteId=n.id;cwHandoffRevision=remote.revision;
    cwHandoffProjectId=activeProjectId;cwHandoffNoteText=n.text;
-   renderInspector();
+   renderInspector();positionInspector();
   }catch(err){note('Запрос не подготовлен: '+err.message)}
  };
  if($('cw-handoff-prompt'))$('cw-handoff-prompt').value=cwHandoffPrompt;
