@@ -44,6 +44,8 @@ jobs:
         run: python qa/browser/tests_cw/test_cw_drop_to_canon_browser.py
       - name: Verify canonical independent SVG sockets and semantic zoom
         run: python qa/browser/tests_cw/test_cw_canonical_sockets_browser.py
+      - name: Verify directed and individually anchored draft relations
+        run: python qa/browser/tests_cw/test_cw_draft_sockets_browser.py
       - name: Verify pending note geometry recovery in synthetic Chromium
         run: python qa/browser/tests_cw/test_cw_pending_geometry_browser.py
       - name: Verify ChatGPT manual JSON handoff and isolated staging
