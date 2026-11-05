@@ -105,6 +105,7 @@ test('local-only listener, forbidden native identity spoof, cookie isolation and
   const health = await (await h.call('/api/health', 'GET', {cookie})).json();
   assert.equal(health.ok, true);
   assert.equal(health.authMode, 'node-loopback');
+  assert.equal(health.workflowEnabled, false);
   assert.equal((await h.call('/api/projects', 'POST', {cookie, json: {}})).status, 403);
   assert.equal((await h.call('/api/projects', 'POST', {
     cookie, originHeader: 'https://attacker.test', json: {}
@@ -131,6 +132,17 @@ test('local-only listener, forbidden native identity spoof, cookie isolation and
   const logout = await h.call('/__local/logout', 'POST', {cookie, originHeader: h.origin});
   assert.equal(logout.status, 303);
   assert.equal((await h.call('/api/projects', 'GET', {cookie})).status, 401);
+});
+
+test('local workflow UI capability is advertised only when server commands are enabled', async t => {
+  const h = await harness(t, {workflowEnabled: true});
+  const response = await h.call('/api/health', 'GET', {authorization: h.key});
+  assert.equal(response.status, 200);
+  const health = await response.json();
+  assert.equal(health.authMode, 'node-loopback');
+  assert.equal(health.authenticated, true);
+  assert.equal(health.workflowEnabled, true);
+  assert.equal((await h.call('/api/health')).status, 401);
 });
 
 test('Node editor REST and MCP read/write the same persistent local SQLite database', async t => {
