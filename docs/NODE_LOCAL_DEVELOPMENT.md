@@ -25,7 +25,9 @@
 ```powershell
 cd D:\Graphite\plot-architect
 git switch main
+if ($LASTEXITCODE -ne 0) { throw 'Не удалось перейти на main; сначала проверь git status.' }
 git pull --ff-only
+if ($LASTEXITCODE -ne 0) { throw 'git pull не завершён; сервер не запускаем.' }
 cd site
 npm.cmd run dev:node-tunnel
 ```
@@ -63,7 +65,9 @@ runtime API key заново. Нужен Secret API key OpenAI Platform с пр�
 ```powershell
 cd D:\Graphite\plot-architect
 git switch main
+if ($LASTEXITCODE -ne 0) { throw 'Не удалось перейти на main; проверь git status.' }
 git pull --ff-only
+if ($LASTEXITCODE -ne 0) { throw 'git pull не завершён; сервер не запускаем.' }
 
 $env:GRAPHITE_TUNNEL_CLIENT_EXE = 'D:\Graphite\tunnel-client\tunnel-client.exe'
 $env:GRAPHITE_TUNNEL_ID = 'tunnel_ВСТАВЬ_СВОЙ_ID'
