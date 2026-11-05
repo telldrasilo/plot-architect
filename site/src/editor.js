@@ -389,8 +389,10 @@ function cwCancelDropReview(){
 }
 let cwSelectedWorkspaceId=null;
 let cwSelectedDraftEdge=null; // transient visual selection only
+let cwDraftTextEdit=null; // unsaved form state only
 const cwSelectedDraftIds=new Set();
 function cwClearDraftSelection(){
+ cwDraftTextEdit=null;
  cwSelectedDraftEdge=null;
  cwSelectedWorkspaceId=null;cwSelectedDraftIds.clear();cwAcceptanceReview=null;
  cwDragDropReview=null;
@@ -1070,6 +1072,92 @@ async function cwCommitDraftEdge(command){
   }
  }finally{cwAcceptanceBusy=false}
 }
+
+function cwOpenDraftTextEditor(workspaceId,nodeId){
+ if(!cwWorkflowEnabled()||cwAcceptanceBusy||cwDragDropReview)return;
+ const node=state.nodes.find(n=>n.id===nodeId&&n.workspaceId===workspaceId);
+ if(!node)return;
+ cwSelectedDraftEdge=null;cwAcceptanceReview=null;
+ cwDraftTextEdit={workspaceId,nodeId,projectId:activeProjectId,
+  title:node.title,description:node.description||'',pending:null};
+ renderCreativeWorkspacePreview();
+ document.querySelector('[data-cw-draft-title]')?.focus({preventScroll:true});
+}
+function cwCloseDraftTextEditor(){
+ if(!cwDraftTextEdit||cwAcceptanceBusy)return;
+ if(cwDraftTextEdit.pending){
+  note('Сохранение не подтверждено: повторите запрос или обновите проект');return;
+ }
+ cwDraftTextEdit=null;renderCreativeWorkspacePreview();
+}
+async function cwSaveDraftText(){
+ const edit=cwDraftTextEdit;
+ if(!edit||edit.projectId!==activeProjectId||cwAcceptanceBusy)return;
+ const title=edit.title.trim(),description=edit.description;
+ if(!title||title.length>300||description.length>20000){
+  note('Название: до 300 знаков; описание: до 20 000');return;
+ }
+ const old=state.nodes.find(n=>n.id===edit.nodeId&&n.workspaceId===edit.workspaceId);
+ if(!old){note('Черновик изменился. Обновите проект');return}
+ if(!edit.pending&&title===old.title&&description===(old.description||'')){
+  cwDraftTextEdit=null;renderCreativeWorkspacePreview();return;
+ }
+ try{await cwEnsureDraftsSynced()}catch(err){note('Сначала сохраните расположение: '+err.message);return}
+ if(!cwCleanForOperation()){note('Проект ещё синхронизируется');return}
+ const projectId=activeProjectId,revision=edit.pending?.revision??remote.revision;
+ const command=edit.pending?.command??{
+  kind:'edit_draft_text',workspaceId:edit.workspaceId,nodeId:edit.nodeId,title,description};
+ let sent=false,verified=false;
+ cwAcceptanceBusy=true;
+ const confirm=latest=>{
+  const node=latest.graph?.nodes?.find(n=>n.id===edit.nodeId);
+  if(activeProjectId!==projectId||cwDraftTextEdit!==edit||remote.blocked||
+     remote.dirty||!Number.isSafeInteger(latest.revision)||
+     latest.revision<=revision||node?.workspaceId!==edit.workspaceId||
+     node.title!==command.title||node.description!==command.description)
+   throw Error('Текст не подтверждён повторным чтением');
+  state=validateImported(latest.graph);remote.revision=latest.revision;
+  remote.dirty=false;verified=true;cwDraftTextEdit=null;
+  try{localStorage.removeItem(PENDING_PREFIX+projectId)}catch{}
+  recomputeFieldTags();save(false);render();note('Черновик сохранён');
+ };
+ try{
+  if(!edit.pending){
+   const reviewed=await cwWorkflowRequest(projectId,'preview',{expectedRevision:revision,command});
+   const plan=reviewed.preview;
+   if(activeProjectId!==projectId||cwDraftTextEdit!==edit||
+      remote.revision!==revision||remote.dirty||remote.blocked||
+      !plan||plan.workspaceId!==edit.workspaceId||plan.nodeId!==edit.nodeId||
+      plan.before?.title!==old.title||
+      plan.before?.description!==(old.description||'')||
+      plan.after?.title!==title||plan.after?.description!==description||
+      plan.autoRewiredEdgeIds?.length)
+    throw Error('Предпросмотр изменения устарел');
+   edit.pending={revision,command,plan,operationId:crypto.randomUUID()};
+  }
+  const pending=edit.pending;
+  sent=true;
+  const receipt=await cwWorkflowRequest(projectId,'apply',{
+   expectedRevision:pending.revision,operationId:pending.operationId,
+   command:{...pending.command,expectedPreview:pending.plan}});
+  if(!Number.isSafeInteger(receipt?.revision))throw Error('Нет подтверждения записи');
+  const latest=await apiRequest('/api/projects/'+encodeURIComponent(projectId));
+  if(latest.revision<receipt.revision)throw Error('Сервер вернул устаревшую ревизию');
+  confirm(latest);
+ }catch(err){
+  // Ambiguous network result: recover by readback; retries reuse operationId.
+  if(sent&&!verified&&activeProjectId===projectId){
+   try{confirm(await apiRequest('/api/projects/'+encodeURIComponent(projectId)))}catch{}
+  }
+  if(!verified){
+   if(err.code==='REVISION_CONFLICT'||err.code==='PREVIEW_STALE')remote.blocked=true;
+   note('Черновик не сохранён: '+err.message);
+  }
+ }finally{
+  cwAcceptanceBusy=false;
+  if(!verified)renderCreativeWorkspacePreview();
+ }
+}
 function cwBeginDraftDrag(event,card,node,area,svg,links,byId,getSockets){
  event.stopPropagation();
  if(event.button!==0)return;
@@ -1507,7 +1595,7 @@ function renderCreativeWorkspacePreview(){
    card.dataset.cwNode=n.id;card.style.left=(n.x-area.x)+'px';card.style.top=(n.y-area.y)+'px';
    card.tabIndex=0;card.setAttribute('aria-label','Черновик: '+n.title);
    const kind=document.createElement('div');kind.className='cw-preview-kind';
-   kind.textContent='Вариант '+(names.indexOf(n.draftBranchId||'single')+1)+' · черновик';
+   kind.textContent=names.length>1?'Вариант '+(names.indexOf(n.draftBranchId||'single')+1)+' · черновик':'Черновик';
    const title=document.createElement('strong');title.textContent=n.title;
    card.append(kind,title);
    if(n.description){const d=document.createElement('p');d.textContent=n.description;card.append(d)}
@@ -1515,6 +1603,17 @@ function renderCreativeWorkspacePreview(){
     card.classList.add('cw-drop-ghost');
    if(persisted){
     card.classList.add('cw-persisted-card');
+    if(cwWorkflowEnabled()&&!cwDragDropReview){
+     const edit=document.createElement('button');edit.type='button';
+     edit.className='cw-draft-text-trigger';edit.dataset.cwEditDraft=n.id;
+     edit.setAttribute('aria-label','Редактировать черновик «'+n.title+'»');
+     edit.title='Изменить текст черновика';edit.textContent='✎';
+     edit.addEventListener('pointerdown',e=>e.stopPropagation());
+     edit.addEventListener('click',e=>{
+      e.stopPropagation();cwOpenDraftTextEditor(area.id,n.id);
+     });
+     card.append(edit);
+    }
     if(cwWorkflowEnabled())card.classList.add('cw-movable-draft');
     if(cwSelectedDraftIds.has(n.id)&&cwSelectedWorkspaceId===area.id)card.classList.add('cw-draft-selected');
     // Canvas pointerdown normally starts a drag and may rerender the world,
@@ -1525,6 +1624,9 @@ function renderCreativeWorkspacePreview(){
      if(cwWorkflowEnabled()&&(e.ctrlKey||e.metaKey))cwToggleDraftSelection(n.id,area.id);
     });
     if(cwWorkflowEnabled()){
+     card.addEventListener('dblclick',e=>{
+      e.stopPropagation();cwOpenDraftTextEditor(area.id,n.id);
+     });
      card.setAttribute('aria-selected',cwSelectedWorkspaceId===area.id&&cwSelectedDraftIds.has(n.id)?'true':'false');
      card.addEventListener('keydown',e=>{
       if(e.key==='Enter'||e.key===' '){
@@ -1562,6 +1664,47 @@ function renderCreativeWorkspacePreview(){
    });
    box.append(card);
   }
+
+   // A local form: only the reviewed CAS command can modify the actual graph.
+   const edit=cwDraftTextEdit;
+   if(persisted&&cwWorkflowEnabled()&&edit?.projectId===activeProjectId&&
+      edit.workspaceId===area.id){
+    const n=nodes.find(n=>n.id===edit.nodeId);
+    if(n){
+     const form=document.createElement('form');form.className='cw-draft-text-editor';
+     form.dataset.cwDraftEditor=n.id;form.setAttribute('aria-label','Редактирование черновика');
+     form.style.left=Math.max(6,n.x-area.x+18)+'px';
+     form.style.top=Math.max(6,n.y-area.y+22)+'px';
+     form.addEventListener('pointerdown',e=>e.stopPropagation());
+     form.addEventListener('click',e=>e.stopPropagation());
+     form.addEventListener('keydown',e=>{
+      e.stopPropagation();
+      if(e.key==='Escape'){e.preventDefault();cwCloseDraftTextEditor()}
+     });
+     const heading=document.createElement('strong');heading.textContent='Изменить черновик';
+     const titleLabel=document.createElement('label');titleLabel.textContent='Название';
+     const titleInput=document.createElement('input');
+     titleInput.dataset.cwDraftTitle=n.id;titleInput.required=true;
+     titleInput.maxLength=300;titleInput.value=edit.title;
+     titleInput.disabled=!!edit.pending;
+     titleInput.addEventListener('input',()=>{edit.title=titleInput.value});
+     const descLabel=document.createElement('label');descLabel.textContent='Описание';
+     const desc=document.createElement('textarea');desc.rows=5;desc.maxLength=20000;
+     desc.dataset.cwDraftDescription=n.id;desc.value=edit.description;
+     desc.disabled=!!edit.pending;
+     desc.addEventListener('input',()=>{edit.description=desc.value});
+     const actions=document.createElement('div');actions.className='cw-draft-text-actions';
+     const save=document.createElement('button');save.type='submit';
+     save.textContent=edit.pending?'Повторить проверку':'Сохранить';
+     const cancel=document.createElement('button');cancel.type='button';
+     cancel.textContent='Отмена';cancel.disabled=!!edit.pending;
+     cancel.addEventListener('click',e=>{e.stopPropagation();cwCloseDraftTextEditor()});
+     actions.append(save,cancel);titleLabel.append(titleInput);descLabel.append(desc);
+     form.append(heading,titleLabel,descLabel,actions);
+     form.addEventListener('submit',e=>{e.preventDefault();e.stopPropagation();void cwSaveDraftText()});
+     box.append(form);
+    }
+   }
   if(persisted&&cwDragDropReview?.workspaceId===area.id&&cwDragDropReview.phase==='checking'){
    const pending=document.createElement('div');
    pending.className='cw-drop-checking';pending.setAttribute('role','status');
