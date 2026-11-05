@@ -246,7 +246,10 @@ def main():
         # Concurrent update stops acceptance; no partial graph mutation.
         page.evaluate("() => __graphite.setCWWorkflowTestMode(true)")
         page.evaluate("() => __graphite.fit()")
-        drag(page,"c",0,-300)
+        # Use a fixed world-space displacement despite viewport/zoom changes
+        # caused by the tall-card fixture. Crossing the static border matters.
+        scale=page.evaluate("() => __graphite.getPan().scale")
+        drag(page,"c",0,-round(380*scale))
         page.locator(".cw-accept-review.cw-drop-review").wait_for()
         assert_review_next_to_card(page,"c")
         db["force_conflict"]=True
