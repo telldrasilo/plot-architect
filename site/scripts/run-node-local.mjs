@@ -35,7 +35,11 @@ const shutdown = async (error = false) => {
 };
 try {
   sqlite = openGraphiteLocalStorage(path);
-  gateway = createGraphiteLoopbackServer({database: sqlite, editorHtml: html, token});
+  // The local owner intentionally uses note → reviewed drafts. Hosted Worker
+  // defaults remain unchanged, and the loopback gateway still authenticates
+  // every REST/MCP request before exposing the transactional workflow.
+  gateway = createGraphiteLoopbackServer({database: sqlite, editorHtml: html,
+    token, workflowEnabled: true});
   const url = await gateway.listen(port);
   console.log('\nGraphite LOCAL NODE (not for public deployment)');
   console.log('Editor: ' + url + '/');
