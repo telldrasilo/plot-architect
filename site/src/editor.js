@@ -140,10 +140,42 @@ function cwServerReady(){
   &&!cwAcceptanceBusy&&state.view===null;
 }
 let cwAcceptanceReview=null;
+// One stable transition border per workspace per editor session. Existing
+// external drafts are included once, but dragging never expands this border.
+const cwDropRects=new Map();
+let cwDragDropReview=null;
+function cwDropRectFor(area){
+ const key=activeProjectId+'::'+area.id;
+ if(!cwDropRects.has(key)){
+  const existing=state.nodes.filter(n=>n.workspaceId===area.id),margin=34;
+  const left=Math.min(area.x,...existing.map(n=>n.x-margin));
+  const top=Math.min(area.y,...existing.map(n=>n.y-margin));
+  const right=Math.max(area.x+area.width,...existing.map(n=>n.x+208+margin));
+  const bottom=Math.max(area.y+area.height,...existing.map(n=>n.y+105+margin));
+  cwDropRects.set(key,{x:left,y:top,width:right-left,height:bottom-top});
+ }
+ return cwDropRects.get(key);
+}
+function cwDropClassification(workspaceId,x,y){
+ const source=state.workspaces.find(w=>w.id===workspaceId);
+ if(!source)return 'invalid';
+ const own=cwDropRectFor(source);
+ const inside=(r,padding=0)=>x>=r.x-padding&&x<=r.x+r.width+padding
+  &&y>=r.y-padding&&y<=r.y+r.height+padding;
+ if(inside(own,24))return 'inside';
+ if(state.workspaces.some(w=>w.id!==workspaceId&&inside(cwDropRectFor(w))))return 'invalid';
+ return 'plot';
+}
+function cwCancelDropReview(){
+ if(!cwDragDropReview)return;
+ cwDragDropReview=null;cwAcceptanceReview=null;
+ renderCreativeWorkspacePreview();
+}
 let cwSelectedWorkspaceId=null;
 const cwSelectedDraftIds=new Set();
 function cwClearDraftSelection(){
  cwSelectedWorkspaceId=null;cwSelectedDraftIds.clear();cwAcceptanceReview=null;
+ cwDragDropReview=null;
 }
 function cwToggleDraftSelection(nodeId,workspaceId){
  if(!cwWorkflowEnabled())return;
@@ -151,6 +183,7 @@ function cwToggleDraftSelection(nodeId,workspaceId){
  if(cwSelectedWorkspaceId!==workspaceId){
   cwSelectedDraftIds.clear();cwSelectedWorkspaceId=workspaceId;
  }
+ if(cwDragDropReview)return;
  if(cwSelectedDraftIds.has(nodeId))cwSelectedDraftIds.delete(nodeId);
  else cwSelectedDraftIds.add(nodeId);
  if(!cwSelectedDraftIds.size)cwSelectedWorkspaceId=null;
@@ -693,14 +726,16 @@ function cwPersistedWorkspaceScene(){
   return position?{...n,x:position.x,y:position.y}:n;
  });
  // Frame expands around moved drafts without altering stored workspace bounds.
- const workspaces=owned.map(area=>{
-  const members=nodes.filter(n=>n.workspaceId===area.id),padding=34;
-  const left=Math.min(area.x,...members.map(n=>n.x-padding));
-  const top=Math.min(area.y,...members.map(n=>n.y-padding));
-  const right=Math.max(area.x+area.width,...members.map(n=>n.x+208+padding));
-  const bottom=Math.max(area.y+area.height,...members.map(n=>n.y+105+padding));
-  return {...area,x:left,y:top,width:right-left,height:bottom-top};
- });
+ const workspaces=owned.map(area=>({...area,...cwDropRectFor(area)}));
+ // The draft never changes membership until the atomic acceptance succeeds.
+ // Preview coordinates are only for rendering while the user decides.
+ if(cwDragDropReview?.projectId===activeProjectId){
+  const positions=new Map(cwDragDropReview.placements.map(p=>[p.nodeId,p]));
+  for(const n of nodes){
+   const p=positions.get(n.id);
+   if(p){n.x=p.x;n.y=p.y}
+  }
+ }
  const ids=new Map(nodes.map(n=>[n.id,n]));
  const edges=state.edges.filter(e=>e.workspaceId&&e.draftRelation==='internal'
   &&ids.has(e.from)&&ids.has(e.to)&&ids.get(e.from).workspaceId===e.workspaceId&&ids.get(e.to).workspaceId===e.workspaceId);
