@@ -1971,6 +1971,130 @@ function cwBeginCanonicalLinkDrag(event,sourceId,handle){
  handle.addEventListener('pointerup',end);
  handle.addEventListener('pointercancel',cancel);
 }
+// CW-003: reconnect replaces the endpoint of one existing canonical edge.
+// Until the server CAS and readback succeed, the old edge stays untouched.
+let cwReconnectClickEdgeId=null;
+function cwEligibleReconnectTarget(edge,targetId){
+ if(!edge||edge.workspaceId||!targetId||edge.from===targetId||edge.to===targetId)return false;
+ if(!visible().some(n=>n.id===edge.from)||!visible().some(n=>n.id===targetId))return false;
+ return !state.edges.some(e=>!e.workspaceId&&e.id!==edge.id
+  &&e.from===edge.from&&e.to===targetId);
+}
+function cwStartReconnectByClick(edgeId){
+ const edge=eby(edgeId);
+ if(!edge||edge.workspaceId||!currentEdges().some(e=>e.id===edgeId))return;
+ if(!remote.connected||remote.blocked){note('Подключите проект для изменения связи');return}
+ cwReconnectClickEdgeId=edgeId;linkFrom=null;selected=null;
+ render();note('Выберите новую конечную ноду · Esc — отмена');
+}
+function cwBeginCanonicalReconnect(event,edgeId,handle){
+ if(event.button!==0||event.ctrlKey||event.metaKey)return;
+ event.preventDefault();event.stopPropagation();
+ if(cwActiveLinkGesture||cwAcceptanceBusy||cwDraftMoveEdits.size||!remote.connected||remote.blocked){
+  note('Изменение связи пока недоступно');return;
+ }
+ const edge=eby(edgeId);
+ if(!edge||edge.workspaceId||!currentEdges().some(e=>e.id===edgeId))return;
+ const source=cwCanonicalSocketLayout?.ports.get(socketKey(edgeId,'source'));
+ if(!source)return;
+ const sx=event.clientX,sy=event.clientY;
+ let moved=false,target=null;
+ const cleanup=()=>{
+  handle.removeEventListener('pointermove',move);
+  handle.removeEventListener('pointerup',end);
+  handle.removeEventListener('pointercancel',cancel);
+  cwActiveLinkGesture=null;cwHideLinkOverlay();
+ };
+ const move=e=>{
+  e.preventDefault();e.stopPropagation();
+  if(!moved&&Math.hypot(e.clientX-sx,e.clientY-sy)<5)return;
+  moved=true;
+  const hit=document.elementFromPoint(e.clientX,e.clientY);
+  const candidate=hit?.closest?.('[data-node]')?.dataset.node;
+  target=cwEligibleReconnectTarget(edge,candidate)?candidate:null;
+  cwClearLinkTarget();
+  if(target)document.querySelector('[data-node="'+target+'"]')?.classList.add('cw-link-target');
+  const point=target?proposeFreeSocket({nodeId:target,role:'target',
+   layout:cwCanonicalSocketLayout,bounds:cwCanonicalSocketBounds})
+   :pointerToWorld(e.clientX,e.clientY);
+  cwDrawLinkOverlay(source,point,!!target);
+ };
+ const end=e=>{
+  e.preventDefault();e.stopPropagation();
+  if(moved){
+   const hit=document.elementFromPoint(e.clientX,e.clientY);
+   const candidate=hit?.closest?.('[data-node]')?.dataset.node;
+   target=cwEligibleReconnectTarget(edge,candidate)?candidate:null;
+  }
+  cleanup();
+  if(moved&&target)void cwCommitCanonicalReconnect(edgeId,target);
+  else if(!moved)cwStartReconnectByClick(edgeId);
+ };
+ const cancel=e=>{e?.stopPropagation();cleanup()};
+ cwActiveLinkGesture={cancel};
+ cwReconnectClickEdgeId=null;
+ handle.setPointerCapture(event.pointerId);
+ handle.addEventListener('pointermove',move);
+ handle.addEventListener('pointerup',end);
+ handle.addEventListener('pointercancel',cancel);
+}
+async function cwCommitCanonicalReconnect(edgeId,newTarget){
+ if(cwAcceptanceBusy)return;
+ if(cwDraftMoveEdits.size){note('Дождитесь сохранения черновиков');return}
+ cwAcceptanceBusy=true;
+ let projectId=null,from=null,oldTarget=null,type=null;
+ let submitted=false,verified=false,prior=null;
+ const acceptReadback=latest=>{
+  if(activeProjectId!==projectId||remote.dirty||!Number.isSafeInteger(latest.revision))
+   throw Error('Проект изменился до подтверждения переподключения');
+  const edge=latest.graph?.edges?.find(e=>e.id===edgeId);
+  if(!edge||edge.workspaceId||edge.from!==from||edge.to!==newTarget||edge.type!==type)
+   throw Error('Переподключение не подтверждено чтением сервера');
+  history.push(prior);if(history.length>60)history.shift();
+  state=validateImported(latest.graph);remote.revision=latest.revision;
+  remote.blocked=false;remote.dirty=false;verified=true;
+  try{localStorage.removeItem(PENDING_PREFIX+projectId)}catch{}
+  selected={type:'edge',id:edgeId};selectedNodeIds.clear();
+  recomputeFieldTags();save(false);render();
+  note('Конец стрелки перенесён');
+ };
+ try{
+  projectId=activeProjectId;
+  if(!remote.connected||remote.blocked)throw Error('Проект не подключён');
+  if(remote.busy||remote.dirty)await flushRemote();
+  if(activeProjectId!==projectId||remote.blocked||remote.busy||remote.dirty)
+   throw Error('Проект изменился во время синхронизации');
+  const original=eby(edgeId);
+  if(!cwEligibleReconnectTarget(original,newTarget))
+   throw Error('Недопустимая цель или дублирование связи');
+  from=original.from;oldTarget=original.to;type=original.type;
+  const before=persistentGraph();prior=JSON.stringify(before);
+  const next=structuredClone(before);
+  const edge=next.edges.find(e=>e.id===edgeId);
+  if(!edge||edge.to!==oldTarget)throw Error('Исходная связь изменилась');
+  edge.to=newTarget;
+  next.revision=(state.revision||0)+1;
+  const expectedRevision=remote.revision;
+  submitted=true;
+  const applied=await apiRequest('/api/projects/'+encodeURIComponent(projectId),{
+   method:'PUT',body:{expectedRevision,name:projectName(),graph:next,
+    message:'Переподключение сюжетной стрелки'}
+  });
+  const latest=await apiRequest('/api/projects/'+encodeURIComponent(projectId));
+  if(latest.revision<applied.revision)throw Error('Устаревшая ревизия после записи');
+  acceptReadback(latest);
+ }catch(err){
+  if(submitted&&!verified&&projectId===activeProjectId&&from&&oldTarget){
+   try{
+    const latest=await apiRequest('/api/projects/'+encodeURIComponent(projectId));
+    const edge=latest.graph?.edges?.find(e=>e.id===edgeId);
+    if(edge?.from===from&&edge?.to===newTarget&&edge?.type===type)
+     acceptReadback(latest);
+   }catch{}
+  }
+  if(!verified)note('Стрелка не изменена: '+err.message);
+ }finally{cwAcceptanceBusy=false}
+}
 async function cwCommitCanonicalLink(from,to){
  if(cwAcceptanceBusy)return;
  if(cwDraftMoveEdits.size){note('Дождитесь сохранения черновиков');return}
@@ -2402,6 +2526,9 @@ document.addEventListener('keydown',e=>{
  if(e.key==='Escape'){
   if(cwActiveLinkGesture){
    e.preventDefault();cwActiveLinkGesture.cancel();return;
+  }
+  if(cwReconnectClickEdgeId){
+   e.preventDefault();cwReconnectClickEdgeId=null;render();return;
   }
   if(cwActiveDraftDragCancel){
    e.preventDefault();cwActiveDraftDragCancel();return;
