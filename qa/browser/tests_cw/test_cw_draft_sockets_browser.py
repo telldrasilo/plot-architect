@@ -50,6 +50,14 @@ def main():
           el=>el.getBoundingClientRect().width)""")
         assert all(abs(d-10)<1.5 for d in visual),visual
         result=snap(page)
+        # Validate the screen-space midpoint, not just world-space coordinates.
+        alignment=page.evaluate("""() => [...document.querySelectorAll('[data-cw-socket]')].map(el=>{
+          const card=document.querySelector('[data-cw-node="'+el.dataset.cwSocketNode+'"]');
+          const r=el.getBoundingClientRect(),b=card.getBoundingClientRect();
+          return Math.abs(r.left+r.width/2-
+            (el.dataset.cwSocketRole==='source'?b.right:b.left));
+        })""")
+        assert all(delta<1.5 for delta in alignment),alignment
         assert len(result["paths"])==3,result
         assert len(result["ports"])==6,result
         ports={v["key"]:v for v in result["ports"]}
