@@ -296,11 +296,11 @@ test('preview placement cannot mutate data and concurrent stale write fails clos
  const {db,sqlite}=syntheticDB();seed(sqlite);
  const before=current(sqlite),nodeIds=['a','b'];
  const placements=[{nodeId:'a',x:550,y:-220},{nodeId:'b',x:790,y:-220}];
- const command={kind:'accept_draft',workspaceId:'w1',nodeIds,placements,
+ const dropCommand={kind:'accept_draft',workspaceId:'w1',nodeIds,placements,
   expectedPreview:previewDraftAcceptance(before,{workspaceId:'w1',nodeIds,placements})};
  const snapshot=JSON.stringify(current(sqlite));
  await send(db,command(current(sqlite),'accept_draft',{nodeIds:['c']}),0,'second-editor');
- await fails(()=>send(db,command,0,'stale-drop'),'REVISION_CONFLICT');
+ await fails(()=>send(db,dropCommand,0,'stale-drop'),'REVISION_CONFLICT');
  assert.equal(current(sqlite).nodes.find(n=>n.id==='a').workspaceId,'w1');
  assert.equal(current(sqlite).nodes.find(n=>n.id==='a').x,0);
  assert.deepEqual(counts(sqlite),{revision:1,history:2,receipts:1});
