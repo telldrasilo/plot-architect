@@ -882,7 +882,7 @@ async function cwConfirmNoteStage(){
   selected=null;selectedNodeIds.clear();linkFrom=null;history=[];
   cwPreparedNoteAlternatives.delete(r.noteId);cwStageReview=null;
   recomputeFieldTags();save(false);render();fit();
-  $('saved').textContent='✓ Сохранено в Site · '+remote.revision;
+  $('saved').textContent='✓ '+(cwLocalWorkflowEnabled?'Сохранено локально':'Сохранено в Site')+' · '+remote.revision;
   note('Варианты сохранены в рабочей области — не в сюжете');
  }catch(err){
   // Do not rotate operationId following an ambiguous reply or lost GET.
@@ -942,7 +942,7 @@ async function cwConfirmAccept(){
   cwClearDraftSelection();
   recomputeFieldTags();
   save(false);render();
-  $('saved').textContent='✓ Сохранено в Site · '+remote.revision;
+  $('saved').textContent='✓ '+(cwLocalWorkflowEnabled?'Сохранено локально':'Сохранено в Site')+' · '+remote.revision;
   note('Выбранные события приняты в сюжет. Остальные черновики сохранены');
  }catch(err){
   // Keep the same operationId for retry after an ambiguous network failure.
@@ -2195,7 +2195,7 @@ window.addEventListener('resize',()=>{if(tipTarget&&!tooltipHost.hidden)displayT
 
 /* PA-SITE-01 project manager; never changes semantic edges on switching projects. */
 function projectName(){return registryEntry(activeProjectId)?.name||'Без названия'}
-function updateProjectLabel(){const t=$('project-current');if(t)t.textContent=projectName();const m=$('project-mode');if(m)m.textContent=remote.connected?'Site · D1':'Локально'}
+function updateProjectLabel(){const t=$('project-current');if(t)t.textContent=projectName();const m=$('project-mode');if(m)m.textContent=remote.connected?(cwLocalWorkflowEnabled?'Graphite Local':'Site · D1'):'Локально'}
 function showProjectManager(){
  modalOpen=true;const h=$('modal-host');h.innerHTML=`<div class="backdrop" id="projects-backdrop"><section class="modal project-manager" role="dialog" aria-label="Проекты" aria-modal="true"><div class="project-modal-head"><h2>Мои истории</h2><button id="pm-close" aria-label="Закрыть">×</button></div><p id="pm-status">${remote.connected?'Хранятся на Site, с локальными копиями':'Локальные проекты этого браузера'}</p><div class="project-list" id="pm-list"></div><div class="project-controls"><button id="pm-new" class="primary">＋ Новая история</button><button id="pm-import">↑ Импорт JSON</button><button id="pm-connect">${remote.connected?'↩ Локальные проекты':'☁ Подключить Site'}</button></div><div id="pm-error" role="alert" class="pm-error"></div><div class="project-controls secondary"><button id="pm-rename">Переименовать</button><button id="pm-copy">Дублировать</button><button id="pm-delete">Удалить</button><button id="pm-export">Экспорт</button><button id="pm-retry" ${remote.connected&&remote.dirty?'':'hidden'}>Повторить синхронизацию</button></div><input id="pm-file" type="file" accept=".json,application/json" hidden></section></div>`;
  const close=()=>{modalOpen=false;h.innerHTML=''};
@@ -2251,7 +2251,7 @@ async function apiRequest(path,opts={}){
  let body;try{body=await res.json()}catch{throw Error('Site API вернул не-JSON ответ')}
  if(!res.ok){if(res.status===409){remote.blocked=true;throw Error('Конфликт ревизий. Экспортируйте данные; автоматическая запись остановлена.')}throw Error(body.message||body.error||'HTTP '+res.status)}return body
 }
-function queueRemote(){if(!remote.connected||remote.blocked)return;remote.dirty=true;try{localStorage.setItem(PENDING_PREFIX+activeProjectId,'1')}catch{};clearTimeout(remote.timer);remote.timer=setTimeout(()=>flushRemote().catch(e=>{note('Не удалось синхронизировать: '+e.message);$('saved').textContent='! Сохранено локально · ошибка Site'}),750)}
+function queueRemote(){if(!remote.connected||remote.blocked)return;remote.dirty=true;try{localStorage.setItem(PENDING_PREFIX+activeProjectId,'1')}catch{};clearTimeout(remote.timer);remote.timer=setTimeout(()=>flushRemote().catch(e=>{note('Не удалось синхронизировать: '+e.message);$('saved').textContent='! Локальная копия сохранена · ошибка синхронизации'}),750)}
 async function flushRemote(){
  clearTimeout(remote.timer);
  if(!remote.connected||remote.blocked)return;
@@ -2259,8 +2259,8 @@ async function flushRemote(){
  if(!remote.dirty)return;
  remote.busy=true;const currentId=activeProjectId,graph=persistentGraph(),name=projectName(),revision=state.revision;
  remote.dirty=false;
- try{const r=await apiRequest('/api/projects/'+encodeURIComponent(currentId),{method:'PUT',body:{expectedRevision:remote.revision,name,graph,message:'Редактирование в Plot Architect'}});remote.revision=r.revision;if(!remote.dirty&&activeProjectId===currentId&&state.revision===revision){try{localStorage.removeItem(PENDING_PREFIX+currentId)}catch{};$('saved').textContent='✓ Сохранено в Site · '+r.revision}}
- catch(err){remote.blocked=err.message.includes('Конфликт');remote.dirty=true;$('saved').textContent='! Не удалось сохранить в Site';throw err}
+ try{const r=await apiRequest('/api/projects/'+encodeURIComponent(currentId),{method:'PUT',body:{expectedRevision:remote.revision,name,graph,message:'Редактирование в Plot Architect'}});remote.revision=r.revision;if(!remote.dirty&&activeProjectId===currentId&&state.revision===revision){try{localStorage.removeItem(PENDING_PREFIX+currentId)}catch{};$('saved').textContent='✓ '+(cwLocalWorkflowEnabled?'Сохранено локально':'Сохранено в Site')+' · '+r.revision}}
+ catch(err){remote.blocked=err.message.includes('Конфликт');remote.dirty=true;$('saved').textContent='! Не удалось сохранить проект';throw err}
  finally{remote.busy=false}
  if(remote.dirty)await flushRemote();
 }
@@ -2272,7 +2272,7 @@ async function connectSite(silent=false){
    &&health.workflowEnabled===true;
   const data=await apiRequest('/api/projects');remote.connected=true;remote.blocked=false;remote.dirty=false;activeRegistryStorage=SITE_REGISTRY_KEY;
  if(!data.projects.length){const created=await apiRequest('/api/projects',{method:'POST',body:{name:'Новая история',graph:blankGraph()}});registry={activeId:created.id,projects:[{id:created.id,name:created.name,revision:created.revision}]};remote.revision=created.revision;activeProjectId=created.id;KEY=KEY_PREFIX+created.id;state=validateImported(created.graph);selected=null;selectedNodeIds.clear();linkFrom=null;history=[];state.view=null;recomputeFieldTags();try{localStorage.removeItem(PENDING_PREFIX+created.id)}catch{};save(false);updateProjectLabel();render();note('Первый проект создан на Site')}
- else{let last;try{last=JSON.parse(localStorage.getItem(SITE_REGISTRY_KEY)||'null')?.activeId}catch{};registry={activeId:data.projects.some(p=>p.id===last)?last:data.projects[0].id,projects:data.projects.map(p=>({id:p.id,name:p.name,revision:p.revision}))};remote.revision=0;await openProject(registry.activeId);note('Подключено к Site')}
+ else{let last;try{last=JSON.parse(localStorage.getItem(SITE_REGISTRY_KEY)||'null')?.activeId}catch{};registry={activeId:data.projects.some(p=>p.id===last)?last:data.projects[0].id,projects:data.projects.map(p=>({id:p.id,name:p.name,revision:p.revision}))};remote.revision=0;await openProject(registry.activeId);note(cwLocalWorkflowEnabled?'Подключён Graphite Local':'Подключено к Site')}
 }
 $('projects-open').onclick=showProjectManager;
 updateProjectLabel();
