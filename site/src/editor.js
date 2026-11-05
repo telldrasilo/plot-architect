@@ -2406,6 +2406,48 @@ function createNode(at=null){notifyModal('Новое событие','Добав
 // CW-003: one temporary overlay. It is not part of the graph and does
 // not change the canonical edge until a server revision is read back.
 let cwActiveLinkGesture=null;
+let cwDisconnectPrompt=null;
+function cwCloseDisconnectPrompt(){
+ if(!cwDisconnectPrompt)return;
+ document.removeEventListener('pointerdown',cwDisconnectPrompt.outside,true);
+ cwDisconnectPrompt.node.remove();
+ cwDisconnectPrompt=null;
+}
+function cwAskDisconnectEdge(edge,x,y){
+ if(!remote.connected||remote.blocked||cwAcceptanceBusy)return;
+ cwCloseDisconnectPrompt();
+ const panel=document.createElement('section');
+ panel.className='cw-disconnect-prompt';
+ panel.dataset.cwDisconnectPrompt=edge.id;
+ panel.setAttribute('role','dialog');
+ panel.setAttribute('aria-label','Подтверждение удаления сюжетной связи');
+ const caption=document.createElement('strong');
+ caption.textContent='Удалить связь?';
+ const detail=document.createElement('p');
+ detail.textContent='Оба события останутся. Связь можно вернуть через Ctrl+Z.';
+ const controls=document.createElement('div');controls.className='cw-disconnect-actions';
+ const cancel=document.createElement('button');cancel.type='button';cancel.textContent='Отмена';
+ const remove=document.createElement('button');remove.type='button';
+ remove.className='cw-disconnect-danger';remove.textContent='Удалить связь';
+ const close=()=>cwCloseDisconnectPrompt();
+ cancel.addEventListener('click',e=>{e.stopPropagation();close()});
+ remove.addEventListener('click',e=>{
+  e.stopPropagation();close();
+  void cwCommitCanonicalDisconnect(edge.id,edge.from,edge.to);
+ });
+ panel.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close()}
+ });
+ controls.append(cancel,remove);panel.append(caption,detail,controls);
+ document.body.append(panel);
+ const rect=panel.getBoundingClientRect();
+ panel.style.left=Math.max(10,Math.min(window.innerWidth-rect.width-10,x+10))+'px';
+ panel.style.top=Math.max(10,Math.min(window.innerHeight-rect.height-10,y+10))+'px';
+ const outside=e=>{if(!panel.contains(e.target))close()};
+ cwDisconnectPrompt={node:panel,outside};
+ document.addEventListener('pointerdown',outside,true);
+ cancel.focus({preventScroll:true});
+}
 function cwLinkOverlay(){
  const world=$('world');
  let svg=world.querySelector('#cw-link-overlay');
@@ -2460,6 +2502,7 @@ function cwPositionRewireHandles(edges){
 function cwBeginCanonicalRewire(event){
  if(event.button!==0)return;
  event.preventDefault();event.stopPropagation();
+ cwCloseDisconnectPrompt();
  const handle=event.currentTarget,edge=currentEdges().find(e=>e.id===handle.dataset.rewireEdge);
  if(!edge||cwActiveLinkGesture||cwAcceptanceBusy||cwDraftMoveEdits.size||
    !remote.connected||remote.blocked)return;
@@ -2489,7 +2532,17 @@ function cwBeginCanonicalRewire(event){
   if(moved)target=cwLinkHitTarget(e.clientX,e.clientY,edge.from,edge.id);
   cleanup();
   if(!moved){selected={type:'edge',id:edge.id};render();return}
-  if(target&&target!==edge.to)void cwCommitCanonicalRewire(edge.id,edge.from,target);
+  if(target&&target!==edge.to){
+   void cwCommitCanonicalRewire(edge.id,edge.from,target);return;
+  }
+  // Only an intentional drop on empty canvas can offer deletion; invalid
+  // cards, controls and edges always cancel. No mutation before confirmation.
+  if(!target&&Math.hypot(e.clientX-startX,e.clientY-startY)>=28){
+   const hit=document.elementFromPoint(e.clientX,e.clientY);
+   if(hit&&!hit.closest('[data-node],[data-cw-node],button,[data-edge],'+
+     '.inspector,.cw-edge-toolbar,.cw-preview-area,.modal,.backdrop'))
+    cwAskDisconnectEdge(edge,e.clientX,e.clientY);
+  }
  };
  const cancel=e=>{e?.stopPropagation();cleanup()};
  cwActiveLinkGesture={cancel};
@@ -2633,6 +2686,57 @@ async function cwCommitCanonicalLink(from,to){
    }catch{}
   }
   if(!verified)note('Стрелка не сохранена: '+err.message);
+ }finally{cwAcceptanceBusy=false}
+}
+async function cwCommitCanonicalDisconnect(edgeId,from,to){
+ if(cwAcceptanceBusy||cwDraftMoveEdits.size)return;
+ cwAcceptanceBusy=true;
+ let projectId=null,submitted=false,verified=false,prior=null;
+ const acceptReadback=latest=>{
+  if(activeProjectId!==projectId||remote.dirty||!Number.isSafeInteger(latest.revision))
+   throw Error('Проект изменился до подтверждения удаления');
+  if(!Array.isArray(latest.graph?.edges)||
+    latest.graph.edges.some(edge=>edge.id===edgeId))
+   throw Error('Удаление связи не подтверждено сервером');
+  history.push(prior);if(history.length>60)history.shift();
+  state=validateImported(latest.graph);remote.revision=latest.revision;
+  remote.blocked=false;remote.dirty=false;verified=true;
+  try{localStorage.removeItem(PENDING_PREFIX+projectId)}catch{}
+  selected=null;selectedNodeIds.clear();
+  recomputeFieldTags();save(false);render();note('Связь удалена · Ctrl+Z для отмены');
+ };
+ try{
+  projectId=activeProjectId;
+  if(!remote.connected||remote.blocked)throw Error('Проект не подключён');
+  if(remote.busy||remote.dirty)await flushRemote();
+  if(activeProjectId!==projectId||remote.blocked||remote.dirty||remote.busy)
+   throw Error('Проект изменился во время синхронизации');
+  const original=currentEdges().find(edge=>edge.id===edgeId&&edge.from===from
+   &&edge.to===to&&!edge.workspaceId);
+  if(!original)throw Error('Исходная связь уже изменилась');
+  const before=persistentGraph();prior=JSON.stringify(before);
+  const next=structuredClone(before);
+  next.edges=next.edges.filter(edge=>edge.id!==edgeId);
+  if(next.edges.length!==before.edges.length-1)
+   throw Error('Связь уже отсутствует');
+  next.revision=(state.revision||0)+1;
+  submitted=true;
+  const applied=await apiRequest('/api/projects/'+encodeURIComponent(projectId),{
+   method:'PUT',body:{expectedRevision:remote.revision,name:projectName(),graph:next,
+    message:'Удаление связи перетаскиванием'}
+  });
+  const latest=await apiRequest('/api/projects/'+encodeURIComponent(projectId));
+  if(latest.revision<applied.revision)throw Error('Сервер вернул старую ревизию');
+  acceptReadback(latest);
+ }catch(err){
+  if(submitted&&!verified&&projectId===activeProjectId){
+   try{
+    const latest=await apiRequest('/api/projects/'+encodeURIComponent(projectId));
+    if(Array.isArray(latest.graph?.edges)&&
+      !latest.graph.edges.some(edge=>edge.id===edgeId))acceptReadback(latest);
+   }catch{}
+  }
+  if(!verified)note('Удаление связи не сохранено: '+err.message);
  }finally{cwAcceptanceBusy=false}
 }
 async function cwCommitCanonicalRewire(edgeId,from,to){

@@ -43,9 +43,13 @@ def main():
                 reply({"error":"REVISION_CONFLICT","message":"Concurrent update"},409)
                 return
             updated=data["graph"]
-            assert len(updated["edges"])==1,updated["edges"]
-            edge=updated["edges"][0]
-            assert edge["id"]=="e1" and edge["from"]=="n1" and edge["type"]=="enables"
+            assert len(updated["edges"]) in (0,1),updated["edges"]
+            if updated["edges"]:
+                edge=updated["edges"][0]
+                assert edge["id"]=="e1" and edge["from"]=="n1" and edge["type"]=="enables"
+            else:
+                assert any(e["id"]=="e1" for e in db["graph"]["edges"]), (
+                    "Only an existing canonical edge may be disconnected")
             db["revision"]+=1;updated["revision"]=db["revision"]
             db["graph"]=copy.deepcopy(updated);db["put"]+=1
             reply({"revision":db["revision"]})
@@ -117,9 +121,14 @@ def main():
         assert page.locator("#cw-link-overlay:not([hidden])").count()==0
         assert page.evaluate("()=>__graphite.getState().edges[0].to")=="n3"
 
-        # An off-node drop does not erase the original edge.
+        # An off-node drop only offers deletion; Cancel preserves the original.
         drag_endpoint(page,None)
+        assert page.locator('[data-cw-disconnect-prompt="e1"]').count()==1
         assert db["put"]==0 and db["graph"]["edges"][0]["to"]=="n3"
+        page.locator('[data-cw-disconnect-prompt="e1"]').get_by_role(
+            "button",name="Отмена").click()
+        assert page.locator('[data-cw-disconnect-prompt]').count()==0
+        assert db["put"]==0
         # The inspector is an optional keyboard-accessible fallback.
         select_edge(page)
         page.get_by_role("button",name="Переподключить").click()
@@ -177,13 +186,41 @@ def main():
         assert db["put"]==1
         assert db["graph"]["edges"][0]["to"]=="n2"
         assert page.evaluate("()=>__graphite.getState().edges[0].to")=="n2"
+        context.close()
+
+        # Use a fresh browser profile after the intentional CAS conflict.
+        # Confirmed empty-canvas deletion must be one guarded server mutation.
+        revision_before_delete=db["revision"]
+        fresh=browser.new_context(viewport={"width":1440,"height":940})
+        fresh.route("https://plot.local/**",route)
+        page=fresh.new_page()
+        page.on("pageerror",lambda err:errors.append(str(err)))
+        page.goto("https://plot.local/")
+        page.wait_for_function(
+            "() => window.__graphite&&__graphite.getRemote().connected"
+            "&&__graphite.getState().edges.some(e=>e.id==='e1'&&e.to==='n2')"
+        )
+        page.evaluate("()=>__graphite.setZoomForTest(1)")
+        assert page.locator('[data-canon-edge-port="e1"]').count()==1
+        drag_endpoint(page,None)
+        confirmation=page.locator('[data-cw-disconnect-prompt="e1"]')
+        assert confirmation.count()==1
+        assert db["put"]==1 and len(db["graph"]["edges"])==1
+        confirmation.get_by_role("button",name="Удалить связь").click()
+        page.wait_for_function(
+            f"() => __graphite.getState().edges.length===0 "
+            f"&&__graphite.getRemote().revision==={revision_before_delete+1}"
+        )
+        assert db["put"]==2
+        assert db["graph"]["edges"]==[] and len(db["graph"]["nodes"])==3
+        assert page.locator('[data-canon-edge-port]').count()==0
         assert not errors,errors
-        context.close();browser.close()
+        fresh.close();browser.close()
     print(json.dumps({"result":"PASS","writes":db["put"],
       "cases":["direct hover before selection","round highlight, no square",
-       "nonpersistent reconnect preview","Esc","off-target",
+       "nonpersistent reconnect preview","Esc","off-target confirmation and cancel",
        "inspector non-destructive","one revision and same edge ID",
-       "reload","CAS collision leaves original"]}))
+       "reload","CAS collision leaves original","confirmed guarded disconnect"]}))
 
 if __name__=="__main__":
     main()
