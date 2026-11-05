@@ -971,9 +971,10 @@ function cwSyncEdgeToolbar(){
  });
  reconnect.addEventListener('click',e=>{
   e.stopPropagation();
-  const selector=target.scope==='draft'?'[data-cw-rewire-edge]':'#cw-rewire-handle';
+  const selector=target.scope==='draft'?'[data-cw-rewire-edge]':'[data-canon-edge-port]';
   const handle=[...document.querySelectorAll(selector)].find(el=>
-   target.scope==='canon'||el.dataset.cwRewireEdge===target.edge.id);
+   target.scope==='canon'?el.dataset.canonEdgePort===target.edge.id:
+   el.dataset.cwRewireEdge===target.edge.id);
   if(handle){handle.focus({preventScroll:true});note('Перетащите конечное гнездо к другой карточке')}
   else note('Выберите конечное гнездо стрелки');
  });
@@ -2022,7 +2023,6 @@ function renderEdges(){
  const sockets=layoutEdgeSockets({nodes:visibleNodes,edges:currentEdges(),
    bounds,mode:semanticZoomLevel()});
  cwCanonicalSocketLayout=sockets;cwCanonicalSocketBounds=bounds;
- cwPositionRewireHandle();
  for(const node of visibleNodes){
   const handle=[...document.querySelectorAll('[data-link-source]')]
    .find(el=>el.dataset.linkSource===node.id);
@@ -2059,6 +2059,7 @@ function renderEdges(){
    c+=`<g data-gap-link="${esc(l.id)}"><path class="edge-gap ${active?'selected':''}" marker-end="url(#${active?'arrOn':'arr'})" d="${d}"/><path class="edge-gap-hit" data-gap-link-target="${esc(l.id)}" d="${d}"/></g>`;
   }
   $('edges').innerHTML=c;
+  cwPositionRewireHandles(plan.visibleEdges);
   // A direction marker sits ON the full socket-to-socket route: no endpoint trim.
   for(const group of $('edges').querySelectorAll('g[data-edge]')){
    const line=group.querySelector('path.edge');
@@ -2411,26 +2412,39 @@ function cwClearLinkTarget(){
  for(const node of document.querySelectorAll('.cw-link-target'))
   node.classList.remove('cw-link-target');
 }
-function cwPositionRewireHandle(){
- const edge=selected?.type==='edge'?currentEdges().find(e=>e.id===selected.id):null;
- let handle=$('cw-rewire-handle');
- if(!edge||semanticZoomLevel()!=='full'||!cwCanonicalSocketLayout){
-  if(handle)handle.remove();return;
- }
- const point=cwCanonicalSocketLayout.ports.get(socketKey(edge.id,'target'));
- if(!point){if(handle)handle.remove();return}
- if(!handle){
-  handle=document.createElement('button');handle.id='cw-rewire-handle';
+// A socket is the control: the visually hidden hit surface sits exactly on
+// each target port. No selection or extra square is required before dragging.
+function cwHighlightCanonicalPort(edgeId,active){
+ for(const dot of $('edges').querySelectorAll('[data-edge-socket]'))
+  if(dot.dataset.edgeSocket===socketKey(edgeId,'target'))
+   dot.classList.toggle('edge-socket-hover',active);
+}
+function cwPositionRewireHandles(edges){
+ const world=$('world');
+ for(const handle of world.querySelectorAll('[data-canon-edge-port]'))handle.remove();
+ if(!cwCanonicalSocketLayout||semanticZoomLevel()!=='full'||!remote.connected
+   ||remote.blocked)return;
+ for(const edge of edges){
+  const port=cwCanonicalSocketLayout.ports.get(socketKey(edge.id,'target'));
+  if(!port)continue;
+  const handle=document.createElement('button');
   handle.type='button';handle.className='cw-rewire-handle';
-  handle.setAttribute('aria-label','Перенести конец выбранной стрелки');
+  handle.dataset.canonEdgePort=edge.id;
+  handle.dataset.rewireEdge=edge.id;
+  const from=nby(edge.from),to=nby(edge.to);
+  handle.setAttribute('aria-label','Перенести конец связи «'+(from?.title||edge.from)+
+   '» — «'+(to?.title||edge.to)+'»');
   handle.title='Перетащите конец стрелки к другому событию';
+  handle.style.left=port.x+'px';handle.style.top=port.y+'px';
+  cwSizeSocketControl(handle,port,cwCanonicalSocketLayout);
+  handle.addEventListener('pointerenter',()=>cwHighlightCanonicalPort(edge.id,true));
+  handle.addEventListener('pointerleave',()=>cwHighlightCanonicalPort(edge.id,false));
+  handle.addEventListener('focus',()=>cwHighlightCanonicalPort(edge.id,true));
+  handle.addEventListener('blur',()=>cwHighlightCanonicalPort(edge.id,false));
   handle.addEventListener('pointerdown',cwBeginCanonicalRewire);
-  handle.addEventListener('click',e=>e.stopPropagation());
-  $('world').append(handle);
+  handle.addEventListener('click',event=>event.stopPropagation());
+  world.append(handle);
  }
- handle.dataset.rewireEdge=edge.id;
- handle.style.left=point.x+'px';handle.style.top=point.y+'px';
- cwSizeSocketControl(handle,point,cwCanonicalSocketLayout);
 }
 function cwBeginCanonicalRewire(event){
  if(event.button!==0)return;
@@ -2463,7 +2477,8 @@ function cwBeginCanonicalRewire(event){
   e.preventDefault();e.stopPropagation();
   if(moved)target=cwLinkHitTarget(e.clientX,e.clientY,edge.from,edge.id);
   cleanup();
-  if(moved&&target&&target!==edge.to)void cwCommitCanonicalRewire(edge.id,edge.from,target);
+  if(!moved){selected={type:'edge',id:edge.id};render();return}
+  if(target&&target!==edge.to)void cwCommitCanonicalRewire(edge.id,edge.from,target);
  };
  const cancel=e=>{e?.stopPropagation();cleanup()};
  cwActiveLinkGesture={cancel};
