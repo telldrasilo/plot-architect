@@ -112,7 +112,28 @@ export function canonicalProjection(graph){
 }
 
 /** Preview only; creates no graph changes, no implied external plot relations. */
-export function previewDraftAcceptance(graph,{workspaceId,nodeIds}){
+function reviewedDraftPlacements(graph,nodeIds,placements){
+ if(placements===undefined)return undefined; // Preserve the original API contract.
+ if(!Array.isArray(placements)||placements.length!==nodeIds.length)
+  fail('PLACEMENTS_INVALID','one position is required for each selected draft');
+ const source=new Map(graph.nodes.map(n=>[n.id,n])),allowed=new Set(nodeIds),seen=new Set();
+ const changes=[];
+ for(const p of placements){
+  if(!obj(p)||Object.keys(p).some(k=>!['nodeId','x','y'].includes(k))
+    ||!allowed.has(p.nodeId)||seen.has(p.nodeId)
+    ||typeof p.x!=='number'||!Number.isFinite(p.x)||Math.abs(p.x)>1_000_000
+    ||typeof p.y!=='number'||!Number.isFinite(p.y)||Math.abs(p.y)>1_000_000)
+   fail('PLACEMENTS_INVALID','unique valid positions for exactly the selected drafts');
+  seen.add(p.nodeId);
+ }
+ // The preview has stable ordering by the selection, independent of user input order.
+ for(const nodeId of nodeIds){
+  const from=source.get(nodeId),to=placements.find(p=>p.nodeId===nodeId);
+  changes.push({nodeId,before:{x:from.x,y:from.y},after:{x:to.x,y:to.y}});
+ }
+ return changes;
+}
+export function previewDraftAcceptance(graph,{workspaceId,nodeIds,placements}={}){
   validateCreativeWorkflowGraph(graph);
   if(!id(workspaceId)||!(graph.workspaces??[]).some(a=>a.id===workspaceId))fail('WORKSPACE_NOT_FOUND',String(workspaceId));
   if(!Array.isArray(nodeIds)||!nodeIds.length||new Set(nodeIds).size!==nodeIds.length)fail('SELECTION_INVALID','nonempty unique selection required');
@@ -126,7 +147,9 @@ export function previewDraftAcceptance(graph,{workspaceId,nodeIds}){
     if(e.draftRelation==='internal'&&becomesCanon(e.from)&&becomesCanon(e.to))promoteEdgeIds.push(e.id);
     else reviewEdgeIds.push(e.id);
   }
-  return {workspaceId,acceptNodeIds:[...selected],promoteEdgeIds,reviewEdgeIds,autoRewiredEdgeIds:[]};
+  const positionChanges=reviewedDraftPlacements(graph,nodeIds,placements);
+  return {workspaceId,acceptNodeIds:[...selected],promoteEdgeIds,reviewEdgeIds,autoRewiredEdgeIds:[],
+   ...(positionChanges===undefined?{}:{positionChanges})};
 }
 
 /** Preview of a truly explicit replacement; does not modify canon. */
@@ -168,15 +191,17 @@ export function assertProtectedOriginalsUnchanged(previous,next){
  * expectedPreview guards against an outdated review of affected edges;
  * expectedRevision, when supplied, checks this in-memory graph's revision only.
  */
-export function applyDraftAcceptance(graph,{workspaceId,nodeIds,expectedPreview,expectedRevision}={}){
+export function applyDraftAcceptance(graph,{workspaceId,nodeIds,placements,expectedPreview,expectedRevision}={}){
   if(expectedRevision!==undefined){
     if(!Number.isSafeInteger(expectedRevision)||expectedRevision<0||graph?.revision!==expectedRevision)fail('REVISION_CONFLICT','graph revision differs from requested revision');
   }
-  const plan=previewDraftAcceptance(graph,{workspaceId,nodeIds});
+  const plan=previewDraftAcceptance(graph,{workspaceId,nodeIds,placements});
   if(expectedPreview!==undefined&&JSON.stringify(expectedPreview)!==JSON.stringify(plan))fail('PREVIEW_STALE','acceptance plan changed');
   const accepted=new Set(plan.acceptNodeIds),promoted=new Set(plan.promoteEdgeIds);
   const next=structuredClone(graph);
+  const positions=new Map((plan.positionChanges??[]).map(p=>[p.nodeId,p.after]));
   for(const n of next.nodes)if(accepted.has(n.id)){
+    if(positions.has(n.id)){n.x=positions.get(n.id).x;n.y=positions.get(n.id).y}
     delete n.workspaceId;
     delete n.draftBranchId;
   }
