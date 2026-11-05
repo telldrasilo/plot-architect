@@ -48,8 +48,8 @@ def main():
                 edge=updated["edges"][0]
                 assert edge["id"]=="e1" and edge["from"]=="n1" and edge["type"]=="enables"
             else:
-                assert any(e["id"]=="e1" for e in db["graph"]["edges"]),
-                    "Only an existing canonical edge may be disconnected"
+                assert any(e["id"]=="e1" for e in db["graph"]["edges"]), (
+                    "Only an existing canonical edge may be disconnected")
             db["revision"]+=1;updated["revision"]=db["revision"]
             db["graph"]=copy.deepcopy(updated);db["put"]+=1
             reply({"revision":db["revision"]})
