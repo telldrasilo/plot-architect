@@ -133,8 +133,25 @@ def main():
         select_edge(page)
 
         db["force_conflict"]=True
-        drag_endpoint(page,"n3")
-        page.wait_for_function("() => __graphite.getRemote().blocked")
+        # The edge inspector can overlap the middle of the right-hand node.
+        # Hit the uncovered left side of the target, not the inspector.
+        n3=page.locator('[data-node="n3"]').bounding_box()
+        assert n3 is not None
+        target=(n3["x"]+24,n3["y"]+26)
+        handle=page.locator("#cw-rewire-handle").bounding_box()
+        assert handle is not None
+        page.mouse.move(handle["x"]+handle["width"]/2,
+                        handle["y"]+handle["height"]/2)
+        page.mouse.down()
+        page.mouse.move(*target,steps=12)
+        assert page.locator('#cw-link-overlay[data-valid="true"]:not([hidden])').count()==1, {
+            "target":target,
+            "hit":page.evaluate("""({x,y}) => document.elementFromPoint(x,y)
+              ?.closest('[data-node]')?.dataset.node??null""",
+              {"x":target[0],"y":target[1]})
+        }
+        page.mouse.up()
+        page.wait_for_function("() => __graphite.getRemote().blocked",timeout=5000)
         assert db["put"]==1
         assert db["graph"]["edges"][0]["to"]=="n2"
         assert page.evaluate("()=>__graphite.getState().edges[0].to")=="n2"
