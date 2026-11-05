@@ -1,6 +1,9 @@
 # Graphite Local — запуск, обновление и перезапуск на Windows
 
 **Это рабочая инструкция для локального Graphite + приватного ChatGPT-плагина «Graphite Local».**
+Стандарт разработки кода в среде текущего чата (без Work) описан отдельно:
+[CHAT_DEVELOPMENT_WORKFLOW.md](CHAT_DEVELOPMENT_WORKFLOW.md). Эта инструкция отвечает
+за **синхронизацию и запуск на ПК** после слияния PR, а не за разработку в чате.
 Локальный Node.js слушает только `127.0.0.1:8788`, использует SQLite
 `%USERPROFILE%\.graphite-local\graphite-dev.sqlite` и передаёт MCP-запросы
 в ChatGPT через отдельный Secure MCP Tunnel. ПК и оба процесса должны работать.
