@@ -130,11 +130,9 @@ let cwLocalWorkflowEnabled=false;
 // the QA switch remains synthetic. The REST server validates every operation.
 function cwWorkflowEnabled(){return cwWorkflowTestMode||cwLocalWorkflowEnabled}
 const cwDraftMoveEdits=new Map();
-let cwMoveWorkspaceId=null;
-let cwMoveReview=null;
-let cwMoveStale=false;
 function cwClearDraftMoves(){
- cwDraftMoveEdits.clear();cwMoveWorkspaceId=null;cwMoveReview=null;cwMoveStale=false;
+ if(cwMoveSaveTimer!==null){clearTimeout(cwMoveSaveTimer);cwMoveSaveTimer=null}
+ cwDraftMoveEdits.clear();cwMoveRetry=null;cwMoveFailure=null;
 }
 function cwServerReady(){
  return cwWorkflowEnabled()&&remote.connected&&!remote.blocked&&!remote.busy&&!remote.dirty
@@ -147,7 +145,7 @@ function cwClearDraftSelection(){
  cwSelectedWorkspaceId=null;cwSelectedDraftIds.clear();cwAcceptanceReview=null;
 }
 function cwToggleDraftSelection(nodeId,workspaceId){
- if(!cwWorkflowEnabled()||cwAcceptanceBusy)return;
+ if(!cwWorkflowEnabled())return;
  if(!state.nodes.some(n=>n.id===nodeId&&n.workspaceId===workspaceId))return;
  if(cwSelectedWorkspaceId!==workspaceId){
   cwSelectedDraftIds.clear();cwSelectedWorkspaceId=workspaceId;
@@ -336,7 +334,7 @@ function setCWWorkflowTestMode(enabled){
  if(selected?.type==='gapNote')renderInspector();
 }
 function cwCleanForOperation(){
- return cwServerReady()&&!cwDraftMoveEdits.size&&!cwMoveStale;
+ return cwServerReady()&&!cwDraftMoveEdits.size&&!cwMoveSavePromise;
 }
 async function cwWorkflowRequest(id,mode,payload){
  const response=await fetch('/api/projects/'+encodeURIComponent(id)+'/workflow/'+mode,{
@@ -350,122 +348,158 @@ async function cwWorkflowRequest(id,mode,payload){
  return body;
 }
 
-function cwDraftMoveCommand(){
- const items=[...cwDraftMoveEdits].map(([nodeId,p])=>({nodeId,x:p.x,y:p.y}));
- return {kind:'move_drafts',workspaceId:cwMoveWorkspaceId,moves:items};
+
+let cwMoveSaveTimer=null;
+let cwMoveSavePromise=null;
+let cwMoveRetry=null;
+let cwMoveFailure=null;
+
+function cwScheduleDraftSave(){
+ if(cwMoveSaveTimer!==null)clearTimeout(cwMoveSaveTimer);
+ cwMoveSaveTimer=setTimeout(()=>{
+  cwMoveSaveTimer=null;
+  void cwSaveDraftMoves().catch(()=>{}); // Error remains visible for explicit retry.
+ },100);
 }
-async function cwPrepareDraftMove(){
- if(!cwServerReady()||cwMoveStale||!cwDraftMoveEdits.size||!cwMoveWorkspaceId){
-  note('Завершите синхронизацию перед сохранением расположения');return
- }
- if(cwMoveReview?.attempted)return note('Повторите прежнюю операцию или обновите проект');
- const id=activeProjectId,revision=remote.revision,command=cwDraftMoveCommand();
- cwAcceptanceBusy=true;
- try{
-  const result=await cwWorkflowRequest(id,'preview',{expectedRevision:revision,command});
-  if(activeProjectId!==id||remote.revision!==revision||remote.dirty||remote.blocked)
-   throw Error('Проект изменился во время проверки');
-  const plan=result.preview;
-  if(!plan||plan.workspaceId!==command.workspaceId
-    ||!Array.isArray(plan.positionChanges)||plan.positionChanges.length!==command.moves.length
-    ||!Array.isArray(plan.affectedDraftEdgeIds)||plan.autoRewiredEdgeIds?.length)
-   throw Error('Сервер вернул неправильный состав изменений');
-  for(let i=0;i<command.moves.length;i++){
-   const move=command.moves[i],review=plan.positionChanges[i];
-   const original=state.nodes.find(n=>n.id===move.nodeId);
-   if(!original||original.workspaceId!==command.workspaceId
-      ||review?.nodeId!==move.nodeId
-      ||review.before?.x!==original.x||review.before?.y!==original.y
-      ||review.after?.x!==move.x||review.after?.y!==move.y)
-    throw Error('Позиции отличаются от проверяемого состояния');
-  }
-  cwMoveReview={projectId:id,revision,command,plan,operationId:crypto.randomUUID(),attempted:false};
- }catch(err){
-  cwMoveReview=null;
-  if(err.code==='REVISION_CONFLICT'||err.code==='PREVIEW_STALE')cwMoveStale=true;
-  note('Не удалось проверить расположение: '+err.message);
- }finally{cwAcceptanceBusy=false;renderCreativeWorkspacePreview()}
+function cwSaveDraftMoves(){
+ if(!cwMoveSavePromise)cwMoveSavePromise=cwRunDraftMoveSave().finally(()=>{cwMoveSavePromise=null});
+ return cwMoveSavePromise;
 }
-async function cwApplyDraftMove(){
- const review=cwMoveReview;
- if(!review||!cwServerReady()||cwMoveStale)return note('Проверьте актуальную ревизию проекта');
- if(review.projectId!==activeProjectId||review.revision!==remote.revision)
-  return note('Ревизия проекта изменилась');
- // If an earlier apply had an ambiguous network outcome, only retry the SAME
- // operation ID and SAME reviewed command. Never silently create another one.
- review.attempted=true;
+async function cwEnsureDraftsSynced(){
+ if(cwMoveSaveTimer!==null){clearTimeout(cwMoveSaveTimer);cwMoveSaveTimer=null}
+ if(cwMoveSavePromise)await cwMoveSavePromise;
+ if(cwDraftMoveEdits.size)await cwSaveDraftMoves();
+ if(cwDraftMoveEdits.size)throw Error('Расположение черновиков ещё не сохранено');
+}
+async function cwRunDraftMoveSave(){
+ if(!cwDraftMoveEdits.size)return;
+ if(cwAcceptanceBusy&&!cwMoveSavePromise)throw Error('Другая редакторская операция ещё выполняется');
  cwAcceptanceBusy=true;
+ $('saved').textContent='● Сохраняется расположение черновиков';
  try{
-  const result=await cwWorkflowRequest(review.projectId,'apply',{
-   expectedRevision:review.revision,operationId:review.operationId,
-   command:{...review.command,expectedPreview:review.plan}
-  });
-  if(!Number.isSafeInteger(result?.revision))throw Error('Сервер не подтвердил ревизию');
-  const latest=await apiRequest('/api/projects/'+encodeURIComponent(review.projectId));
-  if(activeProjectId!==review.projectId||remote.dirty||remote.blocked)
-   throw Error('Локальное состояние изменилось — необходимо обновление');
-  if(!Number.isSafeInteger(latest.revision)||latest.revision<result.revision)
-   throw Error('Сервер вернул старую версию проекта');
-  const next=validateImported(latest.graph);
-  for(const move of review.command.moves){
-   const node=next.nodes.find(n=>n.id===move.nodeId);
-   if(!node||node.workspaceId!==review.command.workspaceId
+  while(cwDraftMoveEdits.size){
+   if(!remote.connected||remote.blocked)throw Error('Соединение с локальным проектом недоступно');
+   // Flush ordinary changes before starting the revision-bound draft command.
+   if(remote.dirty||remote.busy)await flushRemote();
+   let operation=cwMoveRetry;
+   if(!operation){
+    const firstId=cwDraftMoveEdits.keys().next().value;
+    const first=state.nodes.find(n=>n.id===firstId);
+    if(!first?.workspaceId)throw Error('Черновик больше не найден');
+    const workspaceId=first.workspaceId;
+    const moves=[];
+    for(const [nodeId,position] of cwDraftMoveEdits){
+     const original=state.nodes.find(n=>n.id===nodeId);
+     if(original?.workspaceId!==workspaceId)continue;
+     if(position.x===original.x&&position.y===original.y){
+      cwDraftMoveEdits.delete(nodeId);continue;
+     }
+     moves.push({nodeId,x:position.x,y:position.y});
+     if(moves.length===128)break;
+    }
+    if(!moves.length)continue;
+    const projectId=activeProjectId,revision=remote.revision;
+    const command={kind:'move_drafts',workspaceId,moves};
+    const preview=await cwWorkflowRequest(projectId,'preview',{expectedRevision:revision,command});
+    if(activeProjectId!==projectId||remote.revision!==revision||remote.dirty||remote.blocked)
+     throw Error('Проект изменился во время сохранения');
+    const plan=preview.preview;
+    if(plan?.workspaceId!==workspaceId||plan.positionChanges?.length!==moves.length
+      ||!Array.isArray(plan.affectedDraftEdgeIds)||plan.autoRewiredEdgeIds?.length)
+     throw Error('Сервер вернул неожиданный результат проверки координат');
+    for(let i=0;i<moves.length;i++){
+     const before=state.nodes.find(n=>n.id===moves[i].nodeId),change=plan.positionChanges[i];
+     if(change?.nodeId!==moves[i].nodeId||change.before?.x!==before?.x
+       ||change.before?.y!==before?.y||change.after?.x!==moves[i].x
+       ||change.after?.y!==moves[i].y)throw Error('Проверенные координаты не совпадают');
+    }
+    operation={projectId,revision,command,plan,operationId:crypto.randomUUID()};
+    cwMoveRetry=operation; // Never replace the ID after a possibly successful apply.
+   }
+   const confirmed=await cwWorkflowRequest(operation.projectId,'apply',{
+    expectedRevision:operation.revision,operationId:operation.operationId,
+    command:{...operation.command,expectedPreview:operation.plan}
+   });
+   if(!Number.isSafeInteger(confirmed?.revision))throw Error('Сервер не подтвердил запись');
+   const latest=await apiRequest('/api/projects/'+encodeURIComponent(operation.projectId));
+   if(activeProjectId!==operation.projectId||remote.dirty||remote.blocked)
+    throw Error('Проект изменился до подтверждения сохранения');
+   if(!Number.isSafeInteger(latest.revision)||latest.revision<confirmed.revision)
+    throw Error('Сервер вернул устаревшую ревизию');
+   const next=validateImported(latest.graph);
+   for(const move of operation.command.moves){
+    const node=next.nodes.find(n=>n.id===move.nodeId);
+    if(!node||node.workspaceId!==operation.command.workspaceId
       ||node.x!==move.x||node.y!==move.y)
-    throw Error('Перемещение не обнаружено в серверной ревизии');
+     throw Error('Сохранённые координаты не подтверждены');
+   }
+   state=next;remote.revision=latest.revision;remote.dirty=false;
+   for(const move of operation.command.moves){
+    const pending=cwDraftMoveEdits.get(move.nodeId);
+    if(pending?.x===move.x&&pending?.y===move.y)cwDraftMoveEdits.delete(move.nodeId);
+   }
+   cwMoveRetry=null;cwMoveFailure=null;
+   recomputeFieldTags();save(false);renderCreativeWorkspacePreview();
   }
-  state=next;remote.revision=latest.revision;remote.dirty=false;
-  selected=null;selectedNodeIds.clear();linkFrom=null;history=[];
-  cwClearDraftSelection();cwClearDraftMoves();
-  recomputeFieldTags();save(false);render();
-  $('saved').textContent='✓ Сохранено в Site · '+remote.revision;
-  note('Расположение черновиков сохранено. События остаются вне сюжета');
+  $('saved').textContent='✓ Сохранено локально · '+remote.revision;
  }catch(err){
-  if(['REVISION_CONFLICT','PREVIEW_STALE','OPERATION_ID_REUSED'].includes(err.code)){
-   cwMoveStale=true;cwMoveReview=null;
-   note('Конфликт ревизий. Обновите проект перед повторным перемещением');
-  }else note('Сохранение не подтверждено: '+err.message);
- }finally{cwAcceptanceBusy=false;renderCreativeWorkspacePreview()}
+  cwMoveFailure={message:err.message,workspaceId:cwMoveRetry?.command.workspaceId||
+   state.nodes.find(n=>cwDraftMoveEdits.has(n.id))?.workspaceId};
+  $('saved').textContent='! Расположение черновиков не сохранено';
+  throw err;
+ }finally{
+  cwAcceptanceBusy=false;
+  renderCreativeWorkspacePreview();
+ }
 }
 function cwBeginDraftDrag(event,card,node,area,svg,links,byId){
  event.stopPropagation();
- if(event.button!==0||event.target.closest('button,label,input'))return;
+ if(event.button!==0)return;
  if(!cwWorkflowEnabled())return;
- if(!cwServerReady()||cwMoveStale||cwMoveReview?.attempted){
-  note('Завершите предыдущую операцию перед перемещением');return
+ if(event.ctrlKey||event.metaKey){
+  event.preventDefault();cwToggleDraftSelection(node.id,area.id);return;
  }
- if(cwMoveWorkspaceId&&cwMoveWorkspaceId!==area.id&&cwDraftMoveEdits.size){
-  note('Сначала сохраните или сбросьте изменения другой рабочей области');return
+ if(!remote.connected||remote.blocked){
+  note('Нет соединения с локальным проектом. Перемещение не сохранится');return;
  }
- if(cwMoveReview)cwMoveReview=null;
- cwAcceptanceReview=null;cwStageReview=null;
+ if(cwAcceptanceBusy&&!cwMoveSavePromise)return;
  event.preventDefault();
- const original=state.nodes.find(n=>n.id===node.id);
- if(!original||original.workspaceId!==area.id)return;
- const startX=event.clientX,startY=event.clientY,fromX=node.x,fromY=node.y;
- const clamp=(x,min,max)=>Math.max(min,Math.min(max,x));
- const minX=area.x,minY=area.y,maxX=area.x+area.width-208,maxY=area.y+area.height-105;
- let proposedX=fromX,proposedY=fromY,moved=false;
+ if(cwSelectedWorkspaceId!==area.id||!cwSelectedDraftIds.has(node.id)){
+  cwSelectedDraftIds.clear();cwSelectedDraftIds.add(node.id);
+  cwSelectedWorkspaceId=area.id;
+ }
+ cwAcceptanceReview=null;cwStageReview=null;
+ const members=[...cwSelectedDraftIds].map(id=>byId.get(id)).filter(Boolean);
+ const initial=members.map(n=>({id:n.id,x:n.x,y:n.y}));
+ const cardMap=new Map([...card.parentElement.querySelectorAll('[data-cw-node]')]
+  .map(el=>[el.dataset.cwNode,el]));
+ const startX=event.clientX,startY=event.clientY;
+ let dx=0,dy=0,moved=false;
  card.setPointerCapture(event.pointerId);
  const draw=()=>{
-  card.style.left=(proposedX-area.x)+'px';
-  card.style.top=(proposedY-area.y)+'px';
+  const movedNodes=new Map(initial.map(n=>[n.id,{x:n.x+dx,y:n.y+dy}]));
+  for(const n of initial){
+   const el=cardMap.get(n.id);
+   if(el){el.style.left=(n.x+dx-area.x)+'px';el.style.top=(n.y+dy-area.y)+'px'}
+  }
   for(const edge of links){
-   if(edge.from!==node.id&&edge.to!==node.id)continue;
-   const from=edge.from===node.id?{x:proposedX,y:proposedY}:byId.get(edge.from);
-   const to=edge.to===node.id?{x:proposedX,y:proposedY}:byId.get(edge.to);
+   const from=movedNodes.get(edge.from)||byId.get(edge.from);
+   const to=movedNodes.get(edge.to)||byId.get(edge.to);
    const path=[...svg.querySelectorAll('.cw-preview-link')].find(p=>p.dataset.cwEdge===edge.id);
-   if(path&&from&&to)path.setAttribute('d',
-    'M '+(from.x-area.x+208)+' '+(from.y-area.y+56)
-    +' L '+(to.x-area.x)+' '+(to.y-area.y+56));
+   if(path&&from&&to)path.setAttribute('d','M '+(from.x-area.x+208)+' '+(from.y-area.y+56)+
+    ' L '+(to.x-area.x)+' '+(to.y-area.y+56));
   }
  };
  const move=e=>{
   e.stopPropagation();
-  const dx=(e.clientX-startX)/pan.scale,dy=(e.clientY-startY)/pan.scale;
-  if(!moved&&Math.abs(dx)+Math.abs(dy)<4)return;
+  const nextX=Math.round((e.clientX-startX)/pan.scale);
+  const nextY=Math.round((e.clientY-startY)/pan.scale);
+  if(!moved&&Math.abs(nextX)+Math.abs(nextY)<4)return;
   moved=true;
-  proposedX=Math.round(clamp(fromX+dx,minX,maxX));
-  proposedY=Math.round(clamp(fromY+dy,minY,maxY));
+  dx=Math.max(-1000000-Math.min(...initial.map(n=>n.x)),
+   Math.min(1000000-Math.max(...initial.map(n=>n.x)),nextX));
+  dy=Math.max(-1000000-Math.min(...initial.map(n=>n.y)),
+   Math.min(1000000-Math.max(...initial.map(n=>n.y)),nextY));
   draw();
  };
  const cleanup=()=>{
@@ -475,13 +509,15 @@ function cwBeginDraftDrag(event,card,node,area,svg,links,byId){
  };
  const end=e=>{
   e.stopPropagation();cleanup();
-  if(moved&&(!cwMoveWorkspaceId||cwMoveWorkspaceId===area.id)){
-   cwMoveWorkspaceId=area.id;
-   if(proposedX===original.x&&proposedY===original.y)cwDraftMoveEdits.delete(node.id);
-   else cwDraftMoveEdits.set(node.id,{x:proposedX,y:proposedY});
-   if(!cwDraftMoveEdits.size)cwMoveWorkspaceId=null;
+  if(moved){
+   for(const n of initial){
+    const original=state.nodes.find(x=>x.id===n.id),x=n.x+dx,y=n.y+dy;
+    if(original?.x===x&&original?.y===y)cwDraftMoveEdits.delete(n.id);
+    else cwDraftMoveEdits.set(n.id,{x,y});
+   }
   }
   renderCreativeWorkspacePreview();
+  if(moved&&cwDraftMoveEdits.size)cwScheduleDraftSave();
  };
  const cancel=e=>{e.stopPropagation();cleanup();renderCreativeWorkspacePreview()};
  card.addEventListener('pointermove',move);
