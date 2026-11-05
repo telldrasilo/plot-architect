@@ -28,3 +28,25 @@ test('canonical lines have complete socket endpoints and no terminal arrow',()=>
  assert.ok(editor.includes('path.after(arrow)'));
  assert.ok(editor.includes("arrow.setAttribute('pointer-events','none')"));
 });
+
+test('draft links retain the complete path and reorient their arrow on drag',()=>{
+ const start=editor.indexOf('function cwDrawDraftConnections(');
+ const end=editor.indexOf('function cwDraftTargetAt(',start);
+ assert.ok(start>=0&&end>start);
+ const draw=editor.slice(start,end);
+ assert.ok(draw.includes("const from=sockets.ports.get(socketKey(edge.id,'source'))"));
+ assert.ok(draw.includes("const to=sockets.ports.get(socketKey(edge.id,'target'))"));
+ assert.ok(draw.includes("const d='M '+ax+' '+ay+' L '+bx+' '+by"));
+ assert.ok(draw.includes("path.setAttribute('d',d)"));
+ assert.ok(draw.includes("cwPositionPathDirection(path,directions.get(edge.id))"),
+  'direction must move along with the line during draft drag');
+ assert.ok(draw.includes("hitPaths.get(edge.id)?.setAttribute('d',d)"),
+  'the whole link remains an interactive hit target');
+ const render=editor.slice(editor.indexOf('function renderCreativeWorkspacePreview('),
+  editor.indexOf('function note(s){'));
+ assert.ok(render.includes("cwDrawDraftConnections(svg,area,internals,drawnSockets)"));
+ assert.ok(!render.includes("path.setAttribute('marker-end'"),
+  'draft SVG path must not be prematurely terminated by an end marker');
+ assert.ok(!render.includes("cw-draft-arrow-"),
+  'legacy draft marker definitions are retired');
+});
