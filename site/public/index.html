@@ -1224,6 +1224,8 @@ function cwDrawDraftConnections(svg,area,links,sockets,moves=new Map()){
  if(!sockets)return;
  const paths=new Map([...svg.querySelectorAll('[data-cw-edge]')].map(el=>[el.dataset.cwEdge,el]));
  const hitPaths=new Map([...svg.querySelectorAll('[data-cw-edge-hit]')].map(el=>[el.dataset.cwEdgeHit,el]));
+ const directions=new Map([...svg.querySelectorAll('[data-cw-edge-direction]')]
+  .map(el=>[el.dataset.cwEdgeDirection,el]));
  const circles=new Map([...svg.querySelectorAll('[data-cw-socket]')].map(el=>[el.dataset.cwSocket,el]));
  for(const edge of links){
   const from=sockets.ports.get(socketKey(edge.id,'source'));
@@ -1234,7 +1236,12 @@ function cwDrawDraftConnections(svg,area,links,sockets,moves=new Map()){
   const bx=to.x+b.dx-area.x,by=to.y+b.dy-area.y;
   const path=paths.get(edge.id);
   const d='M '+ax+' '+ay+' L '+bx+' '+by;
-  if(path)path.setAttribute('d',d);
+  if(path){
+   path.setAttribute('d',d);
+   // Recompute on draft drag as well as initial render, without shortening the path.
+   const direction=cwPositionPathDirection(path,directions.get(edge.id));
+   if(direction)direction.dataset.cwEdgeDirection=edge.id;
+  }
   hitPaths.get(edge.id)?.setAttribute('d',d);
   const left=circles.get(from.key),right=circles.get(to.key);
   if(left){left.setAttribute('cx',ax);left.setAttribute('cy',ay)}
@@ -1887,15 +1894,6 @@ function renderCreativeWorkspacePreview(){
   const edgeEditable=persisted&&cwWorkflowEnabled()&&!cwDragDropReview&&semanticZoomLevel()==='full';
   svg.setAttribute('aria-hidden',edgeEditable?'false':'true');
   if(edgeEditable)svg.setAttribute('aria-label','Черновые сюжетные связи');
-  const markerId='cw-draft-arrow-'+area.id;
-  const defs=document.createElementNS(namespace,'defs');
-  const arrow=document.createElementNS(namespace,'marker');
-  for(const [k,v] of Object.entries({id:markerId,viewBox:'0 0 10 10',refX:'8',refY:'5',
-   markerWidth:'5',markerHeight:'5',orient:'auto-start-reverse'}))arrow.setAttribute(k,v);
-  const tip=document.createElementNS(namespace,'path');
-  tip.setAttribute('d','M1 1 L9 5 L1 9');tip.setAttribute('stroke','currentColor');
-  tip.setAttribute('stroke-width','1.8');tip.setAttribute('fill','none');
-  arrow.append(tip);defs.append(arrow);svg.append(defs);
   for(const edge of internals){
    const from=nodeById.get(edge.from),to=nodeById.get(edge.to);
    if(!from||!to)continue;
@@ -1907,7 +1905,6 @@ function renderCreativeWorkspacePreview(){
    path.setAttribute('class','cw-preview-link cw-preview-link-'+style+
     (cwSelectedDraftEdge?.workspaceId===area.id&&cwSelectedDraftEdge.edgeId===edge.id
      ?' cw-draft-edge-active':''));
-   path.setAttribute('marker-end','url(#'+markerId+')');
    path.dataset.cwEdge=edge.id;svg.append(path);
    if(edgeEditable&&edge.draftRelation==='internal'){
     const hit=document.createElementNS(namespace,'path');
