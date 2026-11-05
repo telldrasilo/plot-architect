@@ -153,6 +153,15 @@ export function createGraphiteLoopbackServer({database, editorHtml, token, workf
     if (path !== '/mcp' && path !== '/' && path !== '/index.html' && !path.startsWith('/api/')) {
       return reply(res, 404, 'Not found');
     }
+    // The inherited Worker reports sites-native; the local gateway must
+    // identify its actual auth/storage mode without modifying hosted code.
+    if (path === '/api/health' && method === 'GET') {
+      return reply(res, 200, JSON.stringify({
+        ok: true, requiresAuthorization: true,
+        version: 'graphite-node-local-dev', authMode: 'node-loopback',
+        authenticated: true
+      }), {'Content-Type': 'application/json; charset=utf-8'});
+    }
 
     const headers = new Headers();
     const forbidden = new Set([
