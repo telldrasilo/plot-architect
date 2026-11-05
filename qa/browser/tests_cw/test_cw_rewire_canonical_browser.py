@@ -59,10 +59,10 @@ def main():
           if(!hit)throw Error('Missing canonical arrow');
           hit.dispatchEvent(new MouseEvent('click',{bubbles:true}));
         }""")
-        page.locator("#cw-rewire-handle").wait_for()
+        page.locator('[data-canon-edge-port="e1"]').wait_for()
 
     def drag_endpoint(page,to=None,finish=True):
-        handle=page.locator("#cw-rewire-handle")
+        handle=page.locator('[data-canon-edge-port="e1"]')
         rect=handle.bounding_box()
         assert rect is not None
         x=rect["x"]+rect["width"]/2
@@ -89,7 +89,23 @@ def main():
             "&&document.querySelectorAll('[data-node]').length===3"
         )
         page.evaluate("()=>__graphite.setZoomForTest(1)")
-        select_edge(page)
+        # Every target socket is ready before any edge selection.
+        socket=page.locator('[data-canon-edge-port="e1"]')
+        socket.wait_for()
+        assert page.locator("#cw-rewire-handle").count()==0
+        assert page.locator("[data-canon-edge-port]").count()==1
+        styles=page.evaluate("""() => {
+          const el=document.querySelector('[data-canon-edge-port="e1"]');
+          return {rest:getComputedStyle(el,'::after').opacity,
+           radius:getComputedStyle(el,'::after').borderRadius,
+           outline:getComputedStyle(el).outlineStyle};
+        }""")
+        assert styles["rest"]=="0" and styles["radius"]=="50%",styles
+        socket.hover()
+        assert page.evaluate("""() => getComputedStyle(
+          document.querySelector('[data-canon-edge-port="e1"]'),'::after'
+        ).opacity""")=="1"
+        assert page.locator('[data-edge-socket="e1:target"].edge-socket-hover').count()==1
         assert db["put"]==0
         drag_endpoint(page,"n2",finish=False)
         page.locator("#cw-link-overlay:not([hidden])").wait_for()
@@ -104,8 +120,8 @@ def main():
         # An off-node drop does not erase the original edge.
         drag_endpoint(page,None)
         assert db["put"]==0 and db["graph"]["edges"][0]["to"]=="n3"
-        # This was the original inspector's destructive behavior: it should
-        # merely explain the new gesture, never remove the edge.
+        # The inspector is an optional keyboard-accessible fallback.
+        select_edge(page)
         page.get_by_role("button",name="Переподключить").click()
         assert db["put"]==0
         assert page.evaluate("()=>__graphite.getState().edges[0].to")=="n3"
@@ -138,7 +154,7 @@ def main():
         n3=page.locator('[data-node="n3"]').bounding_box()
         assert n3 is not None
         target=(n3["x"]+24,n3["y"]+26)
-        handle=page.locator("#cw-rewire-handle").bounding_box()
+        handle=page.locator('[data-canon-edge-port="e1"]').bounding_box()
         assert handle is not None
         page.mouse.move(handle["x"]+handle["width"]/2,
                         handle["y"]+handle["height"]/2)
@@ -158,7 +174,8 @@ def main():
         assert not errors,errors
         context.close();browser.close()
     print(json.dumps({"result":"PASS","writes":db["put"],
-      "cases":["nonpersistent reconnect preview","Esc","off-target",
+      "cases":["direct hover before selection","round highlight, no square",
+       "nonpersistent reconnect preview","Esc","off-target",
        "inspector non-destructive","one revision and same edge ID",
        "reload","CAS collision leaves original"]}))
 
