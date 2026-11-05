@@ -88,8 +88,26 @@ def main():
                     and c["httpOnly"] and c["sameSite"] == "Strict"
                     for c in cookies
                 )
+                # A browser session must survive a real child-process restart
+                # even though the local MCP Bearer credential rotates.
+                process.terminate()
+                process.wait(timeout=5)
+                process, restarted_origin, new_key = start_local_graphite(home)
+                assert new_key != key, "MCP bearer must rotate independently"
+                remembered = page.goto(restarted_origin + "/", wait_until="domcontentloaded")
+                assert remembered.status == 200, "Existing Chrome cookie must authorize restart"
+                assert page.url == restarted_origin + "/", "Should not show login screen again"
+                assert "Plot Architect" in page.title()
+                health2 = page.evaluate(
+                    """async () => {
+                      const response = await fetch('/api/health');
+                      return {status: response.status, data: await response.json()};
+                    }"""
+                )
+                assert health2["status"] == 200
+                assert health2["data"]["authMode"] == "node-loopback"
                 browser.close()
-            print("PASS: real Chromium login -> editor -> authenticated REST; disposable SQLite")
+            print("PASS: real Chromium login persists across Node restart and MCP key rotation")
         finally:
             process.terminate()
             try:

@@ -9,9 +9,11 @@ import {homedir} from 'node:os';
 import {join} from 'node:path';
 import {openGraphiteLocalStorage} from '../src/node_local_storage.mjs';
 import {createGraphiteLoopbackServer} from '../src/node_local_server.mjs';
+import {createGraphiteBrowserSessionStore} from '../src/node_local_browser_sessions.mjs';
 import {localTunnelLaunchOptions} from '../src/node_local_tunnel_launch.mjs';
 
 const path = join(homedir(), '.graphite-local', 'graphite-dev.sqlite');
+const sessionPath = join(homedir(), '.graphite-local', 'browser-sessions.json');
 const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
 const token = randomBytes(32).toString('base64url');
 const withTunnel = process.argv.includes('--with-tunnel');
@@ -38,14 +40,19 @@ try {
   // The local owner intentionally uses note → reviewed drafts. Hosted Worker
   // defaults remain unchanged, and the loopback gateway still authenticates
   // every REST/MCP request before exposing the transactional workflow.
+  // Keep ONLY hashed, revocable browser sessions in a user-local file.
+  // This deliberately does not persist the per-process MCP Bearer token.
+  const browserSessions = createGraphiteBrowserSessionStore({filePath: sessionPath});
   gateway = createGraphiteLoopbackServer({database: sqlite, editorHtml: html,
-    token, workflowEnabled: true});
+    token, workflowEnabled: true, browserSessions});
   const url = await gateway.listen(port);
   console.log('\nGraphite LOCAL NODE (not for public deployment)');
   console.log('Editor: ' + url + '/');
   console.log('Database: ' + path);
   console.log('Temporary local access key (keep private): ' + token);
   console.log('The key also authenticates local MCP Bearer calls.');
+  console.log('Remembered browser login lasts up to 30 days across restarts on this Chrome profile.');
+  console.log('An existing browser session should open the editor without the temporary key.');
   console.log('No OpenAI model API calls. No Beget, Sites, D1 or plugin changes.');
   console.log('Stop with Ctrl+C. This key expires when the process exits.\n');
   if (withTunnel) {
