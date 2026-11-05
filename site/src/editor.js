@@ -1545,7 +1545,7 @@ function renderCreativeWorkspacePreview(){
     height:card?.offsetHeight||105}];
   }));
   drawnSockets=layoutEdgeSockets({nodes,edges:internals,bounds:socketBounds,mode:'full'});
-  for(const rail of cwRailGeometry(drawnSockets,socketBounds)){
+  if(semanticZoomLevel()==='full')for(const rail of cwRailGeometry(drawnSockets,socketBounds)){
    const line=document.createElementNS(namespace,'path');
    line.setAttribute('class','cw-socket-rail');
    line.dataset.cwSocketRail=rail.nodeId+':'+rail.role;
