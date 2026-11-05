@@ -58,6 +58,10 @@ def main():
         assert page.locator("#dialog h2").inner_text()=="Продолжить сюжет"
         page.locator("#cancel").click()
         assert page.evaluate("()=>__graphite.getState().edges.length")==4
+        # This test also verifies click-to-select edges. Restore its untouched
+        # synthetic baseline after the selected-node Continue dialog closes.
+        page.evaluate("(g)=>__graphite.loadFixture(g)",fixture)
+        page.evaluate("()=>__graphite.setZoomForTest(1)")
         result=socket_snapshot(page)
         assert result["mode"]=="full",result["mode"]
         # Actual rendered circles must be centered on the measured card edge.
