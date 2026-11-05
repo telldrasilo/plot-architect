@@ -102,7 +102,8 @@ def main():
     original = base_graph()
     db = {"graph": copy.deepcopy(original), "revision": 0,
           "previews": 0, "applies": 0, "generic_puts": 0,
-          "last_preview": None, "receipts": {}, "force_conflict": False}
+          "last_preview": None, "receipts": {}, "force_conflict": False,
+          "listing_unavailable": False}
     errors = []
 
     def serve(route):
@@ -122,8 +123,11 @@ def main():
                    "authMode": "node-loopback" if is_local else "sites-native",
                    "workflowEnabled": is_local})
         elif path == "/api/projects" and method == "GET":
-            reply({"projects": [{"id": PROJECT_ID, "name": "Synthetic stage note",
-                                 "revision": db["revision"]}]})
+            if db["listing_unavailable"]:
+                reply({"error": "TEST_LISTING_UNAVAILABLE"}, 503)
+            else:
+                reply({"projects": [{"id": PROJECT_ID, "name": "Synthetic stage note",
+                                     "revision": db["revision"]}]})
         elif path == "/api/projects/" + PROJECT_ID and method == "GET":
             reply({"id": PROJECT_ID, "name": "Synthetic stage note",
                    "revision": db["revision"], "graph": copy.deepcopy(db["graph"])})
@@ -297,6 +301,66 @@ def main():
         local_page.locator(".cw-movable-draft").first.click()
         assert local_page.locator(".cw-draft-selection-actions").count() == 1
         assert db["applies"] == 1 and db["generic_puts"] == 0
+
+        # Crash after a completed write may leave a stale browser marker.
+        # If the copies are identical it must not block ordinary dragging.
+        local_page.evaluate("""id => {
+            localStorage.setItem('pa-site01-pending-' + id, '1');
+        }""", PROJECT_ID)
+        local_page.reload()
+        local_page.wait_for_function(
+            "() => __graphite.getRemote().connected && !__graphite.getRemote().blocked"
+            "&& document.querySelectorAll('.cw-movable-draft').length === 7"
+        )
+        assert local_page.evaluate(
+            "id => localStorage.getItem('pa-site01-pending-' + id)", PROJECT_ID
+        ) is None
+
+        # A genuinely different local draft must remain protected and
+        # recoverable without silent overwriting of the browser copy.
+        local_page.evaluate("""id => {
+            const key = 'pa-site01-graph-' + id;
+            const graph = JSON.parse(localStorage.getItem(key));
+            graph.nodes.find(n => n.id === 'v1-n1').title = 'Unsynced local draft';
+            localStorage.setItem(key, JSON.stringify(graph));
+            localStorage.setItem('pa-site01-pending-' + id, '1');
+        }""", PROJECT_ID)
+        local_page.reload()
+        local_page.wait_for_function(
+            "() => __graphite.getRemote().connected && __graphite.getRemote().blocked"
+            "&& __graphite.getState().nodes.find(n => n.id === 'v1-n1').title === 'Unsynced local draft'"
+        )
+        assert local_page.locator(".cw-movable-draft").count() == 7
+        local_page.locator('[data-cw-node="v1-n1"]').click()
+        assert "Запись заблокирована" in local_page.locator("#toast").inner_text()
+        assert db["graph"]["nodes"][-7]["title"] != "Unsynced local draft"
+
+        # User-initiated recovery downloads the complete local graph first.
+        local_page.locator("#projects-open").click()
+        assert local_page.locator("#pm-recover").is_visible()
+        local_page.once("dialog", lambda dialog: dialog.accept())
+        with local_page.expect_download() as downloaded:
+            local_page.locator("#pm-recover").click()
+        backup = json.loads(Path(downloaded.value.path()).read_text(encoding="utf-8"))
+        assert any(n["title"] == "Unsynced local draft"
+                   for n in backup["project"]["graph"]["nodes"])
+        local_page.wait_for_function(
+            "() => __graphite.getRemote().connected && !__graphite.getRemote().blocked"
+            "&& __graphite.getState().nodes.find(n => n.id === 'v1-n1').title !== 'Unsynced local draft'"
+        )
+        assert local_page.evaluate(
+            "id => localStorage.getItem('pa-site01-pending-' + id)", PROJECT_ID
+        ) is None
+        assert db["generic_puts"] == 0
+
+        # Health success alone is not permission to edit without a project.
+        db["listing_unavailable"] = True
+        local_page.reload()
+        local_page.wait_for_function(
+            "() => window.__graphite && !__graphite.getRemote().connected"
+            "&& document.querySelector('#saved').textContent.includes('Graphite Local не подключён')"
+        )
+        assert local_page.locator(".cw-movable-draft").count() == 0
         assert not errors, errors
         local.close()
         browser.close()
@@ -307,7 +371,9 @@ def main():
         "generic_puts": db["generic_puts"],
         "cases": ["disabled by default", "prepared branches", "preview",
                   "cancel", "concurrent conflict", "explicit save",
-                  "canonical isolation", "reload", "local workflow auto-activation"]
+                  "canonical isolation", "reload", "local workflow auto-activation",
+                  "stale-marker reconciliation", "backup-first recovery",
+                  "health without project listing is disconnected"]
     }, ensure_ascii=False))
 
 
