@@ -17,7 +17,9 @@ def main():
     graph=story()
     # A tall card reproduces the real reported overlap: a fixed 125px
     # drop-review offset previously covered the lower part of its text.
-    graph["nodes"][1]["description"]="Длинное описание подготовленного события. " * 13
+    next(n for n in graph["nodes"] if n["id"]=="a")["description"]=(
+        "Длинное описание подготовленного события. " * 13
+    )
     graph["workspaces"].append({"id":"w2","taskId":"gn2","x":1260,"y":450,"width":420,"height":400})
     graph["nodes"].append({"id":"d","title":"Независимая версия","description":"Вторая область",
                             "x":1300,"y":510,"parent":None,"workspaceId":"w2","draftBranchId":"gamma"})
