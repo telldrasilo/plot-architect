@@ -213,7 +213,7 @@ def main():
         # Concurrent update stops acceptance; no partial graph mutation.
         page.evaluate("() => __graphite.setCWWorkflowTestMode(true)")
         page.evaluate("() => __graphite.fit()")
-        drag(page,"c",0,-178)
+        drag(page,"c",0,-300)
         page.locator(".cw-accept-review.cw-drop-review").wait_for()
         db["force_conflict"]=True
         page.get_by_role("button",name="Принять в сюжет").click()
