@@ -842,6 +842,8 @@ function renderCreativeWorkspacePreview(){
 
 function note(s){$('toast').textContent=s;$('toast').classList.add('on');clearTimeout(note.t);note.t=setTimeout(()=>$('toast').classList.remove('on'),2700)}
 const remote={connected:false,token:null,revision:0,dirty:false,busy:false,blocked:false,timer:null};
+// A preview of the pending position-only divergence, not a write entitlement.
+let cwPendingNoteReconcile=null;
 // Only confirmed pins are persistent. Automatic memberships are recalculated from geometry on every load.
 function persistentGraph(){const graph=structuredClone(state);for(const node of graph.nodes||[])delete node.autoFieldIds;return graph}
 function save(sync=true){let localOk=true;try{localStorage.setItem(KEY,JSON.stringify(persistentGraph()));const entry=registryEntry(activeProjectId);if(entry){entry.revision=state.revision;entry.updatedAt=Date.now();writeRegistry()}}catch{localOk=false};$('saved').textContent=localOk?'● '+(remote.connected?'Локальная копия сохранена':'Сохранено локально')+' · '+state.revision:'! Локальное хранилище недоступно';if(remote.connected&&sync)queueRemote();return localOk}
@@ -1897,7 +1899,7 @@ window.addEventListener('resize',()=>{if(tipTarget&&!tooltipHost.hidden)displayT
 function projectName(){return registryEntry(activeProjectId)?.name||'Без названия'}
 function updateProjectLabel(){const t=$('project-current');if(t)t.textContent=projectName();const m=$('project-mode');if(m)m.textContent=remote.connected?(cwLocalWorkflowEnabled?'Graphite Local':'Site · D1'):'Локально'}
 function showProjectManager(){
- modalOpen=true;const h=$('modal-host');h.innerHTML=`<div class="backdrop" id="projects-backdrop"><section class="modal project-manager" role="dialog" aria-label="Проекты" aria-modal="true"><div class="project-modal-head"><h2>Мои истории</h2><button id="pm-close" aria-label="Закрыть">×</button></div><p id="pm-status">${remote.blocked?'Есть несинхронизированная локальная копия. Сначала экспортируйте JSON':remote.connected?(cwLocalWorkflowEnabled?'Хранятся в локальной SQLite, с копией в браузере':'Хранятся на Site, с локальными копиями'):'Локальные проекты этого браузера'}</p><div class="project-list" id="pm-list"></div><div class="project-controls"><button id="pm-new" class="primary">＋ Новая история</button><button id="pm-import">↑ Импорт JSON</button><button id="pm-connect">${remote.connected?'↩ Локальные проекты':'☁ Подключить Site'}</button></div><div id="pm-error" role="alert" class="pm-error"></div><div class="project-controls secondary"><button id="pm-rename">Переименовать</button><button id="pm-copy">Дублировать</button><button id="pm-delete">Удалить</button><button id="pm-export">Экспорт</button><button id="pm-retry" ${remote.connected&&remote.dirty?'':'hidden'}>Повторить синхронизацию</button><button id="pm-recover" ${remote.connected&&remote.blocked&&cwLocalWorkflowEnabled?'':'hidden'}>Восстановить из SQLite…</button></div><input id="pm-file" type="file" accept=".json,application/json" hidden></section></div>`;
+ modalOpen=true;const h=$('modal-host');h.innerHTML=`<div class="backdrop" id="projects-backdrop"><section class="modal project-manager" role="dialog" aria-label="Проекты" aria-modal="true"><div class="project-modal-head"><h2>Мои истории</h2><button id="pm-close" aria-label="Закрыть">×</button></div><p id="pm-status">${remote.blocked&&cwPendingNoteReconcile?'Только расположение заметок отличается от SQLite ('+cwPendingNoteReconcile.moves.length+'). Выберите сохранение или восстановление после резервного JSON.':remote.blocked?'Есть несинхронизированная локальная копия. Сначала экспортируйте JSON':remote.connected?(cwLocalWorkflowEnabled?'Хранятся в локальной SQLite, с копией в браузере':'Хранятся на Site, с локальными копиями'):'Локальные проекты этого браузера'}</p><div class="project-list" id="pm-list"></div><div class="project-controls"><button id="pm-new" class="primary">＋ Новая история</button><button id="pm-import">↑ Импорт JSON</button><button id="pm-connect">${remote.connected?'↩ Локальные проекты':'☁ Подключить Site'}</button></div><div id="pm-error" role="alert" class="pm-error"></div><div class="project-controls secondary"><button id="pm-rename">Переименовать</button><button id="pm-copy">Дублировать</button><button id="pm-delete">Удалить</button><button id="pm-export">Экспорт</button><button id="pm-retry" ${remote.connected&&remote.dirty?'':'hidden'}>Повторить синхронизацию</button><button id="pm-save-note-positions" ${remote.connected&&remote.blocked&&cwLocalWorkflowEnabled&&cwPendingNoteReconcile?'':'hidden'}>Сохранить положение заметок в SQLite…</button><button id="pm-recover" ${remote.connected&&remote.blocked&&cwLocalWorkflowEnabled?'':'hidden'}>${cwPendingNoteReconcile?'Оставить положение из SQLite…':'Восстановить из SQLite…'}</button></div><input id="pm-file" type="file" accept=".json,application/json" hidden></section></div>`;
  const close=()=>{modalOpen=false;h.innerHTML=''};
  $('pm-close').onclick=close;$('projects-backdrop').onclick=e=>{if(e.target.id==='projects-backdrop')close()};
  const fail=err=>{const p=$('pm-error');if(p)p.textContent=String(err?.message||err)};
@@ -1909,6 +1911,51 @@ function showProjectManager(){
  $('pm-delete').onclick=async()=>{if(!confirm('Удалить проект «'+projectName()+'»? Сохраните JSON, если хотите оставить резервную копию.'))return;try{await deleteProject();paint();close()}catch(err){fail(err)}};
  $('pm-export').onclick=exportProject;$('pm-retry').onclick=async()=>{if(!remote.connected)return fail('Подключите Site');if(remote.blocked)return fail('Конфликт или незавершённое локальное сохранение. Экспортируйте JSON, затем согласуйте изменения вручную.');try{remote.dirty=true;await flushRemote();close()}catch(e){fail(e)}};
  $('pm-file').onchange=async e=>{const f=e.target.files?.[0];if(!f)return;try{const src=JSON.parse(await f.text());let g,name;if(src.format==='plot-architect/project-1'){g=src.project.graph;name=src.project.name}else if(src.graph){g=src.graph;name=src.name||'Импортированный сюжет'}else{g=src;name='Импортированный сюжет'};g=validateImported(g);await createProject(name,g);close()}catch(err){fail(err)}};
+ $('pm-save-note-positions').onclick=async()=>{
+  const conflict=cwPendingNoteReconcile;
+  if(!cwLocalWorkflowEnabled||!remote.connected||!remote.blocked||
+    !conflict||conflict.projectId!==activeProjectId)
+   return fail('Нет конфликта положения заметок');
+  exportProject();
+  if(!confirm('Сначала убедитесь, что резервный JSON скачан. Сохранить только положение '+conflict.moves.length+' заметок из браузера в SQLite? Текст и связи не изменятся.'))return;
+  cwAcceptanceBusy=true;
+  try{
+   const current=await apiRequest('/api/projects/'+encodeURIComponent(conflict.projectId));
+   if(activeProjectId!==conflict.projectId||current.revision!==conflict.serverRevision)
+    throw Error('SQLite изменилась после обнаружения расхождения. Обновите страницу после сохранения JSON');
+   const changes=cwPendingNotePositions(persistentGraph(),current.graph);
+   if(!changes?.length||!cwConflictEqual(changes,conflict.moves))
+    throw Error('Изменения не ограничиваются исходным перемещением заметок. Запись остановлена');
+   // Construct the outgoing graph from the verified SQLite version, applying
+   // ONLY note coordinates, then guard the whole graph with a revision CAS.
+   const merged=structuredClone(current.graph);
+   for(const move of changes){
+    const target=merged.gapNotes?.find(n=>n.id===move.noteId);
+    if(!target)throw Error('Заметка отсутствует в SQLite');
+    target.x=move.x;target.y=move.y;
+   }
+   const saved=await apiRequest('/api/projects/'+encodeURIComponent(conflict.projectId),{
+    method:'PUT',body:{
+     expectedRevision:conflict.serverRevision,name:projectName(),
+     graph:merged,message:'Согласование координат заметок'
+    }
+   });
+   const confirmed=await apiRequest('/api/projects/'+encodeURIComponent(conflict.projectId));
+   if(activeProjectId!==conflict.projectId||confirmed.revision!==saved.revision||
+     cwPendingNotePositions(persistentGraph(),confirmed.graph)?.length!==0)
+    throw Error('Запись ещё не подтверждена. Экспорт сохранён; повторно проверьте проект');
+   // Drop the pending marker ONLY after a successful server readback.
+   localStorage.removeItem(PENDING_PREFIX+conflict.projectId);
+   if(localStorage.getItem(PENDING_PREFIX+conflict.projectId)==='1')
+    throw Error('Не удалось снять отметку синхронизации');
+   state=validateImported(confirmed.graph);remote.revision=confirmed.revision;
+   remote.blocked=false;remote.dirty=false;cwPendingNoteReconcile=null;
+   cwClearDraftSelection();history=[];selected=null;
+   ensureEditorialState(state);recomputeFieldTags();save(false);render();fit();close();
+   $('saved').textContent='✓ Положение заметок сохранено в SQLite · '+remote.revision;
+  }catch(err){fail(err)}
+  finally{cwAcceptanceBusy=false}
+ };
  $('pm-recover').onclick=async()=>{
   if(!cwLocalWorkflowEnabled||!remote.connected||!remote.blocked)return fail('Нет конфликта локального проекта');
   const id=activeProjectId;
@@ -1926,6 +1973,7 @@ function showProjectManager(){
    if(localStorage.getItem(PENDING_PREFIX+id)==='1')throw Error('Не удалось снять отметку несинхронизированного сохранения');
    cwClearDraftMoves();cwClearDraftSelection();
    state=next;remote.revision=rec.revision;remote.blocked=false;remote.dirty=false;
+   cwPendingNoteReconcile=null;
    selected=null;history=[];ensureEditorialState(state);recomputeFieldTags();
    save(false);render();fit();close();
    $('saved').textContent='✓ Открыта версия SQLite · '+remote.revision;
@@ -1954,32 +2002,65 @@ function exportProject(){
 }
 // A completed write may leave an obsolete pending marker after interruption.
 // Compare the entire normalized graph; never ignore substantive local changes.
-function cwEquivalentPersistedGraphs(local,server){
- const normalize=graph=>{
-  const g=validateImported(graph);ensureEditorialState(g);
-  for(const node of g.nodes)delete node.autoFieldIds; // Derived tags only.
-  const stable=value=>Array.isArray(value)?value.map(stable)
-   :value&&typeof value==='object'
-    ?Object.fromEntries(Object.keys(value).sort().map(key=>[key,stable(value[key])]))
-    :value;
-  return JSON.stringify(stable(g));
- };
- return normalize(local)===normalize(server);
+// The graph's own revision is not the authoritative SQLite row revision.
+// autoFieldIds are recalculated from field geometry and are never an edit.
+function cwConflictGraph(raw){
+ const g=validateImported(raw);
+ ensureEditorialState(g);
+ delete g.revision;
+ for(const node of g.nodes)delete node.autoFieldIds;
+ return g;
 }
-async function openProject(id){await cwEnsureDraftsSynced();creativeWorkspacePreview=null;cwClearDraftSelection();cwClearDraftMoves();cwStageReview=null;cwPreparedNoteAlternatives.clear();cwHandoffClear();
+function cwStableConflictValue(value){
+ if(Array.isArray(value))return value.map(cwStableConflictValue);
+ if(value&&typeof value==='object')
+  return Object.fromEntries(Object.keys(value).sort().map(key=>[key,cwStableConflictValue(value[key])]));
+ return value;
+}
+function cwConflictEqual(a,b){
+ return JSON.stringify(cwStableConflictValue(a))===JSON.stringify(cwStableConflictValue(b));
+}
+// A non-null result proves that the ONLY substantive difference is the
+// positions of existing notes. Empty array means identical editorial content.
+// Never infer or merge changed text, membership, nodes, links or metadata.
+function cwPendingNotePositions(localRaw,serverRaw){
+ const local=cwConflictGraph(localRaw),server=cwConflictGraph(serverRaw);
+ if(local.gapNotes.length!==server.gapNotes.length)return null;
+ const moves=[];
+ for(let i=0;i<local.gapNotes.length;i++){
+  const from=local.gapNotes[i],to=server.gapNotes[i];
+  if(!from||!to||from.id!==to.id)return null;
+  if(![from.x,from.y,to.x,to.y].every(Number.isFinite))return null;
+  if(from.x!==to.x||from.y!==to.y){
+   moves.push({noteId:from.id,x:from.x,y:from.y});
+   to.x=from.x;to.y=from.y;
+  }
+ }
+ return cwConflictEqual(local,server)?moves:null;
+}
+function cwEquivalentPersistedGraphs(local,server){
+ return cwPendingNotePositions(local,server)?.length===0;
+}
+async function openProject(id){await cwEnsureDraftsSynced();creativeWorkspacePreview=null;cwClearDraftSelection();cwClearDraftMoves();cwStageReview=null;cwPreparedNoteAlternatives.clear();cwHandoffClear();cwPendingNoteReconcile=null;
  if(remote.connected){if(remote.dirty||remote.busy)await flushRemote();if(remote.blocked)throw Error('Сохраните резервную копию: конфликт ревизий');const rec=await apiRequest('/api/projects/'+encodeURIComponent(id));remote.revision=rec.revision;
  let pending=false;try{pending=localStorage.getItem(PENDING_PREFIX+id)==='1'}catch{}
  const backup=pending?localStorage.getItem(KEY_PREFIX+id):null;
  const serverGraph=validateImported(rec.graph);
  if(pending&&backup){
   const localGraph=validateImported(JSON.parse(backup));
-  if(cwEquivalentPersistedGraphs(localGraph,serverGraph)){
-   // Identical copies: only the pending marker is stale. Never discard edits.
+  const positionChanges=cwPendingNotePositions(localGraph,serverGraph);
+  if(positionChanges?.length===0){
+   // Only obsolete derived fields or revisions differ: no content to recover.
    try{localStorage.removeItem(PENDING_PREFIX+id)}catch{}
    state=serverGraph;remote.blocked=false;remote.dirty=false;
   }else{
    state=localGraph;remote.blocked=true;remote.dirty=true;
-   note('Есть несинхронизированная локальная копия. Сначала сохраните резервный JSON');
+   if(positionChanges?.length)cwPendingNoteReconcile={
+    projectId:id,serverRevision:rec.revision,moves:positionChanges
+   };
+   note(positionChanges?.length
+    ?'Есть несохранённое положение заметки. Откройте «Мои истории» для выбора'
+    :'Есть несинхронизированная локальная копия. Сначала сохраните резервный JSON');
   }
  }else{
   state=serverGraph;
