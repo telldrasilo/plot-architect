@@ -350,14 +350,13 @@ body.pa-multi-modifier .inspector{pointer-events:none;opacity:.35}/* allows Ctrl
  background:transparent;border:0
 }
 .node .cw-free-source::after,
-.cw-preview-card .cw-draft-source::after,.cw-preview-card .cw-draft-rewire::after{
+.cw-preview-card .cw-draft-source::after{
  content:"";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
  width:var(--cw-socket-dot-size);height:var(--cw-socket-dot-size);
  background:#29272e;border:1.5px solid #b7a68c;border-radius:50%;pointer-events:none
 }
 .node .cw-free-source:hover::after,.node .cw-free-source:focus-visible::after,
-.cw-preview-card .cw-draft-source:hover::after,.cw-preview-card .cw-draft-source:focus-visible::after,
-.cw-preview-card .cw-draft-rewire:hover::after,.cw-preview-card .cw-draft-rewire:focus-visible::after{
+.cw-preview-card .cw-draft-source:hover::after,.cw-preview-card .cw-draft-source:focus-visible::after{
  background:#463a2a;border-color:#e1c99a
 }
 
@@ -375,6 +374,27 @@ body.pa-multi-modifier .inspector{pointer-events:none;opacity:.35}/* allows Ctrl
 }
 .cw-rewire-handle:hover::after,.cw-rewire-handle:focus-visible::after{
  opacity:1;border-color:#e1c99a;box-shadow:0 0 0 4px #bca16a26
+}
+
+/* Direct manipulation of internal draft connections. The editor adds
+   handles only in editable mode; no extra square/dot shows at rest. */
+.cw-preview-card .cw-draft-rewire{
+ opacity:1;pointer-events:auto;cursor:grab;outline:none
+}
+.cw-preview-card .cw-draft-rewire:hover,
+.cw-preview-card .cw-draft-rewire:focus-visible{outline:none}
+.cw-preview-card .cw-draft-rewire::after{
+ content:"";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+ width:var(--cw-socket-dot-size);height:var(--cw-socket-dot-size);
+ border:1.5px solid transparent;background:transparent;border-radius:50%;
+ opacity:0;pointer-events:none;box-shadow:none
+}
+.cw-preview-card .cw-draft-rewire:hover::after,
+.cw-preview-card .cw-draft-rewire:focus-visible::after{
+ opacity:1;border-color:#d9c59e;box-shadow:0 0 0 4px #bca16a26
+}
+.cw-preview-socket.cw-preview-socket-hover{
+ fill:#463a36;stroke:#e1c99a;opacity:1
 }
 
 /* Variant C: action panel follows the rendered SVG route in screen coordinates. */
@@ -2123,6 +2143,17 @@ function renderCreativeWorkspacePreview(){
     handle.style.left=(port.x-target.x)+'px';
     handle.style.top=(port.y-target.y)+'px';
     cwSizeSocketControl(handle,port,drawnSockets);
+    // No preselection: the existing socket responds as soon as it is hovered.
+    // Its independent hit region remains limited by the port spacing.
+    const highlight=active=>{
+     for(const dot of svg.querySelectorAll('[data-cw-socket]'))
+      if(dot.dataset.cwSocket===port.key)
+       dot.classList.toggle('cw-preview-socket-hover',active);
+    };
+    handle.addEventListener('pointerenter',()=>highlight(true));
+    handle.addEventListener('pointerleave',()=>highlight(false));
+    handle.addEventListener('focus',()=>highlight(true));
+    handle.addEventListener('blur',()=>highlight(false));
     handle.addEventListener('pointerdown',e=>cwBeginDraftLinkDrag(
       e,source,area,handle,svg,()=>drawnSockets,()=>socketBounds,edge));
     handle.addEventListener('click',e=>e.stopPropagation());
