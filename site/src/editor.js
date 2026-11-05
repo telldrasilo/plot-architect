@@ -1501,6 +1501,7 @@ function renderEdges(){
  const sockets=layoutEdgeSockets({nodes:visibleNodes,edges:currentEdges(),
    bounds,mode:semanticZoomLevel()});
  cwCanonicalSocketLayout=sockets;cwCanonicalSocketBounds=bounds;
+ cwPositionRewireHandle();
  for(const node of visibleNodes){
   const handle=[...document.querySelectorAll('[data-link-source]')]
    .find(el=>el.dataset.linkSource===node.id);
@@ -1839,7 +1840,8 @@ if(selected.type==='gapNote'){const n=gnby(selected.id);if(!n){el.hidden=true;re
  if(selected.type==='gapLink'){const l=state.gapLinks.find(x=>x.id===selected.id);if(!l){el.hidden=true;return}el.hidden=false;el.innerHTML=`<div class="inspect-head"><b>Связь заметки</b><button id="close-inspect">×</button></div><p class="muted">Редакторский контекст, не причинная связь истории.</p><button id="gap-link-delete">Удалить связь</button>`;$('close-inspect').onclick=()=>{selected=null;render()};$('gap-link-delete').onclick=()=>{commit(()=>{state.gapLinks=state.gapLinks.filter(x=>x.id!==l.id)},'Связь удалена');selected=null;render()};return}
  if(selected.type==='editorialField'){const ef=efby(selected.id);if(!ef){el.hidden=true;return}return renderEditorialInspector(el,ef)}
 if(selected.type==='bridge')return renderBridgeInspector(el);if(selected.type==='field'){const f=fby(selected.id);if(!f){el.hidden=true;return}return renderFieldInspector(el,f)}if(selected.type==='node'){const n=nby(selected.id);if(!n){el.hidden=true;return}const existingDraft=rewriteBy(n.id);if(existingDraft)return renderSingleEventRewriteInspector(el,n,existingDraft);el.hidden=false;el.innerHTML=`<div class="inspect-head"><b>Событие</b><span class="inspect-top-tools"><button id="pin-inspect" title="${inspectorPinned?'Вернуть окно к событию':'Закрепить окно справа'}">${inspectorPinned?'↗ Рядом':'▣ Справа'}</button><button id="close-inspect" title="Закрыть">×</button></span></div><div class="field"><label>Название</label><input id="field-title" value="${esc(n.title)}"></div><div class="field"><label>Описание</label><textarea id="field-desc">${esc(n.description||'')}</textarea></div><div class="field"><label>Сюжетные линии</label>${state.lanes.map(l=>`<label class="check-row"><input type="checkbox" data-line-check="${l.id}" ${n.lineIds.includes(l.id)?'checked':''}><span style="color:${l.color}">●</span>${esc(l.title)}</label>`).join('')}</div><div class="field"><label>Смысловые поля</label><div class="field-list">${tagNames(n).map(t=>`<span class="field-badge" data-actual-tag="${esc(t.id)}">${esc(t.name)} ${t.manual?'<span class="tiny">закреплено</span>':'<span class="tiny">по расположению</span>'}</span>`).join('')||'<span class="muted">Вне смысловых полей</span>'}</div>${(n.manualFieldIds||[]).filter(id=>!!fby(id)).map(id=>`<div class="field-tag-row"><span>Закреплено: ${esc(fby(id).title)}</span><button data-unpin-field="${esc(id)}" title="Снять ручное закрепление. Принадлежность по расположению сохранится">Открепить</button></div>`).join('')}</div><div class="field"><label>Цвет карточки</label><div class="node-palette"><button type="button" class="node-palette-auto ${!n.color?'active':''}" data-node-color="auto" title="Цвет по сюжетной линии">Авто</button>${COLORS.map(c=>`<button type="button" class="node-palette-swatch ${n.color===c?'active':''}" data-node-color="${c}" title="Выбрать цвет" style="--swatch:${c}"><span></span></button>`).join('')}</div></div><hr><div class="ux014-main-action"><button id="i-rewrite" type="button">✎ Переработать событие</button></div><div class="ux014-delete-line"><button id="i-delete" type="button">Удалить…</button></div>`; $('pin-inspect').onclick=()=>{inspectorPinned=!inspectorPinned;renderInspector();positionInspector()};el.querySelectorAll('[data-node-color]').forEach(b=>b.onclick=()=>{const value=b.dataset.nodeColor;commit(()=>{const node=nby(n.id);if(value==='auto')delete node.color;else node.color=value},'Цвет карточки изменён')});$('field-title').onchange=e=>{let v=e.target.value.trim();if(v)commit(()=>nby(n.id).title=v,'Название обновлено')};$('field-desc').onchange=e=>commit(()=>nby(n.id).description=e.target.value,'Описание обновлено');el.querySelectorAll('[data-line-check]').forEach(cb=>cb.onchange=e=>{let line=cb.dataset.lineCheck;let nn=nby(n.id);let s=new Set(nn.lineIds);if(cb.checked)s.add(line);else s.delete(line);if(!s.size){cb.checked=true;note('У события должна остаться хотя бы одна линия');return}commit(()=>nn.lineIds=[...s],'Принадлежность линии обновлена')});el.querySelectorAll('[data-unpin-field]').forEach(b=>b.onclick=()=>{const id=b.dataset.unpinField;commit(()=>{const t=nby(n.id);t.manualFieldIds=(t.manualFieldIds||[]).filter(x=>x!==id)},'Закрепление метки снято')});$('i-rewrite').onclick=()=>beginEventRewrite(n.id);$('i-delete').onclick=()=>deletePlotNode(n.id);$('close-inspect').onclick=()=>{selected=null;render()}}
- else{const edge=eby(selected.id);if(!edge){el.hidden=true;return}el.hidden=false;const edgeNames={precedes:'Следом (порядок)',causes:'Из-за этого (причина)',enables:'Делает возможным',hinders:'Препятствует'};el.innerHTML=`<div class="inspect-head"><b>Связь событий</b><button id="close-inspect">×</button></div><div class="muted"><b>${esc(nby(edge.from)?.title)}</b><div style="margin:10px 0;color:#c4a77a">→</div><b>${esc(nby(edge.to)?.title)}</b></div><div class="field"><label>Смысл связи</label><select id="edge-type">${Object.entries(edgeNames).map(([id,t])=>`<option value="${id}" ${edge.type===id?'selected':''}>${t}</option>`).join('')}</select></div><div class="muted">«Следом» означает последовательность, но не доказывает причину.</div><hr><div class="inspect-actions"><button id="reconnect">Переподключить</button><button id="i-delete">Удалить связь</button></div>`;$('edge-type').onchange=e=>commit(()=>eby(edge.id).type=e.target.value,'Тип связи изменён');$('reconnect').onclick=()=>{linkFrom=edge.from;const id=edge.id;commit(()=>state.edges=state.edges.filter(k=>k.id!==id),'Выберите новую конечную карточку');selected=null;render()};$('i-delete').onclick=deleteSelected;$('close-inspect').onclick=()=>{selected=null;render()}}
+ else{const edge=eby(selected.id);if(!edge){el.hidden=true;return}el.hidden=false;const edgeNames={precedes:'Следом (порядок)',causes:'Из-за этого (причина)',enables:'Делает возможным',hinders:'Препятствует'};el.innerHTML=`<div class="inspect-head"><b>Связь событий</b><button id="close-inspect">×</button></div><div class="muted"><b>${esc(nby(edge.from)?.title)}</b><div style="margin:10px 0;color:#c4a77a">→</div><b>${esc(nby(edge.to)?.title)}</b></div><div class="field"><label>Смысл связи</label><select id="edge-type">${Object.entries(edgeNames).map(([id,t])=>`<option value="${id}" ${edge.type===id?'selected':''}>${t}</option>`).join('')}</select></div><div class="muted">«Следом» означает последовательность, но не доказывает причину.</div><hr><div class="inspect-actions"><button id="reconnect">Переподключить</button><button id="i-delete">Удалить связь</button></div>`;$('edge-type').onchange=e=>commit(()=>eby(edge.id).type=e.target.value,'Тип связи изменён');$('reconnect').onclick=()=>{selected={type:'edge',id:edge.id};render();
+ note('Возьмите конечное гнездо стрелки и перенесите к другой карточке')};$('i-delete').onclick=deleteSelected;$('close-inspect').onclick=()=>{selected=null;render()}}
 }
 function deletePlotNode(id){
  const node=nby(id);if(!node)return;
@@ -1879,19 +1881,79 @@ function cwClearLinkTarget(){
  for(const node of document.querySelectorAll('.cw-link-target'))
   node.classList.remove('cw-link-target');
 }
-function cwEligibleLinkTarget(from,to){
+function cwPositionRewireHandle(){
+ const edge=selected?.type==='edge'?currentEdges().find(e=>e.id===selected.id):null;
+ let handle=$('cw-rewire-handle');
+ if(!edge||semanticZoomLevel()!=='full'||!cwCanonicalSocketLayout){
+  if(handle)handle.remove();return;
+ }
+ const point=cwCanonicalSocketLayout.ports.get(socketKey(edge.id,'target'));
+ if(!point){if(handle)handle.remove();return}
+ if(!handle){
+  handle=document.createElement('button');handle.id='cw-rewire-handle';
+  handle.type='button';handle.className='cw-rewire-handle';
+  handle.setAttribute('aria-label','Перенести конец выбранной стрелки');
+  handle.title='Перетащите конец стрелки к другому событию';
+  handle.addEventListener('pointerdown',cwBeginCanonicalRewire);
+  handle.addEventListener('click',e=>e.stopPropagation());
+  $('world').append(handle);
+ }
+ handle.dataset.rewireEdge=edge.id;
+ handle.style.left=point.x+'px';handle.style.top=point.y+'px';
+}
+function cwBeginCanonicalRewire(event){
+ if(event.button!==0)return;
+ event.preventDefault();event.stopPropagation();
+ const handle=event.currentTarget,edge=currentEdges().find(e=>e.id===handle.dataset.rewireEdge);
+ if(!edge||cwActiveLinkGesture||cwAcceptanceBusy||cwDraftMoveEdits.size||
+   !remote.connected||remote.blocked)return;
+ const source=cwCanonicalSocketLayout?.ports.get(socketKey(edge.id,'source'));
+ if(!source)return;
+ const startX=event.clientX,startY=event.clientY;
+ let moved=false,target=null;
+ const cleanup=()=>{
+  handle.removeEventListener('pointermove',move);
+  handle.removeEventListener('pointerup',end);
+  handle.removeEventListener('pointercancel',cancel);
+  cwActiveLinkGesture=null;cwHideLinkOverlay();
+ };
+ const move=e=>{
+  e.preventDefault();e.stopPropagation();
+  if(!moved&&Math.hypot(e.clientX-startX,e.clientY-startY)<5)return;
+  moved=true;target=cwLinkHitTarget(e.clientX,e.clientY,edge.from,edge.id);
+  cwClearLinkTarget();
+  if(target)document.querySelector('[data-node="'+target+'"]')?.classList.add('cw-link-target');
+  const point=target?proposeFreeSocket({nodeId:target,role:'target',
+   layout:cwCanonicalSocketLayout,bounds:cwCanonicalSocketBounds})
+   :pointerToWorld(e.clientX,e.clientY);
+  cwDrawLinkOverlay(source,point,!!target);
+ };
+ const end=e=>{
+  e.preventDefault();e.stopPropagation();
+  if(moved)target=cwLinkHitTarget(e.clientX,e.clientY,edge.from,edge.id);
+  cleanup();
+  if(moved&&target&&target!==edge.to)void cwCommitCanonicalRewire(edge.id,edge.from,target);
+ };
+ const cancel=e=>{e?.stopPropagation();cleanup()};
+ cwActiveLinkGesture={cancel};
+ handle.setPointerCapture(event.pointerId);
+ handle.addEventListener('pointermove',move);
+ handle.addEventListener('pointerup',end);
+ handle.addEventListener('pointercancel',cancel);
+}
+function cwEligibleLinkTarget(from,to,exceptEdgeId=null){
  if(!from||!to||from===to)return false;
  const shown=new Set(visible().map(n=>n.id));
  if(!shown.has(from)||!shown.has(to))return false;
- if(state.edges.some(e=>e.from===from&&e.to===to&&!e.workspaceId))return false;
+ if(state.edges.some(e=>e.from===from&&e.to===to&&!e.workspaceId&&e.id!==exceptEdgeId))return false;
  return true;
 }
-function cwLinkHitTarget(x,y,sourceId){
+function cwLinkHitTarget(x,y,sourceId,exceptEdgeId=null){
  // A captured pointer never fires normal target pointerenter events.
  const hit=document.elementFromPoint(x,y);
  const el=hit?.closest?.('[data-node]');
  const id=el?.dataset.node;
- return cwEligibleLinkTarget(sourceId,id)?id:null;
+ return cwEligibleLinkTarget(sourceId,id,exceptEdgeId)?id:null;
 }
 function cwDrawLinkOverlay(from,to,valid){
  const svg=cwLinkOverlay();
@@ -2014,6 +2076,59 @@ async function cwCommitCanonicalLink(from,to){
    }catch{}
   }
   if(!verified)note('Стрелка не сохранена: '+err.message);
+ }finally{cwAcceptanceBusy=false}
+}
+async function cwCommitCanonicalRewire(edgeId,from,to){
+ if(cwAcceptanceBusy||cwDraftMoveEdits.size)return;
+ cwAcceptanceBusy=true;
+ let projectId=null,submitted=false,verified=false,prior=null,previousTo=null;
+ const acceptReadback=latest=>{
+  if(activeProjectId!==projectId||remote.dirty||!Number.isSafeInteger(latest.revision))
+   throw Error('Проект изменился до подтверждения переподключения');
+  const edge=latest.graph?.edges?.find(e=>e.id===edgeId);
+  if(!edge||edge.from!==from||edge.to!==to||edge.workspaceId)
+   throw Error('Новый конец стрелки не подтверждён сервером');
+  history.push(prior);if(history.length>60)history.shift();
+  state=validateImported(latest.graph);remote.revision=latest.revision;
+  remote.blocked=false;remote.dirty=false;verified=true;
+  try{localStorage.removeItem(PENDING_PREFIX+projectId)}catch{}
+  selected={type:'edge',id:edgeId};
+  recomputeFieldTags();save(false);render();note('Стрелка переподключена');
+ };
+ try{
+  projectId=activeProjectId;
+  if(!remote.connected||remote.blocked)throw Error('Проект не подключён');
+  if(remote.busy||remote.dirty)await flushRemote();
+  if(activeProjectId!==projectId||remote.blocked||remote.dirty||remote.busy)
+   throw Error('Проект изменился во время синхронизации');
+  const original=currentEdges().find(e=>e.id===edgeId&&e.from===from);
+  if(!original)throw Error('Стрелка недоступна для переподключения');
+  previousTo=original.to;
+  if(previousTo===to||!cwEligibleLinkTarget(from,to,edgeId))
+   throw Error('Недопустимое или повторное соединение');
+  const before=persistentGraph();prior=JSON.stringify(before);
+  const next=structuredClone(before);
+  const edit=next.edges.find(e=>e.id===edgeId);
+  if(!edit||edit.from!==from||edit.to!==previousTo||edit.workspaceId)
+   throw Error('Оригинальная стрелка изменилась');
+  edit.to=to;next.revision=(state.revision||0)+1;
+  submitted=true;
+  const applied=await apiRequest('/api/projects/'+encodeURIComponent(projectId),{
+   method:'PUT',body:{expectedRevision:remote.revision,name:projectName(),graph:next,
+    message:'Переподключение стрелки'}
+  });
+  const latest=await apiRequest('/api/projects/'+encodeURIComponent(projectId));
+  if(latest.revision<applied.revision)throw Error('Сервер вернул устаревшую ревизию');
+  acceptReadback(latest);
+ }catch(err){
+  if(submitted&&!verified&&projectId===activeProjectId){
+   try{
+    const latest=await apiRequest('/api/projects/'+encodeURIComponent(projectId));
+    const edge=latest.graph?.edges?.find(e=>e.id===edgeId);
+    if(edge?.from===from&&edge?.to===to)acceptReadback(latest);
+   }catch{}
+  }
+  if(!verified)note('Переподключение не сохранено: '+err.message);
  }finally{cwAcceptanceBusy=false}
 }
 function finishLink(to){const from=linkFrom;linkFrom=null;if(!from||from===to){note('Связь отменена');render();return}if(state.edges.some(e=>e.from===from&&e.to===to)){note('Такая связь уже существует');render();return}commit(()=>state.edges.push({id:'e'+state.nextEdge++,from,to,type:'precedes'}),'Создана последовательность: слева → направо')}
