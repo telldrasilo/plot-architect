@@ -1657,6 +1657,17 @@ function renderCreativeWorkspacePreview(){
     handle.style.left=(port.x-target.x)+'px';
     handle.style.top=(port.y-target.y)+'px';
     cwSizeSocketControl(handle,port,drawnSockets);
+    // No preselection: the existing socket responds as soon as it is hovered.
+    // Its independent hit region remains limited by the port spacing.
+    const highlight=active=>{
+     for(const dot of svg.querySelectorAll('[data-cw-socket]'))
+      if(dot.dataset.cwSocket===port.key)
+       dot.classList.toggle('cw-preview-socket-hover',active);
+    };
+    handle.addEventListener('pointerenter',()=>highlight(true));
+    handle.addEventListener('pointerleave',()=>highlight(false));
+    handle.addEventListener('focus',()=>highlight(true));
+    handle.addEventListener('blur',()=>highlight(false));
     handle.addEventListener('pointerdown',e=>cwBeginDraftLinkDrag(
       e,source,area,handle,svg,()=>drawnSockets,()=>socketBounds,edge));
     handle.addEventListener('click',e=>e.stopPropagation());
