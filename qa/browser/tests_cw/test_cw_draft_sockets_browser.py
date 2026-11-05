@@ -50,6 +50,14 @@ def main():
           el=>el.getBoundingClientRect().width)""")
         assert all(abs(d-10)<1.5 for d in visual),visual
         result=snap(page)
+        # Validate the screen-space midpoint, not just world-space coordinates.
+        alignment=page.evaluate("""() => [...document.querySelectorAll('[data-cw-socket]')].map(el=>{
+          const card=document.querySelector('[data-cw-node="'+el.dataset.cwSocketNode+'"]');
+          const r=el.getBoundingClientRect(),b=card.getBoundingClientRect();
+          return Math.abs(r.left+r.width/2-
+            (el.dataset.cwSocketRole==='source'?b.right:b.left));
+        })""")
+        assert all(delta<1.5 for delta in alignment),alignment
         assert len(result["paths"])==3,result
         assert len(result["ports"])==6,result
         ports={v["key"]:v for v in result["ports"]}
@@ -67,6 +75,10 @@ def main():
         assert "enables" in next(p for p in result["paths"] if p["id"]=="ec")["className"]
         initial={(v["key"],v["x"],v["y"]) for v in result["ports"]}
         page.evaluate("()=>__graphite.setZoomForTest(.55)")
+        # Compact overview simplifies draft socket chrome but never changes edges.
+        assert not snap(page)["ports"]
+        assert page.locator('.cw-draft-edge-select').count()==0
+        page.evaluate("()=>__graphite.setZoomForTest(1)")
         assert {(v["key"],v["x"],v["y"]) for v in snap(page)["ports"]}==initial
         assert page.evaluate("()=>__graphite.getState().edges.length")==6
         assert not errors,errors
