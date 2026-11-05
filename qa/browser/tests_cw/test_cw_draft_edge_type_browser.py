@@ -137,8 +137,9 @@ def main():
         assert page.locator('[data-cw-edge-type-panel="ea"]').count()==0
         assert data["apply"]==0
 
-        # Real pointer selection and explicit save via preview/apply/readback.
-        page.locator('[data-cw-edge-hit="ea"]').click(force=True)
+        # Real mouse selection on a dedicated accessible handle next to the socket.
+        page.locator('[data-cw-node="b"]').hover(position={"x":44,"y":24})
+        page.locator('[data-cw-edge-type-trigger="ea"]').click()
         panel=page.locator('[data-cw-edge-type-panel="ea"]')
         assert panel.count()==1
         panel.locator("select").select_option("enables")
