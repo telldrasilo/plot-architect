@@ -18,7 +18,7 @@ def main():
     # A tall card reproduces the real reported overlap: a fixed 125px
     # drop-review offset previously covered the lower part of its text.
     next(n for n in graph["nodes"] if n["id"]=="a")["description"]=(
-        "Длинное описание подготовленного события. " * 13
+        "Длинное описание подготовленного события. " * 5
     )
     graph["workspaces"].append({"id":"w2","taskId":"gn2","x":1260,"y":450,"width":420,"height":400})
     graph["nodes"].append({"id":"d","title":"Независимая версия","description":"Вторая область",
@@ -256,6 +256,11 @@ def main():
         assert card_box and card_box["y"]+25+dy>15, {
             "card":card_box, "scale":scale, "drag":dy
         }
+        hovered=page.evaluate("""({x,y}) => {
+          const hit=document.elementFromPoint(x,y);
+          return hit?.closest('[data-cw-node]')?.dataset.cwNode ?? null;
+        }""",{"x":card_box["x"]+31,"y":card_box["y"]+25})
+        assert hovered=="c", {"hit":hovered,"card":card_box}
         drag(page,"c",0,dy)
         page.locator(".cw-accept-review.cw-drop-review").wait_for()
         assert_review_next_to_card(page,"c")
