@@ -625,7 +625,10 @@ async function cwConfirmNoteStage(){
  }finally{cwAcceptanceBusy=false;renderInspector()}
 }
 
-async function cwPrepareAccept(nodeIds,workspaceId){
+async function cwPrepareAccept(nodeIds,workspaceId,placements){
+ const dropRef=placements===undefined?null:cwDragDropReview;
+ if(placements!==undefined&&!dropRef)return;
+ if(placements===undefined)cwDragDropReview=null;
  try{
   await cwEnsureDraftsSynced();
   if(remote.connected&&(remote.dirty||remote.busy))await flushRemote();
@@ -638,17 +641,32 @@ async function cwPrepareAccept(nodeIds,workspaceId){
  const id=activeProjectId,revision=remote.revision,selection=[...nodeIds];
  cwAcceptanceBusy=true;
  try{
-  const command={kind:'accept_draft',workspaceId,nodeIds:selection};
+  const command={kind:'accept_draft',workspaceId,nodeIds:selection,
+   ...(placements===undefined?{}:{placements})};
   const reviewed=await cwWorkflowRequest(id,'preview',{expectedRevision:revision,command});
+  if(dropRef&&cwDragDropReview!==dropRef)return;
   if(activeProjectId!==id||remote.revision!==revision||remote.dirty||remote.blocked)
    throw Error('Проект изменился во время проверки. Повторите действие');
   const plan=reviewed.preview;
   if(!plan||JSON.stringify(plan.acceptNodeIds)!==JSON.stringify(selection)
     ||plan.workspaceId!==workspaceId||!Array.isArray(plan.promoteEdgeIds)
-    ||!Array.isArray(plan.reviewEdgeIds)||plan.autoRewiredEdgeIds?.length)
+    ||!Array.isArray(plan.reviewEdgeIds)||plan.autoRewiredEdgeIds?.length
+    ||(placements!==undefined&&(!Array.isArray(plan.positionChanges)
+      ||plan.positionChanges.length!==selection.length
+      ||plan.positionChanges.some((p,i)=>p.nodeId!==selection[i]
+        ||p.after?.x!==placements.find(v=>v.nodeId===p.nodeId)?.x
+        ||p.after?.y!==placements.find(v=>v.nodeId===p.nodeId)?.y))))
    throw Error('Проверка вернула неожиданный состав изменений');
-  cwAcceptanceReview={projectId:id,revision,nodeIds:selection,workspaceId,plan,operationId:crypto.randomUUID()};
- }catch(err){cwAcceptanceReview=null;note('Не удалось проверить принятие: '+err.message)}
+  cwAcceptanceReview={projectId:id,revision,nodeIds:selection,workspaceId,plan,
+   ...(placements===undefined?{}:{placements}),operationId:crypto.randomUUID()};
+  if(dropRef)dropRef.phase='ready';
+ }catch(err){
+  if(!dropRef||cwDragDropReview===dropRef){
+   cwAcceptanceReview=null;
+   if(dropRef)cwDragDropReview=null;
+   note('Не удалось проверить принятие: '+err.message);
+  }
+ }
  finally{cwAcceptanceBusy=false;renderCreativeWorkspacePreview()}
 }
 async function cwConfirmAccept(){
@@ -657,7 +675,8 @@ async function cwConfirmAccept(){
  if(review.projectId!==activeProjectId||review.revision!==remote.revision)return note('Ревизия проекта изменилась');
  cwAcceptanceBusy=true;
  try{
-  const command={kind:'accept_draft',workspaceId:review.workspaceId,nodeIds:[...review.nodeIds],expectedPreview:review.plan};
+  const command={kind:'accept_draft',workspaceId:review.workspaceId,nodeIds:[...review.nodeIds],
+   ...(review.placements===undefined?{}:{placements:review.placements}),expectedPreview:review.plan};
   const committed=await cwWorkflowRequest(review.projectId,'apply',{
    expectedRevision:review.revision,operationId:review.operationId,command
   });
@@ -668,11 +687,17 @@ async function cwConfirmAccept(){
    throw Error('Локальная версия изменилась — выполните проверку синхронизации');
   if(!Number.isSafeInteger(latest.revision)||latest.revision<committed.revision)
    throw Error('Сервер вернул устаревшее состояние после принятия');
+  if(review.nodeIds.some(id=>{
+   const node=latest.graph?.nodes?.find(n=>n.id===id);
+   const target=review.placements?.find(p=>p.nodeId===id);
+   return !node||node.workspaceId!=null||(target&&(node.x!==target.x||node.y!==target.y));
+  }))throw Error('Принятие и координаты не подтверждены повторным чтением');
   state=validateImported(latest.graph);
   remote.revision=latest.revision;
   remote.dirty=false;
   selected=null;selectedNodeIds.clear();linkFrom=null;history=[];
   cwClearDraftSelection();
+  cwDragDropReview=null;
   recomputeFieldTags();
   save(false);render();
   $('saved').textContent='✓ '+(cwLocalWorkflowEnabled?'Сохранено локально':'Сохранено в Site')+' · '+remote.revision;
@@ -681,7 +706,7 @@ async function cwConfirmAccept(){
   // Keep the same operationId for retry after an ambiguous network failure.
   // Never silently mint a second write after a possibly committed request.
   if(err.code==='REVISION_CONFLICT'||err.code==='PREVIEW_STALE'){
-   cwAcceptanceReview=null;
+   cwAcceptanceReview=null;cwDragDropReview=null;
    note('Конфликт ревизий. Обновите проект и повторите проверку');
   }else note('Принятие не подтверждено: '+err.message);
  }finally{cwAcceptanceBusy=false;renderCreativeWorkspacePreview()}
