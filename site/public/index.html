@@ -412,6 +412,42 @@ const centerY=r=>r.y+r.height/2;
 const cmp=(a,b)=>a<b?-1:a>b?1:0;
 const DEFAULTS=Object.freeze({minGap:20,maxGap:30,inset:16,railOffset:16});
 
+/** UI-only metrics in screen pixels, separate from graph/world coordinates.
+ *  Dense sockets use nearest-port resolution, not overlapping click targets.
+ */
+const SOCKET_UI_DEFAULTS=Object.freeze({
+ visualDiameterPx:10, mouseHitDiameterPx:24, touchHitDiameterPx:40,
+ clearancePx:2
+});
+function socketUiMetrics({
+ scale=1,input='mouse',minSeparationWorld=Infinity,options={}
+}={}){
+ const cfg={...SOCKET_UI_DEFAULTS,...options};
+ if(!finite(scale)||scale<=0||!['mouse','touch'].includes(input)
+   ||!(minSeparationWorld===Infinity||finite(minSeparationWorld)&&minSeparationWorld>=0)
+   ||Object.values(cfg).some(v=>!finite(v)||v<0)
+   ||cfg.visualDiameterPx<=0||cfg.mouseHitDiameterPx<cfg.visualDiameterPx
+   ||cfg.touchHitDiameterPx<cfg.visualDiameterPx)
+  throw new TypeError('Invalid socket screen metrics');
+ const visualPx=cfg.visualDiameterPx;
+ const desiredHitPx=input==='touch'?cfg.touchHitDiameterPx:cfg.mouseHitDiameterPx;
+ const separationPx=minSeparationWorld*scale;
+ const direct=separationPx>=desiredHitPx+cfg.clearancePx;
+ const effectiveHitPx=direct?desiredHitPx:Math.max(0,Math.min(desiredHitPx,separationPx-cfg.clearancePx));
+ return {
+  visualDiameterPx:visualPx,hitDiameterPx:desiredHitPx,
+  effectiveHitDiameterPx:effectiveHitPx,resolution:direct?'direct':'nearest',
+  visualRadiusWorld:visualPx/(2*scale),hitRadiusWorld:effectiveHitPx/(2*scale)
+ };
+}
+
+/** Card-edge anchor; only an explicitly flagged overflow rail moves away. */
+function socketBoundaryX(rect,role){
+ if(!validRect(rect)||!['source','target'].includes(role))
+  throw new TypeError('Invalid socket boundary');
+ return role==='source'?rect.x+rect.width:rect.x;
+}
+
 function rectFor(node,bounds){
  const b=bounds instanceof Map?bounds.get(node.id):bounds?.[node.id];
  const r=b??node;
@@ -471,10 +507,10 @@ function layoutEdgeSockets({nodes=[],edges=[],bounds={},mode='full',options={}}=
    const gap=group.length<=1?0:overflowing?cfg.minGap
      :Math.max(cfg.minGap,Math.min(cfg.maxGap,available/(group.length-1)));
    const first=centerY(rect)-(group.length-1)*gap/2;
-   const x=role==='source'?rect.x+rect.width+(overflowing?cfg.railOffset:0)
-    :rect.x-(overflowing?cfg.railOffset:0);
+   const boundaryX=socketBoundaryX(rect,role);
+   const x=boundaryX+(overflowing?(role==='source'?cfg.railOffset:-cfg.railOffset):0);
    for(let i=0;i<group.length;i++){
-    const p=group[i];p.x=x;p.y=first+i*gap;p.rail=overflowing;p.ordinal=i;
+    const p=group[i];p.x=x;p.y=first+i*gap;p.boundaryX=boundaryX;p.rail=overflowing;p.ordinal=i;
     byNode.get(nodeId)[role==='source'?'outgoing':'incoming'].push(p);
    }
    if(overflowing)warnings.push({code:'SOCKET_RAIL',nodeId,role,
@@ -503,10 +539,10 @@ function proposeFreeSocket({nodeId,role,layout,bounds,options={}}={}){
  }
  const rail=y<rect.y+cfg.inset||y>rect.y+rect.height-cfg.inset
   ||occupied.some(p=>p.rail);
- const x=role==='source'?rect.x+rect.width+(rail?cfg.railOffset:0)
-  :rect.x-(rail?cfg.railOffset:0);
+ const boundaryX=socketBoundaryX(rect,role);
+ const x=boundaryX+(rail?(role==='source'?cfg.railOffset:-cfg.railOffset):0);
  return {key:'new:'+nodeId+':'+role,nodeId,role,
-  side:role==='source'?'right':'left',x,y,rail,temporary:true};
+  side:role==='source'?'right':'left',x,y,boundaryX,rail,temporary:true};
 }
 
 /* CW-004 generated geometry end */

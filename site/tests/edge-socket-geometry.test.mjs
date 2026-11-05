@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {layoutEdgeSockets,proposeFreeSocket,socketKey} from '../src/edge_socket_geometry.mjs';
+import {layoutEdgeSockets,proposeFreeSocket,socketKey,socketUiMetrics,socketBoundaryX} from '../src/edge_socket_geometry.mjs';
 
 const card=(id,x=0,y=0,w=208,h=110)=>({id,x,y,width:w,height:h});
 const edgesTo=(n,target='hub')=>Array.from({length:n},(_,i)=>({
@@ -131,4 +131,47 @@ test('duplicate endpoint identities are rejected rather than sharing one socket'
  const nodes=[card('a'),card('b',400,0)];
  const edges=[{id:'duplicate',from:'a',to:'b'},{id:'duplicate',from:'a',to:'b'}];
  assert.throws(()=>layoutEdgeSockets({nodes,edges}),/Duplicate edge endpoint/);
+});
+
+test('screen metrics preserve display size at zoom and stay independent of graph coordinates',()=>{
+ for(const scale of [.5,.75,1,1.25,1.5,2]){
+  const m=socketUiMetrics({scale});
+  assert.ok(Math.abs(m.visualRadiusWorld*scale*2-m.visualDiameterPx)<1e-9);
+  assert.ok(Math.abs(m.hitRadiusWorld*scale*2-m.effectiveHitDiameterPx)<1e-9);
+  assert.equal(m.resolution,'direct');
+  assert.equal(m.hitDiameterPx,24);
+ }
+ const touch=socketUiMetrics({scale:1.5,input:'touch'});
+ assert.equal(touch.hitDiameterPx,40);
+ assert.equal(touch.visualDiameterPx,10);
+ for(const invalid of [0,-1,Infinity,NaN])
+  assert.throws(()=>socketUiMetrics({scale:invalid}),TypeError);
+ assert.throws(()=>socketUiMetrics({input:'unknown'}),TypeError);
+});
+test('dense ports request nearest selection and do not create overlapping targets',()=>{
+ const close=socketUiMetrics({scale:1,minSeparationWorld:12});
+ assert.equal(close.resolution,'nearest');
+ assert.equal(close.hitDiameterPx,24);
+ assert.equal(close.effectiveHitDiameterPx,10);
+ assert.equal(socketUiMetrics({scale:2,minSeparationWorld:15}).resolution,'direct');
+ assert.equal(socketUiMetrics({scale:.5,minSeparationWorld:15}).resolution,'nearest');
+ assert.equal(socketUiMetrics({scale:1,minSeparationWorld:0}).effectiveHitDiameterPx,0);
+});
+test('normal ports use measured card edge, dense overflow rail is explicit',()=>{
+ const f=fixture(3,180),layout=layoutEdgeSockets(f);
+ for(const e of f.edges){
+  const s=at(layout,e.id,'source'),t=at(layout,e.id,'target');
+  const src=f.nodes.find(x=>x.id===e.from),dst=f.nodes.find(x=>x.id===e.to);
+  assert.equal(s.x,s.boundaryX);
+  assert.equal(t.x,t.boundaryX);
+  assert.equal(s.boundaryX,socketBoundaryX(src,'source'));
+  assert.equal(t.boundaryX,socketBoundaryX(dst,'target'));
+ }
+ const overflow=layoutEdgeSockets(fixture(20,105)).byNode.get('hub').incoming;
+ assert.ok(overflow.every(p=>p.rail&&p.x!==p.boundaryX&&p.boundaryX===1200));
+ const free=proposeFreeSocket({nodeId:'hub',role:'target',
+  layout:layoutEdgeSockets(fixture(20,105)),
+  bounds:{hub:card('hub',1200,90,260,105)}});
+ assert.equal(free.boundaryX,1200);
+ assert.throws(()=>socketBoundaryX({width:0,height:1,x:0,y:0},'source'),TypeError);
 });
