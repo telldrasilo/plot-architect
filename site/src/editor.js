@@ -1897,7 +1897,7 @@ window.addEventListener('resize',()=>{if(tipTarget&&!tooltipHost.hidden)displayT
 function projectName(){return registryEntry(activeProjectId)?.name||'Без названия'}
 function updateProjectLabel(){const t=$('project-current');if(t)t.textContent=projectName();const m=$('project-mode');if(m)m.textContent=remote.connected?(cwLocalWorkflowEnabled?'Graphite Local':'Site · D1'):'Локально'}
 function showProjectManager(){
- modalOpen=true;const h=$('modal-host');h.innerHTML=`<div class="backdrop" id="projects-backdrop"><section class="modal project-manager" role="dialog" aria-label="Проекты" aria-modal="true"><div class="project-modal-head"><h2>Мои истории</h2><button id="pm-close" aria-label="Закрыть">×</button></div><p id="pm-status">${remote.connected?'Хранятся на Site, с локальными копиями':'Локальные проекты этого браузера'}</p><div class="project-list" id="pm-list"></div><div class="project-controls"><button id="pm-new" class="primary">＋ Новая история</button><button id="pm-import">↑ Импорт JSON</button><button id="pm-connect">${remote.connected?'↩ Локальные проекты':'☁ Подключить Site'}</button></div><div id="pm-error" role="alert" class="pm-error"></div><div class="project-controls secondary"><button id="pm-rename">Переименовать</button><button id="pm-copy">Дублировать</button><button id="pm-delete">Удалить</button><button id="pm-export">Экспорт</button><button id="pm-retry" ${remote.connected&&remote.dirty?'':'hidden'}>Повторить синхронизацию</button></div><input id="pm-file" type="file" accept=".json,application/json" hidden></section></div>`;
+ modalOpen=true;const h=$('modal-host');h.innerHTML=`<div class="backdrop" id="projects-backdrop"><section class="modal project-manager" role="dialog" aria-label="Проекты" aria-modal="true"><div class="project-modal-head"><h2>Мои истории</h2><button id="pm-close" aria-label="Закрыть">×</button></div><p id="pm-status">${remote.blocked?'Есть несинхронизированная локальная копия. Сначала экспортируйте JSON':remote.connected?(cwLocalWorkflowEnabled?'Хранятся в локальной SQLite, с копией в браузере':'Хранятся на Site, с локальными копиями'):'Локальные проекты этого браузера'}</p><div class="project-list" id="pm-list"></div><div class="project-controls"><button id="pm-new" class="primary">＋ Новая история</button><button id="pm-import">↑ Импорт JSON</button><button id="pm-connect">${remote.connected?'↩ Локальные проекты':'☁ Подключить Site'}</button></div><div id="pm-error" role="alert" class="pm-error"></div><div class="project-controls secondary"><button id="pm-rename">Переименовать</button><button id="pm-copy">Дублировать</button><button id="pm-delete">Удалить</button><button id="pm-export">Экспорт</button><button id="pm-retry" ${remote.connected&&remote.dirty?'':'hidden'}>Повторить синхронизацию</button><button id="pm-recover" ${remote.connected&&remote.blocked&&cwLocalWorkflowEnabled?'':'hidden'}>Восстановить из SQLite…</button></div><input id="pm-file" type="file" accept=".json,application/json" hidden></section></div>`;
  const close=()=>{modalOpen=false;h.innerHTML=''};
  $('pm-close').onclick=close;$('projects-backdrop').onclick=e=>{if(e.target.id==='projects-backdrop')close()};
  const fail=err=>{const p=$('pm-error');if(p)p.textContent=String(err?.message||err)};
@@ -1909,6 +1909,29 @@ function showProjectManager(){
  $('pm-delete').onclick=async()=>{if(!confirm('Удалить проект «'+projectName()+'»? Сохраните JSON, если хотите оставить резервную копию.'))return;try{await deleteProject();paint();close()}catch(err){fail(err)}};
  $('pm-export').onclick=exportProject;$('pm-retry').onclick=async()=>{if(!remote.connected)return fail('Подключите Site');if(remote.blocked)return fail('Конфликт или незавершённое локальное сохранение. Экспортируйте JSON, затем согласуйте изменения вручную.');try{remote.dirty=true;await flushRemote();close()}catch(e){fail(e)}};
  $('pm-file').onchange=async e=>{const f=e.target.files?.[0];if(!f)return;try{const src=JSON.parse(await f.text());let g,name;if(src.format==='plot-architect/project-1'){g=src.project.graph;name=src.project.name}else if(src.graph){g=src.graph;name=src.name||'Импортированный сюжет'}else{g=src;name='Импортированный сюжет'};g=validateImported(g);await createProject(name,g);close()}catch(err){fail(err)}};
+ $('pm-recover').onclick=async()=>{
+  if(!cwLocalWorkflowEnabled||!remote.connected||!remote.blocked)return fail('Нет конфликта локального проекта');
+  const id=activeProjectId;
+  // The user's entire local version (including pending draft positions) is
+  // exported before offering the destructive, explicit recovery choice.
+  exportProject();
+  if(!confirm('Проверьте, что резервный JSON скачан. Затем открыть сохранённую версию из SQLite? Несинхронизированные изменения останутся только в экспортированном файле.'))return;
+  try{
+   const rec=await apiRequest('/api/projects/'+encodeURIComponent(id));
+   if(id!==activeProjectId||!Number.isSafeInteger(rec.revision))throw Error('Проект изменился во время восстановления');
+   const next=validateImported(rec.graph);
+   // Do not touch the saved server graph. Fail safely if browser storage
+   // cannot clear the pending marker.
+   localStorage.removeItem(PENDING_PREFIX+id);
+   if(localStorage.getItem(PENDING_PREFIX+id)==='1')throw Error('Не удалось снять отметку несинхронизированного сохранения');
+   cwClearDraftMoves();cwClearDraftSelection();
+   state=next;remote.revision=rec.revision;remote.blocked=false;remote.dirty=false;
+   selected=null;history=[];ensureEditorialState(state);recomputeFieldTags();
+   save(false);render();fit();close();
+   $('saved').textContent='✓ Открыта версия SQLite · '+remote.revision;
+   note('Версия SQLite открыта. Резервную копию храните до проверки проекта');
+  }catch(err){fail(err)}
+ };
  $('pm-import').onclick=()=>$('pm-file').click();
  $('pm-connect').onclick=async()=>{try{if(remote.connected){await flushRemote();remote.connected=false;remote.token=null;remote.blocked=false;cwLocalWorkflowEnabled=false;cwClearDraftSelection();cwClearDraftMoves();activeRegistryStorage=REGISTRY_KEY;registry=readLocalRegistry();const id=registry.activeId;activeProjectId=id;KEY=KEY_PREFIX+id;state=JSON.parse(localStorage.getItem(KEY)||'null')||(id===STARTER_LOCAL_ID?structuredClone(STARTER_GRAPH):seed());history=[];selected=null;save();render();fit();close();note('Локальный режим')}else{await connectSite();close()}}catch(err){fail(err)}};
 }
@@ -1921,7 +1944,14 @@ function validateImported(g){if(!g||!Array.isArray(g.nodes)||!Array.isArray(g.ed
  for(const f of out.fields){if(!f.id||!Number.isFinite(f.x)||!Number.isFinite(f.y)||!Number.isFinite(f.width)||!Number.isFinite(f.height))throw Error('Неверные границы поля');f.comment=f.comment||'';f.parent=f.parent??null}
  for(const [prefix,property,list] of [['n','nextNode',out.nodes],['e','nextEdge',out.edges],['f','nextField',out.fields],['l','nextLine',out.lanes]]){let max=0;for(const x of list){const match=new RegExp('^'+prefix+'(\\d+)$').exec(x.id);if(match)max=Math.max(max,Number(match[1]))}out[property]=Math.max(out[property]||1,max+1)}out.view=null;out.revision=Number.isSafeInteger(out.revision)?out.revision:0;return out}
 function downloadJson(data,filename){const u=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=u;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(u),2500)}
-function exportProject(){downloadJson({format:'plot-architect/project-1',exportedAt:new Date().toISOString(),project:{id:activeProjectId,name:projectName(),graph:persistentGraph()}},'plot-architect-'+projectName().replace(/[^a-zA-Zа-яА-Я0-9-]+/g,'-').slice(0,50)+'.json');note('Проект экспортирован')}
+function exportProject(){
+ const graph=persistentGraph();
+ for(const [id,position] of cwDraftMoveEdits){const node=graph.nodes.find(n=>n.id===id);if(node){node.x=position.x;node.y=position.y}}
+ downloadJson({format:'plot-architect/project-1',exportedAt:new Date().toISOString(),
+  project:{id:activeProjectId,name:projectName(),graph}},
+  'plot-architect-'+projectName().replace(/[^a-zA-Zа-яА-Я0-9-]+/g,'-').slice(0,50)+'.json');
+ note('Резервный JSON отправлен на скачивание');
+}
 // A completed write may leave an obsolete pending marker after interruption.
 // Compare the entire normalized graph; never ignore substantive local changes.
 function cwEquivalentPersistedGraphs(local,server){
