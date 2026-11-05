@@ -425,7 +425,7 @@ function beginEventRewrite(id){
 }
 function cancelEventRewrite(id){if(!rewriteBy(id))return;commit(()=>{state.eventRewrites=state.eventRewrites.filter(d=>d.nodeId!==id)},'Переработка отменена · событие не изменено');selected={type:'node',id};render()}
 
-const gapInView=()=>state.gapNotes.filter(n=>n.parent===state.view);
+const gapInView=()=>state.gapNotes.filter(n=>n.parent===state.view&&!cwNoteHasWorkspace(n.id));
 let gapLinkFrom=null;
 const editorialInView=()=>state.editorialFields.filter(f=>f.parent===state.view);
 // Never conflate editorial node.status='proposed' with draft ownership.
@@ -441,6 +441,10 @@ const currentEdges=()=>{const ids=new Set(visible().map(n=>n.id)),suspended=cwSu
 // canonical isolation and verified transition endpoints are connected.
 let creativeWorkspacePreview=null;
 let cwWorkflowTestMode=false;
+let cwLocalWorkflowEnabled=false;
+// The local server explicitly advertises this capability after authentication;
+// the QA switch remains synthetic. The REST server validates every operation.
+function cwWorkflowEnabled(){return cwWorkflowEnabled()||cwLocalWorkflowEnabled}
 const cwDraftMoveEdits=new Map();
 let cwMoveWorkspaceId=null;
 let cwMoveReview=null;
@@ -449,7 +453,7 @@ function cwClearDraftMoves(){
  cwDraftMoveEdits.clear();cwMoveWorkspaceId=null;cwMoveReview=null;cwMoveStale=false;
 }
 function cwServerReady(){
- return cwWorkflowTestMode&&remote.connected&&!remote.blocked&&!remote.busy&&!remote.dirty
+ return cwWorkflowEnabled()&&remote.connected&&!remote.blocked&&!remote.busy&&!remote.dirty
   &&!cwAcceptanceBusy&&state.view===null;
 }
 let cwAcceptanceReview=null;
@@ -459,7 +463,7 @@ function cwClearDraftSelection(){
  cwSelectedWorkspaceId=null;cwSelectedDraftIds.clear();cwAcceptanceReview=null;
 }
 function cwToggleDraftSelection(nodeId,workspaceId){
- if(!cwWorkflowTestMode||cwAcceptanceBusy)return;
+ if(!cwWorkflowEnabled()||cwAcceptanceBusy)return;
  if(!state.nodes.some(n=>n.id===nodeId&&n.workspaceId===workspaceId))return;
  if(cwSelectedWorkspaceId!==workspaceId){
   cwSelectedDraftIds.clear();cwSelectedWorkspaceId=workspaceId;
@@ -583,7 +587,7 @@ function cwParseChatGPTAlternatives(raw){
  return branches;
 }
 function cwPrepareChatGPTAlternatives(noteId,raw){
- if(!cwWorkflowTestMode||!cwServerReady()||cwNoteHasWorkspace(noteId))
+ if(!cwWorkflowEnabled()||!cwServerReady()||cwNoteHasWorkspace(noteId))
   throw Error('Сначала завершите сохранение проекта в тестовом режиме');
  const n=gnby(noteId);
  if(!n||!n.text?.trim())throw Error('Заметка не найдена');
@@ -623,7 +627,7 @@ function cwPrepareChatGPTAlternatives(noteId,raw){
 }
 
 function setCWPreparedNoteAlternativesForTest(noteId,spec){
- if(!cwWorkflowTestMode||!gnby(noteId)||state.view!==null)
+ if(!cwWorkflowEnabled()||!gnby(noteId)||state.view!==null)
   throw Error('Тестовая подготовка доступна только для открытой заметки');
  if(!spec||typeof spec!=='object'||!Array.isArray(spec.branches)||!spec.branches.length
     ||!spec.workspace||!spec.workspaceId)throw Error('Нет подготовленных вариантов');
@@ -636,14 +640,14 @@ function setCWPreparedNoteAlternativesForTest(noteId,spec){
 function cwNoteHasWorkspace(noteId){
  return (state.workspaces||[]).some(a=>a.taskId===noteId);
 }
-// QA-only activation. This client switch never changes server access controls
-// or enables CW_WORKFLOW_ENABLED; disabled by default in every ordinary editor.
+// Synthetic QA activation is independent of the authenticated loopback capability.
+// Neither client-side flag changes the server's workflow authorization.
 function setCWWorkflowTestMode(enabled){
  cwWorkflowTestMode=enabled===true;
  cwClearDraftSelection();
  cwClearDraftMoves();
  cwStageReview=null;
- if(!cwWorkflowTestMode){cwPreparedNoteAlternatives.clear();cwHandoffClear()}
+ if(!cwWorkflowEnabled()){cwPreparedNoteAlternatives.clear();cwHandoffClear()}
  renderCreativeWorkspacePreview();
  if(selected?.type==='gapNote')renderInspector();
 }
@@ -741,7 +745,7 @@ async function cwApplyDraftMove(){
 function cwBeginDraftDrag(event,card,node,area,svg,links,byId){
  event.stopPropagation();
  if(event.button!==0||event.target.closest('button,label,input'))return;
- if(!cwWorkflowTestMode)return;
+ if(!cwWorkflowEnabled())return;
  if(!cwServerReady()||cwMoveStale||cwMoveReview?.attempted){
   note('Завершите предыдущую операцию перед перемещением');return
  }
@@ -849,7 +853,7 @@ async function cwConfirmNoteStage(){
   if(!next.workspaces?.some(a=>a.id===r.command.workspaceId&&a.taskId===r.noteId))
    throw Error('Рабочая область не найдена в сохранённой версии');
   state=next;remote.revision=latest.revision;remote.dirty=false;
-  selected={type:'gapNote',id:r.noteId};selectedNodeIds.clear();linkFrom=null;history=[];
+  selected=null;selectedNodeIds.clear();linkFrom=null;history=[];
   cwPreparedNoteAlternatives.delete(r.noteId);cwStageReview=null;
   recomputeFieldTags();save(false);render();fit();
   $('saved').textContent='✓ Сохранено в Site · '+remote.revision;
@@ -993,7 +997,7 @@ function renderCreativeWorkspacePreview(){
   }
   box.append(svg);
   const nodes=data.nodes.filter(n=>n.workspaceId===area.id);
-  if(persisted&&cwWorkflowTestMode&&cwMoveWorkspaceId===area.id&&cwDraftMoveEdits.size){
+  if(persisted&&cwWorkflowEnabled()&&cwMoveWorkspaceId===area.id&&cwDraftMoveEdits.size){
    const actions=document.createElement('div');actions.className='cw-draft-move-actions';
    actions.setAttribute('role','group');actions.setAttribute('aria-label','Сохранение расположения');
    actions.addEventListener('pointerdown',e=>e.stopPropagation());
@@ -1006,7 +1010,7 @@ function renderCreativeWorkspacePreview(){
    discard.addEventListener('click',e=>{e.stopPropagation();cwClearDraftMoves();renderCreativeWorkspacePreview()});
    actions.append(count,save,discard);box.append(actions);
   }
-  if(persisted&&cwWorkflowTestMode&&cwSelectedWorkspaceId===area.id&&cwSelectedDraftIds.size){
+  if(persisted&&cwWorkflowEnabled()&&cwSelectedWorkspaceId===area.id&&cwSelectedDraftIds.size){
    const actions=document.createElement('div');actions.className='cw-draft-selection-actions';
    actions.setAttribute('role','group');actions.setAttribute('aria-label','Групповое принятие');
    actions.addEventListener('pointerdown',e=>e.stopPropagation());
@@ -1034,13 +1038,13 @@ function renderCreativeWorkspacePreview(){
    if(n.description){const d=document.createElement('p');d.textContent=n.description;card.append(d)}
    if(persisted){
     card.classList.add('cw-persisted-card');
-    if(cwWorkflowTestMode)card.classList.add('cw-movable-draft');
+    if(cwWorkflowEnabled())card.classList.add('cw-movable-draft');
     if(cwSelectedDraftIds.has(n.id)&&cwSelectedWorkspaceId===area.id)card.classList.add('cw-draft-selected');
     // Canvas pointerdown normally starts a drag and may rerender the world,
     // destroying a button before its click can be dispatched.
     card.addEventListener('pointerdown',e=>cwBeginDraftDrag(e,card,n,area,svg,internals,nodeById));
     card.addEventListener('click',e=>e.stopPropagation());
-    if(cwWorkflowTestMode){
+    if(cwWorkflowEnabled()){
      const pick=document.createElement('label');pick.className='cw-draft-pick';
      const check=document.createElement('input');check.type='checkbox';
      check.className='cw-draft-check';
@@ -1087,7 +1091,7 @@ function renderCreativeWorkspacePreview(){
    });
    box.append(card);
   }
-  if(persisted&&cwWorkflowTestMode&&cwMoveReview?.command.workspaceId===area.id){
+  if(persisted&&cwWorkflowEnabled()&&cwMoveReview?.command.workspaceId===area.id){
    const review=cwMoveReview,panel=document.createElement('section');
    panel.className='cw-move-review';panel.setAttribute('role','group');
    panel.setAttribute('aria-label','Проверка расположения черновиков');
@@ -1105,7 +1109,7 @@ function renderCreativeWorkspacePreview(){
    back.addEventListener('click',e=>{e.stopPropagation();cwMoveReview=null;renderCreativeWorkspacePreview()});
    panel.append(summary,confirm,back);box.append(panel);
   }
-  if(persisted&&cwWorkflowTestMode&&cwAcceptanceReview?.workspaceId===area.id){
+  if(persisted&&cwWorkflowEnabled()&&cwAcceptanceReview?.workspaceId===area.id){
    const p=cwAcceptanceReview,review=document.createElement('section');
    review.className='cw-accept-review';review.setAttribute('role','group');
    review.addEventListener('pointerdown',e=>e.stopPropagation());
@@ -1323,7 +1327,7 @@ function renderGapNotes(){const host=$('gap-notes');host.innerHTML='';
  for(const n of gapInView()){
   const el=document.createElement('article');el.className='gap-note'+(selected?.type==='gapNote'&&selected.id===n.id?' selected':'');
   el.dataset.gapNote=n.id;el.style.left=n.x+'px';el.style.top=n.y+'px';el.tabIndex=0;
-  el.innerHTML=`<div class="gap-note-head">▤ ${esc(n.title||'Заметка')}</div><div class="gap-note-body ${!n.text?'gap-note-empty':''}">${esc(n.text||'Напишите, что нужно придумать здесь…')}</div><div class="gap-note-foot">${cwWorkflowTestMode?(cwNoteHasWorkspace(n.id)?'Варианты в рабочей области':cwPreparedNoteAlternatives.has(n.id)?'Подготовлено '+cwPreparedNoteAlternatives.get(n.id).branches.length+' ветвей':'Редакторское задание') :'Редакторское задание'} · не сюжетное событие</div>`;
+  el.innerHTML=`<div class="gap-note-head">▤ ${esc(n.title||'Заметка')}</div><div class="gap-note-body ${!n.text?'gap-note-empty':''}">${esc(n.text||'Напишите, что нужно придумать здесь…')}</div><div class="gap-note-foot">${cwWorkflowEnabled()?(cwNoteHasWorkspace(n.id)?'Варианты в рабочей области':cwPreparedNoteAlternatives.has(n.id)?'Подготовлено '+cwPreparedNoteAlternatives.get(n.id).branches.length+' ветвей':'Редакторское задание') :'Редакторское задание'} · не сюжетное событие</div>`;
   host.append(el);
   el.onclick=e=>{e.stopPropagation();if(completeGapLink('gap_note',n.id))return;selected={type:'gapNote',id:n.id};render()};
   el.addEventListener('pointerdown',e=>{if(e.button!==0||e.target.closest('input,textarea')||e.ctrlKey)return;interaction={type:'gap-note-move',id:n.id,px:e.clientX,py:e.clientY,x:n.x,y:n.y,moved:false};el.setPointerCapture(e.pointerId)});
@@ -1333,7 +1337,7 @@ function renderGapNotes(){const host=$('gap-notes');host.innerHTML='';
  }
 }
 function renderGapInspector(el,n){
- const prepared=cwWorkflowTestMode&&cwPreparedNoteAlternatives.has(n.id)&&!cwNoteHasWorkspace(n.id);
+ const prepared=cwWorkflowEnabled()&&cwPreparedNoteAlternatives.has(n.id)&&!cwNoteHasWorkspace(n.id);
  const review=cwStageReview?.noteId===n.id?cwStageReview:null;
  const ready=review?.plan;
  const summary=ready?'Подготовлено '+ready.branchSummaries.length+' ветвей · '+ready.proposedNodes.length
@@ -1342,9 +1346,9 @@ function renderGapInspector(el,n){
  const stageReview=review?'<section class="cw-note-stage-review" role="group" aria-label="Проверка вариантов">'+
   '<p>'+esc(summary)+'</p><button id="cw-stage-confirm" type="button">Сохранить черновики</button>'+
   '<button id="cw-stage-cancel" type="button">Отмена</button></section>':'';
- const existing=cwWorkflowTestMode&&cwNoteHasWorkspace(n.id)
+ const existing=cwWorkflowEnabled()&&cwNoteHasWorkspace(n.id)
   ?'<p class="muted">Рабочая область этой заметки уже создана. Варианты остаются вне сюжета.</p>':'';
- const handoffAvailable=cwWorkflowTestMode&&!cwNoteHasWorkspace(n.id);
+ const handoffAvailable=cwWorkflowEnabled()&&!cwNoteHasWorkspace(n.id);
  const expanded=handoffAvailable&&cwHandoffNoteId===n.id&&!!cwHandoffPrompt;
  const handoff=handoffAvailable?'<section class="cw-chatgpt-handoff" aria-label="Передача задания в ChatGPT">'+
   '<button id="cw-handoff-request" type="button">Запрос для ChatGPT</button>'+
@@ -1398,7 +1402,7 @@ function renderGapInspector(el,n){
  };
 }
 
-function gapAnchor(end){if(end.kind==='gap_note'){const n=gnby(end.id);if(!n||n.parent!==state.view)return null;const h=document.querySelector(`[data-gap-note="${n.id}"]`)?.offsetHeight||115;return {x:n.x+126,y:n.y+h/2}};
+function gapAnchor(end){if(end.kind==='gap_note'){const n=gnby(end.id);if(!n||n.parent!==state.view||cwNoteHasWorkspace(n.id))return null;const h=document.querySelector(`[data-gap-note="${n.id}"]`)?.offsetHeight||115;return {x:n.x+126,y:n.y+h/2}};
  if(end.kind==='semantic_field'){const f=fby(end.id);return f&&f.parent===state.view?{x:f.x+f.width/2,y:f.y+f.height/2}:null;}
  if(end.kind==='plot_node'){const n=nby(end.id);return n&&n.parent===state.view?nodeCenter(n):null;}return null;}
 
@@ -2194,7 +2198,7 @@ function showProjectManager(){
  $('pm-export').onclick=exportProject;$('pm-retry').onclick=async()=>{if(!remote.connected)return fail('Подключите Site');if(remote.blocked)return fail('Конфликт или незавершённое локальное сохранение. Экспортируйте JSON, затем согласуйте изменения вручную.');try{remote.dirty=true;await flushRemote();close()}catch(e){fail(e)}};
  $('pm-file').onchange=async e=>{const f=e.target.files?.[0];if(!f)return;try{const src=JSON.parse(await f.text());let g,name;if(src.format==='plot-architect/project-1'){g=src.project.graph;name=src.project.name}else if(src.graph){g=src.graph;name=src.name||'Импортированный сюжет'}else{g=src;name='Импортированный сюжет'};g=validateImported(g);await createProject(name,g);close()}catch(err){fail(err)}};
  $('pm-import').onclick=()=>$('pm-file').click();
- $('pm-connect').onclick=async()=>{try{if(remote.connected){await flushRemote();remote.connected=false;remote.token=null;remote.blocked=false;activeRegistryStorage=REGISTRY_KEY;registry=readLocalRegistry();const id=registry.activeId;activeProjectId=id;KEY=KEY_PREFIX+id;state=JSON.parse(localStorage.getItem(KEY)||'null')||(id===STARTER_LOCAL_ID?structuredClone(STARTER_GRAPH):seed());history=[];selected=null;save();render();fit();close();note('Локальный режим')}else{await connectSite();close()}}catch(err){fail(err)}};
+ $('pm-connect').onclick=async()=>{try{if(remote.connected){await flushRemote();remote.connected=false;remote.token=null;remote.blocked=false;cwLocalWorkflowEnabled=false;cwClearDraftSelection();cwClearDraftMoves();activeRegistryStorage=REGISTRY_KEY;registry=readLocalRegistry();const id=registry.activeId;activeProjectId=id;KEY=KEY_PREFIX+id;state=JSON.parse(localStorage.getItem(KEY)||'null')||(id===STARTER_LOCAL_ID?structuredClone(STARTER_GRAPH):seed());history=[];selected=null;save();render();fit();close();note('Локальный режим')}else{await connectSite();close()}}catch(err){fail(err)}};
 }
 function readLocalRegistry(){try{const v=JSON.parse(localStorage.getItem(REGISTRY_KEY));if(Array.isArray(v.projects)&&v.activeId)return v}catch{}return {activeId:STARTER_LOCAL_ID,projects:[{id:STARTER_LOCAL_ID,name:STARTER_NAME,revision:STARTER_GRAPH.revision,origin:STARTER_ORIGIN}]}}
 function blankGraph(){return {version:1,revision:0,nextNode:1,nextEdge:1,nextField:1,nextLine:2,view:null,nodes:[],edges:[],fields:[],lanes:[{id:'l1',title:'Основная линия',color:COLORS[0],y:200}]}}
@@ -2250,7 +2254,10 @@ async function flushRemote(){
 async function connectSite(silent=false){
  const health=await fetch('/api/health').then(r=>r.json()).catch(()=>null);
  if(!health?.ok)throw Error('Site API недоступен. В этом HTML работают только локальные проекты.');
- const data=await apiRequest('/api/projects');remote.connected=true;remote.blocked=false;remote.dirty=false;activeRegistryStorage=SITE_REGISTRY_KEY;
+ cwLocalWorkflowEnabled=location.hostname==='127.0.0.1'
+   &&health.authMode==='node-loopback'&&health.authenticated===true
+   &&health.workflowEnabled===true;
+  const data=await apiRequest('/api/projects');remote.connected=true;remote.blocked=false;remote.dirty=false;activeRegistryStorage=SITE_REGISTRY_KEY;
  if(!data.projects.length){const created=await apiRequest('/api/projects',{method:'POST',body:{name:'Новая история',graph:blankGraph()}});registry={activeId:created.id,projects:[{id:created.id,name:created.name,revision:created.revision}]};remote.revision=created.revision;activeProjectId=created.id;KEY=KEY_PREFIX+created.id;state=validateImported(created.graph);selected=null;selectedNodeIds.clear();linkFrom=null;history=[];state.view=null;recomputeFieldTags();try{localStorage.removeItem(PENDING_PREFIX+created.id)}catch{};save(false);updateProjectLabel();render();note('Первый проект создан на Site')}
  else{let last;try{last=JSON.parse(localStorage.getItem(SITE_REGISTRY_KEY)||'null')?.activeId}catch{};registry={activeId:data.projects.some(p=>p.id===last)?last:data.projects[0].id,projects:data.projects.map(p=>({id:p.id,name:p.name,revision:p.revision}))};remote.revision=0;await openProject(registry.activeId);note('Подключено к Site')}
 }
