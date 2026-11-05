@@ -7,7 +7,7 @@ import {previewDraftAcceptance,previewReplacementStart,canonicalProjection} from
 import {previewReplacementReconnection} from '../src/creative_workflow_reconnection.mjs';
 import {previewCompleteReplacement,previewCancelReplacement} from '../src/creative_workflow_lifecycle.mjs';
 import {previewStageNoteAlternatives} from '../src/creative_workflow_note_staging.mjs';
-import {commitSyntheticWorkflowCommand} from '../src/creative_workflow_transactional_spike.mjs';
+import {commitSyntheticWorkflowCommand,previewWorkflowCommand} from '../src/creative_workflow_transactional_spike.mjs';
 
 const clone=x=>structuredClone(x);
 const fails=async(fn,code)=>await assert.rejects(fn,e=>e?.code===code);
@@ -305,4 +305,48 @@ test('preview placement cannot mutate data and concurrent stale write fails clos
  assert.equal(current(sqlite).nodes.find(n=>n.id==='a').x,0);
  assert.deepEqual(counts(sqlite),{revision:1,history:2,receipts:1});
  assert.ok(snapshot.includes('"workspaceId":"w1"'));
+});
+
+test('draft arrow create is one verified revision and receipt without canon changes',async()=>{
+ const {db,sqlite}=syntheticDB();seed(sqlite);
+ const original=current(sqlite),edge={id:'ec',from:'a',to:'c',type:'hinders'};
+ const command={kind:'add_draft_edge',workspaceId:'w1',edge};
+ const preview=(await previewWorkflowCommand(db,{
+  projectId:'project-1',expectedRevision:0,command
+ })).preview;
+ assert.equal(preview.edge.id,'ec');
+ assert.deepEqual(current(sqlite),original,'preview does not write');
+ const full={...command,expectedPreview:preview};
+ const result=await send(db,full,0,'draft-create-1');
+ assert.equal(result.revision,1);
+ assert.deepEqual(counts(sqlite),{revision:1,history:2,receipts:1});
+ assert.deepEqual(canonicalProjection(current(sqlite)),canonicalProjection(original));
+ assert.equal(current(sqlite).edges.find(e=>e.id==='ec').workspaceId,'w1');
+ assert.equal((await send(db,full,0,'draft-create-1')).replayed,true);
+ assert.deepEqual(counts(sqlite),{revision:1,history:2,receipts:1});
+ await fails(()=>send(db,{...full,edge:{...edge,type:'causes'}},0,'draft-create-1'),'OPERATION_ID_REUSED');
+ assert.deepEqual(historical(sqlite,1),current(sqlite));
+});
+test('draft rewire preserves source edge ID and type with CAS and stale rejection',async()=>{
+ const {db,sqlite}=syntheticDB();seed(sqlite);
+ const g=current(sqlite),command={kind:'rewire_draft_edge',workspaceId:'w1',
+  edgeId:'eb',to:'a'};
+ const preview=(await previewWorkflowCommand(db,{
+  projectId:'project-1',expectedRevision:0,command
+ })).preview;
+ assert.equal(preview.before.to,'c');
+ assert.equal(preview.after.to,'a');
+ const result=await send(db,{...command,expectedPreview:preview},0,'draft-rewire-1');
+ assert.equal(result.revision,1);
+ const next=current(sqlite),edge=next.edges.find(e=>e.id==='eb');
+ assert.equal(edge.to,'a');
+ assert.equal(edge.from,'b');
+ assert.equal(edge.type,'precedes');
+ assert.equal(edge.workspaceId,'w1');
+ assert.deepEqual(canonicalProjection(next),canonicalProjection(g));
+ assert.deepEqual(counts(sqlite),{revision:1,history:2,receipts:1});
+ await fails(()=>send(db,{kind:'add_draft_edge',workspaceId:'w1',
+  edge:{id:'ee',from:'c',to:'a',type:'precedes'},expectedPreview:preview},
+  0,'stale-draft-create'),'REVISION_CONFLICT');
+ assert.equal(current(sqlite).edges.length,g.edges.length);
 });
