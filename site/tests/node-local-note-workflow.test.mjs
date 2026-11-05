@@ -88,10 +88,15 @@ test('default-off gateway remains isolated and cannot save drafts',async t=>{
  const h=await harness(t,false);
  const list=await h.tool('create_project',{name:'Проверка закрытого режима'});
  const id=list.data.project_id;
+ const path='/api/projects/'+id;
+ const original=await h.rest(path);
+ const graph=structuredClone(original.data.graph);
+ graph.gapNotes=[{id:'gn1',title:'Заметка',text:'Синтетический запрос',x:100,y:420,parent:null,status:'pending'}];
+ assert.equal((await h.rest(path,'PUT',{name:original.data.name,expectedRevision:0,graph})).status,200);
  const r=await h.tool('preview_note_drafts',{
-   project_id:id,note_id:'gn1',source_revision:0,
+   project_id:id,note_id:'gn1',source_revision:1,
    generation_id:'syntheticDisabled0001',proposal
  });
  assert.match(r.error,/WORKFLOW_DISABLED/);
- assert.equal((await h.rest('/api/projects/'+id)).data.revision,0);
+ assert.equal((await h.rest(path)).data.revision,1);
 });
