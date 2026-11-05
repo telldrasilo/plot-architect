@@ -260,6 +260,7 @@ let cwAcceptanceReview=null;
 const cwDropRects=new Map();
 let cwDragDropReview=null;
 let cwActiveDraftDragCancel=null;
+let cwActiveDraftLinkGesture=null;
 function cwDropRectFor(area){
  const key=activeProjectId+'::'+area.id;
  if(!cwDropRects.has(key)){
@@ -624,6 +625,141 @@ function cwDrawDraftConnections(svg,area,links,sockets,moves=new Map()){
   if(left){left.setAttribute('cx',ax);left.setAttribute('cy',ay)}
   if(right){right.setAttribute('cx',bx);right.setAttribute('cy',by)}
  }
+}
+function cwDraftTargetAt(x,y,workspaceId,sourceId,exceptEdgeId=null){
+ const target=document.elementFromPoint(x,y)?.closest?.('[data-cw-node]');
+ const nodeId=target?.dataset.cwNode;
+ if(!nodeId||nodeId===sourceId||!state.nodes.some(n=>n.id===nodeId&&n.workspaceId===workspaceId))
+  return null;
+ if(state.edges.some(e=>e.workspaceId===workspaceId&&e.from===sourceId
+  &&e.to===nodeId&&e.id!==exceptEdgeId))return null;
+ return nodeId;
+}
+function cwBeginDraftLinkDrag(event,source,area,handle,svg,getSockets,getBounds){
+ event.preventDefault();event.stopPropagation();
+ if(event.button!==0||event.ctrlKey||event.metaKey||!cwWorkflowEnabled()
+  ||cwActiveDraftLinkGesture||cwAcceptanceBusy||cwDragDropReview)return;
+ if(!cwCleanForOperation()){
+  note('Завершите сохранение проекта перед созданием стрелки');return;
+ }
+ const sourcePort=proposeFreeSocket({nodeId:source.id,role:'source',
+  layout:getSockets(),bounds:getBounds()});
+ const startX=event.clientX,startY=event.clientY;
+ let moved=false,targetId=null;
+ const ns='http://www.w3.org/2000/svg';
+ const guide=document.createElementNS(ns,'path');guide.classList.add('cw-draft-link-guide');
+ guide.setAttribute('aria-hidden','true');svg.append(guide);
+ const dot=document.createElementNS(ns,'circle');dot.classList.add('cw-draft-link-candidate');
+ dot.setAttribute('r','6');dot.setAttribute('aria-hidden','true');
+ dot.setAttribute('hidden','');svg.append(dot);
+ const clearTarget=()=>{
+  for(const element of document.querySelectorAll('.cw-draft-link-target'))
+   element.classList.remove('cw-draft-link-target');
+ };
+ const cleanup=()=>{
+  handle.removeEventListener('pointermove',move);
+  handle.removeEventListener('pointerup',end);
+  handle.removeEventListener('pointercancel',cancel);
+  cwActiveDraftLinkGesture=null;
+  guide.remove();dot.remove();clearTarget();
+ };
+ const move=e=>{
+  e.preventDefault();e.stopPropagation();
+  if(!moved&&Math.hypot(e.clientX-startX,e.clientY-startY)<5)return;
+  moved=true;
+  targetId=cwDraftTargetAt(e.clientX,e.clientY,area.id,source.id);
+  clearTarget();
+  if(targetId)document.querySelector('[data-cw-node="'+targetId+'"]')
+   ?.classList.add('cw-draft-link-target');
+  const target=targetId?proposeFreeSocket({nodeId:targetId,role:'target',
+   layout:getSockets(),bounds:getBounds()}):pointerToWorld(e.clientX,e.clientY);
+  const x=sourcePort.x-area.x,y=sourcePort.y-area.y;
+  const dx=Math.max(28,Math.abs(target.x-sourcePort.x)*.4);
+  guide.setAttribute('d','M'+x+','+y+' C'+(x+dx)+','+y+' '+
+   (target.x-area.x-dx)+','+(target.y-area.y)+' '+
+   (target.x-area.x)+','+(target.y-area.y));
+  guide.classList.toggle('cw-draft-link-valid',!!targetId);
+  dot.toggleAttribute('hidden',!targetId);
+  if(targetId){dot.setAttribute('cx',target.x-area.x);
+   dot.setAttribute('cy',target.y-area.y)}
+ };
+ const end=e=>{
+  e.preventDefault();e.stopPropagation();
+  if(moved)targetId=cwDraftTargetAt(e.clientX,e.clientY,area.id,source.id);
+  cleanup();
+  if(moved&&targetId)void cwCommitDraftEdge({
+   kind:'add_draft_edge',workspaceId:area.id,
+   edge:{id:'dedge-'+crypto.randomUUID(),from:source.id,to:targetId,type:'precedes'}
+  });
+ };
+ const cancel=e=>{e?.stopPropagation();cleanup()};
+ cwActiveDraftLinkGesture={cancel};
+ handle.setPointerCapture(event.pointerId);
+ handle.addEventListener('pointermove',move);
+ handle.addEventListener('pointerup',end);
+ handle.addEventListener('pointercancel',cancel);
+}
+async function cwCommitDraftEdge(command){
+ if(!cwCleanForOperation()){note('Проект ещё синхронизируется');return}
+ cwAcceptanceBusy=true;
+ const projectId=activeProjectId,revision=remote.revision;
+ let sent=false,verified=false;
+ const applyReadback=latest=>{
+  if(activeProjectId!==projectId||remote.dirty||remote.blocked||
+    !Number.isSafeInteger(latest.revision)||latest.revision<=revision)
+   throw Error('Версия проекта изменилась во время записи');
+  let edge=latest.graph?.edges?.find(e=>e.id===(command.edge?.id||command.edgeId));
+  if(!edge||edge.workspaceId!==command.workspaceId||
+   (command.kind==='add_draft_edge'
+    ?edge.from!==command.edge.from||edge.to!==command.edge.to||edge.type!==command.edge.type
+    :edge.to!==command.to))
+   throw Error('Черновая стрелка не подтверждена');
+  state=validateImported(latest.graph);remote.revision=latest.revision;
+  remote.dirty=false;verified=true;
+  try{localStorage.removeItem(PENDING_PREFIX+projectId)}catch{}
+  recomputeFieldTags();save(false);render();
+  note('Черновая стрелка сохранена');
+ };
+ try{
+  const preview=await cwWorkflowRequest(projectId,'preview',{
+   expectedRevision:revision,command});
+  const plan=preview.preview;
+  if(activeProjectId!==projectId||remote.revision!==revision||remote.dirty||
+   remote.blocked||!plan||plan.workspaceId!==command.workspaceId||
+   plan.autoRewiredEdgeIds?.length)
+   throw Error('Проверка черновой стрелки устарела');
+  if(command.kind==='add_draft_edge'&&(
+    plan.edge?.id!==command.edge.id||plan.edge?.from!==command.edge.from||
+    plan.edge?.to!==command.edge.to||plan.edge?.draftRelation!=='internal'))
+   throw Error('Сервер вернул неожиданную стрелку');
+  if(command.kind==='rewire_draft_edge'&&(
+    plan.edgeId!==command.edgeId||plan.after?.to!==command.to))
+   throw Error('Сервер вернул неожиданное переподключение');
+  sent=true;
+  const receipt=await cwWorkflowRequest(projectId,'apply',{
+   expectedRevision:revision,operationId:crypto.randomUUID(),
+   command:{...command,expectedPreview:plan}});
+  const latest=await apiRequest('/api/projects/'+encodeURIComponent(projectId));
+  if(latest.revision<receipt.revision)throw Error('Устаревшая серверная ревизия');
+  applyReadback(latest);
+ }catch(err){
+  // Never blindly replay an ambiguous write with a new operation ID.
+  if(sent&&!verified&&activeProjectId===projectId){
+   try{
+    const latest=await apiRequest('/api/projects/'+encodeURIComponent(projectId));
+    const edge=latest.graph?.edges?.find(e=>e.id===(command.edge?.id||command.edgeId));
+    if(edge?.workspaceId===command.workspaceId&&(
+      command.kind==='add_draft_edge'
+        ?edge.from===command.edge.from&&edge.to===command.edge.to
+        :edge.to===command.to
+    ))applyReadback(latest);
+   }catch{}
+  }
+  if(!verified){
+   if(err.code==='REVISION_CONFLICT')remote.blocked=true;
+   note('Стрелка не сохранена: '+err.message);
+  }
+ }finally{cwAcceptanceBusy=false}
 }
 function cwBeginDraftDrag(event,card,node,area,svg,links,byId,getSockets){
  event.stopPropagation();
@@ -1150,6 +1286,25 @@ function renderCreativeWorkspacePreview(){
     height:card?.offsetHeight||105}];
   }));
   drawnSockets=layoutEdgeSockets({nodes,edges:internals,bounds:socketBounds,mode:'full'});
+  if(persisted&&cwWorkflowEnabled()&&!cwDragDropReview){
+   for(const n of nodes){
+    const card=[...box.querySelectorAll('[data-cw-node]')]
+      .find(el=>el.dataset.cwNode===n.id);
+    if(!card)continue;
+    const free=proposeFreeSocket({nodeId:n.id,role:'source',
+     layout:drawnSockets,bounds:socketBounds});
+    const handle=document.createElement('button');
+    handle.type='button';handle.className='cw-draft-source';
+    handle.dataset.cwLinkSource=n.id;
+    handle.setAttribute('aria-label','Начать стрелку от черновика «'+n.title+'»');
+    handle.title='Протяните стрелку к другому черновику';
+    handle.style.left=(free.x-n.x)+'px';handle.style.top=(free.y-n.y)+'px';
+    handle.addEventListener('pointerdown',e=>cwBeginDraftLinkDrag(
+     e,n,area,handle,svg,()=>drawnSockets,()=>socketBounds));
+    handle.addEventListener('click',e=>e.stopPropagation());
+    card.append(handle);
+   }
+  }
   for(const port of drawnSockets.ports.values()){
    const dot=document.createElementNS(namespace,'circle');
    dot.setAttribute('class','cw-preview-socket');
@@ -2503,6 +2658,9 @@ $('export').onclick=()=>exportProject();
 document.addEventListener('keydown',e=>{
  if(e.code==='Space'&&!modalOpen&&!e.target.closest('input,textarea,select,button')){spacePan=true;e.preventDefault()}
  if(e.key==='Escape'){
+  if(cwActiveDraftLinkGesture){
+   e.preventDefault();cwActiveDraftLinkGesture.cancel();return;
+  }
   if(cwActiveLinkGesture){
    e.preventDefault();cwActiveLinkGesture.cancel();return;
   }
@@ -2531,6 +2689,7 @@ document.addEventListener('keyup',e=>{if(e.code==='Space')spacePan=false;if(!e.c
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&!modalOpen)document.body.classList.add('pa-multi-modifier')},true);
 window.addEventListener('blur',()=>{
  spacePan=false;document.body.classList.remove('pa-multi-modifier');
+ if(cwActiveDraftLinkGesture)cwActiveDraftLinkGesture.cancel();
  if(cwActiveLinkGesture)cwActiveLinkGesture.cancel();
  if(cwActiveDraftDragCancel)cwActiveDraftDragCancel();
  if(interaction)cancelGesture();
