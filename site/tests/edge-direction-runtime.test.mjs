@@ -7,8 +7,8 @@ const editor=readFileSync(new URL('../src/editor.js',import.meta.url),'utf8');
 const html=readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
 
 test('V2 midpoint helper is mirrored exactly into the browser editor',()=>{
- const start='/* Graphite edge direction V2 generated start: site/src/edge_direction_geometry.mjs */\\n';
- const end='\\n/* Graphite edge direction V2 generated end */';
+ const start='/* Graphite edge direction V2 generated start: site/src/edge_direction_geometry.mjs */\n';
+ const end='\n/* Graphite edge direction V2 generated end */';
  const embedded=start+source.replace(/^export /gm,'')+end;
  assert.ok(editor.includes(embedded),'the browser must execute the tested geometry');
  assert.ok(html.includes(editor),'inline HTML must mirror complete editor runtime');
