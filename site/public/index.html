@@ -601,6 +601,69 @@ function proposeFreeSocket({nodeId,role,layout,bounds,options={}}={}){
 }
 
 /* CW-004 generated geometry end */
+/* Graphite edge direction V2 generated start: site/src/edge_direction_geometry.mjs */
+/**
+ * Graphite edge direction V2: place a visual arrow on the *complete* SVG path.
+ *
+ * getTotalLength/getPointAtLength measure the rendered route, including bends
+ * and curves. No endpoint is shortened and no graph data is changed.
+ * This is deliberately independent from DOM mutation and persistence.
+ */
+const finiteDirectionNumber=value=>typeof value==='number'&&Number.isFinite(value);
+
+function directionAtPathFraction(path,{fraction=.5,tangentWindow=2}={}){
+ if(!path||typeof path.getTotalLength!=='function'
+   ||typeof path.getPointAtLength!=='function'
+   ||!finiteDirectionNumber(fraction)||fraction<=0||fraction>=1
+   ||!finiteDirectionNumber(tangentWindow)||tangentWindow<=0)return null;
+ let length,center,before,after;
+ try{
+  length=path.getTotalLength();
+  if(!finiteDirectionNumber(length)||length<=0)return null;
+  const distance=length*fraction;
+  center=path.getPointAtLength(distance);
+  const sample=Math.min(tangentWindow,distance,length-distance);
+  before=path.getPointAtLength(distance-sample);
+  after=path.getPointAtLength(distance+sample);
+  if(![center?.x,center?.y,before?.x,before?.y,after?.x,after?.y]
+   .every(finiteDirectionNumber))return null;
+  let dx=after.x-before.x,dy=after.y-before.y;
+  if(Math.hypot(dx,dy)<1e-7){
+   before=path.getPointAtLength(0);
+   after=path.getPointAtLength(length);
+   dx=after.x-before.x;dy=after.y-before.y;
+   if(!finiteDirectionNumber(dx)||!finiteDirectionNumber(dy)
+     ||Math.hypot(dx,dy)<1e-7)return null;
+  }
+  return {x:center.x,y:center.y,angle:Math.atan2(dy,dx)*180/Math.PI,
+   distance,length};
+ }catch{return null;}
+}
+
+/* Graphite edge direction V2 generated end */
+function cwPositionPathDirection(path,existing=null){
+ if(!path){existing?.remove();return null}
+ const at=directionAtPathFraction(path);
+ if(!at){existing?.remove();return null}
+ const arrow=existing||document.createElementNS('http://www.w3.org/2000/svg','path');
+ if(!existing){
+  arrow.classList.add('edge-direction-v2');
+  arrow.setAttribute('d','M-7 -4.5 L0 0 L-7 4.5');
+  arrow.setAttribute('stroke-linecap','round');
+  arrow.setAttribute('stroke-linejoin','round');
+  arrow.setAttribute('fill','none');
+  arrow.setAttribute('pointer-events','none');
+  arrow.setAttribute('aria-hidden','true');
+  path.after(arrow);
+ }
+ arrow.setAttribute('transform','translate('+at.x+' '+at.y+') rotate('+at.angle+')');
+ const style=getComputedStyle(path);
+ arrow.setAttribute('stroke',style.stroke&&style.stroke!=='none'?style.stroke:'#93908b');
+ arrow.setAttribute('stroke-width',String(Math.max(1.8,Number.parseFloat(style.strokeWidth)||1.8)));
+ arrow.setAttribute('opacity',style.opacity||'1');
+ return arrow;
+}
+
 
 const LEGACY_KEY='plot-architect-edge-clarity-v09-20261101';
 const REGISTRY_KEY='pa-site01-project-registry';
@@ -2437,7 +2500,7 @@ function renderEdges(){
    const start=sockets.ports.get(socketKey(e.id,'source'));
    const finish=sockets.ports.get(socketKey(e.id,'target'));
    const portMarkup=(port)=>port?`<circle class="edge-socket ${active?'edge-socket-active':''}" data-edge-socket="${esc(port.key)}" data-socket-node="${esc(port.nodeId)}" data-socket-role="${port.role}" cx="${port.x}" cy="${port.y}" r="${socketUiMetrics({scale:pan.scale}).visualRadiusWorld}"/>`:'';
-   c+=`<g data-edge="${esc(e.id)}" data-routed="${q.routed?'yes':'no'}"><path class="edge ${kind} ${active?'selected':''} ${faded?'faded':''} ${keep&&!(keep.has(e.from)&&keep.has(e.to))?'focus-muted':''}" marker-end="url(#${active?'arrOn':'arr'})" d="${q.d}"/><path class="edge-hit" d="${q.d}" data-edge-target="${esc(e.id)}"/>${portMarkup(start)}${portMarkup(finish)}</g>`;
+   c+=`<g data-edge="${esc(e.id)}" data-routed="${q.routed?'yes':'no'}"><path class="edge ${kind} ${active?'selected':''} ${faded?'faded':''} ${keep&&!(keep.has(e.from)&&keep.has(e.to))?'focus-muted':''}" d="${q.d}"/><path class="edge-hit" d="${q.d}" data-edge-target="${esc(e.id)}"/>${portMarkup(start)}${portMarkup(finish)}</g>`;
  }
  for(const g of plan.bridges){
    const c0=bridgeCoordinates(g);if(!c0)continue;
@@ -2451,6 +2514,12 @@ function renderEdges(){
    c+=`<g data-gap-link="${esc(l.id)}"><path class="edge-gap ${active?'selected':''}" marker-end="url(#${active?'arrOn':'arr'})" d="${d}"/><path class="edge-gap-hit" data-gap-link-target="${esc(l.id)}" d="${d}"/></g>`;
   }
   $('edges').innerHTML=c;
+  // A direction marker sits ON the full socket-to-socket route: no endpoint trim.
+  for(const group of $('edges').querySelectorAll('g[data-edge]')){
+   const line=group.querySelector('path.edge');
+   const arrow=cwPositionPathDirection(line);
+   if(arrow)arrow.dataset.edgeDirection=group.dataset.edge;
+  }
   $('edges').querySelectorAll('[data-gap-link-target]').forEach(p=>p.onclick=e=>{e.stopPropagation();selected={type:'gapLink',id:p.dataset.gapLinkTarget};render()});
  $('edges').querySelectorAll('[data-edge-target]').forEach(p=>p.onclick=e=>{e.stopPropagation();selected={type:'edge',id:p.dataset.edgeTarget};render()});
  $('edges').querySelectorAll('[data-bridge-target]').forEach(p=>{p.onclick=e=>{e.stopPropagation();pickBridge(p.dataset.bridgeTarget)};p.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();pickBridge(p.dataset.bridgeTarget)}}});
