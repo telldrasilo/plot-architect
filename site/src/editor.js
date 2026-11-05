@@ -647,6 +647,35 @@ async function cwRunDraftMoveSave(){
 // Convert the common world-space port layout to each workspace-local SVG.
 // During a drag existing ports are frozen and merely translate with their
 // endpoint card; reflow happens only after the completed movement is rendered.
+// CW-003/004: visual ports and pointer targets share one screen-space metric policy.
+function cwPortSeparation(port,layout){
+ const group=layout?.byNode?.get(port.nodeId)?.[port.role==='source'?'outgoing':'incoming']||[];
+ let nearest=Infinity;
+ for(const p of group)if(p.key!==port.key)nearest=Math.min(nearest,Math.abs(p.y-port.y));
+ return nearest;
+}
+function cwApplySocketControlSize(handle){
+ const gap=Number(handle.dataset.cwPortGap??'Infinity');
+ const m=socketUiMetrics({scale:pan.scale,minSeparationWorld:gap});
+ const diameter=Math.max(m.visualDiameterPx,m.effectiveHitDiameterPx)/pan.scale;
+ handle.style.width=diameter+'px';handle.style.height=diameter+'px';
+ handle.style.minHeight='0';
+ handle.style.setProperty('--cw-socket-dot-size',m.visualDiameterPx/pan.scale+'px');
+ handle.dataset.cwSocketResolution=m.resolution;
+}
+function cwSizeSocketControl(handle,port,layout){
+ handle.dataset.cwPortGap=String(cwPortSeparation(port,layout));
+ cwApplySocketControlSize(handle);
+}
+function cwRefreshSocketVisuals(){
+ const metric=socketUiMetrics({scale:pan.scale});
+ for(const el of document.querySelectorAll('.edge-socket,.cw-preview-socket'))
+  el.setAttribute('r',String(metric.visualRadiusWorld));
+ for(const handle of document.querySelectorAll(
+  '.cw-free-source,.cw-rewire-handle,.cw-draft-source,.cw-draft-rewire'))
+  cwApplySocketControlSize(handle);
+}
+
 function cwDrawDraftConnections(svg,area,links,sockets,moves=new Map()){
  if(!sockets)return;
  const paths=new Map([...svg.querySelectorAll('[data-cw-edge]')].map(el=>[el.dataset.cwEdge,el]));
@@ -1393,6 +1422,7 @@ function renderCreativeWorkspacePreview(){
     handle.setAttribute('aria-label','Начать стрелку от черновика «'+n.title+'»');
     handle.title='Протяните стрелку к другому черновику';
     handle.style.left=(free.x-n.x)+'px';handle.style.top=(free.y-n.y)+'px';
+    cwSizeSocketControl(handle,free,drawnSockets);
     handle.addEventListener('pointerdown',e=>cwBeginDraftLinkDrag(
      e,n,area,handle,svg,()=>drawnSockets,()=>socketBounds));
     handle.addEventListener('click',e=>e.stopPropagation());
@@ -1404,7 +1434,7 @@ function renderCreativeWorkspacePreview(){
    dot.setAttribute('class','cw-preview-socket');
    dot.dataset.cwSocket=port.key;dot.dataset.cwSocketRole=port.role;
    dot.dataset.cwSocketNode=port.nodeId;
-   dot.setAttribute('r','5');
+   dot.setAttribute('r',String(socketUiMetrics({scale:pan.scale}).visualRadiusWorld));
    svg.append(dot);
   }
   if(persisted&&cwWorkflowEnabled()&&!cwDragDropReview){
@@ -1422,6 +1452,7 @@ function renderCreativeWorkspacePreview(){
     handle.title='Перенести конец черновой стрелки';
     handle.style.left=(port.x-target.x)+'px';
     handle.style.top=(port.y-target.y)+'px';
+    cwSizeSocketControl(handle,port,drawnSockets);
     handle.addEventListener('pointerdown',e=>cwBeginDraftLinkDrag(
       e,source,area,handle,svg,()=>drawnSockets,()=>socketBounds,edge));
     handle.addEventListener('click',e=>e.stopPropagation());
@@ -1488,6 +1519,7 @@ function renderCreativeWorkspacePreview(){
   }
   if(dropReviewPanel)cwPositionDropReview(dropReviewPanel,box,dropReviewIds);
  }
+ cwRefreshSocketVisuals();
 }
 
 function note(s){$('toast').textContent=s;$('toast').classList.add('on');clearTimeout(note.t);note.t=setTimeout(()=>$('toast').classList.remove('on'),2700)}
@@ -1837,6 +1869,7 @@ function renderEdges(){
    layout:sockets,bounds});
   handle.style.left=(free.x-node.x)+'px';
   handle.style.top=(free.y-node.y)+'px';
+  cwSizeSocketControl(handle,free,sockets);
  }
  const marker='<defs><marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#93908b" stroke-width="1.8"/></marker><marker id="arrOn" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#e4c78c" stroke-width="1.8"/></marker></defs>';
  let c=marker;
@@ -1847,7 +1880,7 @@ function renderEdges(){
    const kind=e.type==='causes'?'causal':e.type==='enables'?'enable':'';
    const start=sockets.ports.get(socketKey(e.id,'source'));
    const finish=sockets.ports.get(socketKey(e.id,'target'));
-   const portMarkup=(port)=>port?`<circle class="edge-socket ${active?'edge-socket-active':''}" data-edge-socket="${esc(port.key)}" data-socket-node="${esc(port.nodeId)}" data-socket-role="${port.role}" cx="${port.x}" cy="${port.y}" r="5"/>`:'';
+   const portMarkup=(port)=>port?`<circle class="edge-socket ${active?'edge-socket-active':''}" data-edge-socket="${esc(port.key)}" data-socket-node="${esc(port.nodeId)}" data-socket-role="${port.role}" cx="${port.x}" cy="${port.y}" r="${socketUiMetrics({scale:pan.scale}).visualRadiusWorld}"/>`:'';
    c+=`<g data-edge="${esc(e.id)}" data-routed="${q.routed?'yes':'no'}"><path class="edge ${kind} ${active?'selected':''} ${faded?'faded':''} ${keep&&!(keep.has(e.from)&&keep.has(e.to))?'focus-muted':''}" marker-end="url(#${active?'arrOn':'arr'})" d="${q.d}"/><path class="edge-hit" d="${q.d}" data-edge-target="${esc(e.id)}"/>${portMarkup(start)}${portMarkup(finish)}</g>`;
  }
  for(const g of plan.bridges){
@@ -2227,6 +2260,7 @@ function cwPositionRewireHandle(){
  }
  handle.dataset.rewireEdge=edge.id;
  handle.style.left=point.x+'px';handle.style.top=point.y+'px';
+ cwSizeSocketControl(handle,point,cwCanonicalSocketLayout);
 }
 function cwBeginCanonicalRewire(event){
  if(event.button!==0)return;
@@ -2593,6 +2627,7 @@ function updateCamera(){
  $('world').style.transform=`translate(${pan.x}px,${pan.y}px) scale(${pan.scale})`;
  $('zoom-label').textContent=Math.round(pan.scale*100)+'%';positionInspector();renderOverviewTitles();
  if(prior!==mode||lodOverview!==useOverview()){renderEdges();showNotice();}
+ cwRefreshSocketVisuals();
  renderOverview();
 }
 function centerAt(wx,wy,scale=null){

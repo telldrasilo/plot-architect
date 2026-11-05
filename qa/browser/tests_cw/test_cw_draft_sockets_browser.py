@@ -45,6 +45,10 @@ def main():
         page.on("pageerror",lambda exc:errors.append(str(exc)))
         page.set_content(HTML,wait_until="load")
         page.evaluate("(graph)=>__graphite.loadFixture(graph)",g)
+        page.evaluate("()=>__graphite.setZoomForTest(1)")
+        visual=page.evaluate("""() => [...document.querySelectorAll('[data-cw-socket]')].map(
+          el=>el.getBoundingClientRect().width)""")
+        assert all(abs(d-10)<1.5 for d in visual),visual
         result=snap(page)
         assert len(result["paths"])==3,result
         assert len(result["ports"])==6,result
