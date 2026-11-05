@@ -54,6 +54,8 @@ jobs:
         run: python qa/browser/tests_cw/test_cw_draft_drag_connect_browser.py
       - name: Verify draft arrow rewire keeps its old endpoint until confirmed
         run: python qa/browser/tests_cw/test_cw_draft_drag_rewire_browser.py
+      - name: Verify guarded draft relation type selection and CAS
+        run: python qa/browser/tests_cw/test_cw_draft_edge_type_browser.py
       - name: Verify pending note geometry recovery in synthetic Chromium
         run: python qa/browser/tests_cw/test_cw_pending_geometry_browser.py
       - name: Verify ChatGPT manual JSON handoff and isolated staging
