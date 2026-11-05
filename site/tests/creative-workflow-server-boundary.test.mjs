@@ -198,3 +198,73 @@ test('pure write guard accepts benign legacy graph update and rejects workflow c
  assert.equal(assertOrdinaryGraphWrite(before,after).nodes[0].title,'Изменённый канон');
  assert.throws(()=>assertOrdinaryGraphWrite(before,withDraft()),e=>e.code==='EXPLICIT_WORKFLOW_COMMAND_REQUIRED');
 });
+
+test('ordinary graph write tolerates draft key ordering and derived tags without changing stored drafts',()=>{
+  // Server normalization inserts autoFieldIds before size. Browser-side
+  // persistentGraph removes it and server normalization re-appends it last.
+  const stored=validateServerGraph(withDraft());
+  const draftStored=structuredClone(stored.nodes.find(n=>n.id==='draft-a'));
+  const incoming=structuredClone(stored);
+  const draft=incoming.nodes.find(n=>n.id==='draft-a');
+  delete draft.autoFieldIds;
+  draft.autoFieldIds=['f1']; // computed browser-only metadata; never accepted as a draft edit
+  incoming.gapNotes[0].text='Уточнённое авторское задание';
+  incoming.nodes.find(n=>n.id==='n1').title='Изменён канон';
+  const normalized=validateServerGraph(incoming);
+  assert.notEqual(JSON.stringify(draftStored),JSON.stringify(normalized.nodes.find(n=>n.id==='draft-a')),
+    'regression: raw JSON comparison would block this harmless technical difference');
+  const saved=assertOrdinaryGraphWrite(stored,incoming);
+  assert.equal(saved.gapNotes[0].text,'Уточнённое авторское задание');
+  assert.equal(saved.nodes.find(n=>n.id==='n1').title,'Изменён канон');
+  assert.deepEqual(saved.nodes.find(n=>n.id==='draft-a'),draftStored,
+    'server-owned protected draft is copied back byte-for-byte');
+  assert.deepEqual(saved.edges.filter(e=>e.workspaceId),stored.edges.filter(e=>e.workspaceId));
+  assert.deepEqual(saved.replacements,stored.replacements);
+});
+test('ordinary PUT can save note text with reordered staged draft keys but cannot edit draft content',async()=>{
+  const st=storage(),id=await project(st);
+  const stored=validateServerGraph(withDraft());
+  installDraft(st.sql,id,stored);
+  const incoming=structuredClone((await api(st.db,'GET','/api/projects/'+id)).body.graph);
+  // Mirrors persistentGraph(): calculated autoFieldIds removed from each
+  // draft, and the browser computes its own value while rendering.
+  for(const node of incoming.nodes)delete node.autoFieldIds;
+  incoming.gapNotes[0].text='Согласованный текст задачи';
+  const saved=await api(st.db,'PUT','/api/projects/'+id,{
+    name:'Синтетическая история',expectedRevision:1,graph:incoming
+  });
+  assert.equal(saved.status,200,JSON.stringify(saved.body));
+  assert.equal(saved.body.revision,2);
+  const readback=(await api(st.db,'GET','/api/projects/'+id)).body.graph;
+  assert.equal(readback.gapNotes[0].text,'Согласованный текст задачи');
+  for(const id of ['draft-a','draft-b','n2']){
+    assert.deepEqual(readback.nodes.find(n=>n.id===id),
+      stored.nodes.find(n=>n.id===id),'protected node '+id+' unchanged');
+  }
+  const malicious=structuredClone(readback);
+  malicious.nodes.find(n=>n.id==='draft-a').x+=50;
+  malicious.gapNotes[0].text='Следующее редактирование';
+  const rejected=await api(st.db,'PUT','/api/projects/'+id,{
+    name:'Синтетическая история',expectedRevision:2,graph:malicious
+  });
+  assert.equal(rejected.status,422,JSON.stringify(rejected.body));
+  assert.match(rejected.body.message,/PROTECTED_NODE_CHANGED/);
+  const after=(await api(st.db,'GET','/api/projects/'+id)).body;
+  assert.equal(after.revision,2);
+  assert.equal(after.graph.gapNotes[0].text,'Согласованный текст задачи');
+});
+test('ordinary PUT rejects meaningful changes even with reordered keys',()=>{
+  const before=validateServerGraph(withDraft());
+  for(const edit of [
+    n=>{n.title='Чужое заглавие'},
+    n=>{n.description='Подмена содержания'},
+    n=>{n.x+=1},
+    n=>{n.workspaceId='w-forged'},
+    n=>{n.manualTags.push('скрытое изменение')}
+  ]){
+    const next=structuredClone(before),node=next.nodes.find(n=>n.id==='draft-a');
+    edit(node);
+    assert.throws(()=>assertOrdinaryGraphWrite(before,next),
+      e=>e.code==='PROTECTED_NODE_CHANGED'||e.code==='WORKSPACE_NOT_FOUND');
+  }
+});
