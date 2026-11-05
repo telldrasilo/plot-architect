@@ -457,9 +457,7 @@ function cwBeginDraftDrag(event,card,node,area,svg,links,byId){
  event.stopPropagation();
  if(event.button!==0)return;
  if(!cwWorkflowEnabled())return;
- if(event.ctrlKey||event.metaKey){
-  event.preventDefault();cwToggleDraftSelection(node.id,area.id);return;
- }
+ if(event.ctrlKey||event.metaKey){event.preventDefault();return}
  if(!remote.connected||remote.blocked){
   note('Нет соединения с локальным проектом. Перемещение не сохранится');return;
  }
@@ -776,7 +774,10 @@ function renderCreativeWorkspacePreview(){
     // Canvas pointerdown normally starts a drag and may rerender the world,
     // destroying a button before its click can be dispatched.
     card.addEventListener('pointerdown',e=>cwBeginDraftDrag(e,card,n,area,svg,internals,nodeById));
-    card.addEventListener('click',e=>e.stopPropagation());
+    card.addEventListener('click',e=>{
+     e.stopPropagation();
+     if(cwWorkflowEnabled()&&(e.ctrlKey||e.metaKey))cwToggleDraftSelection(n.id,area.id);
+    });
     if(cwWorkflowEnabled()){
      card.setAttribute('aria-selected',cwSelectedWorkspaceId===area.id&&cwSelectedDraftIds.has(n.id)?'true':'false');
      card.addEventListener('keydown',e=>{
