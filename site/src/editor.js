@@ -1859,6 +1859,162 @@ function deleteSelected(){if(!selected)return;let s=selected;if(s.type==='gapNot
 function addNode(title,after=null,lids=null,at=null){let a=after?nby(after):null;const id='n'+state.nextNode++;const ys=visible().map(n=>n.y),mx=Math.max(170,...visible().map(n=>n.x));let base= at?{x:Math.round(at.x),y:Math.round(at.y)}:a?{x:a.x+350,y:a.y}: {x:mx+45,y:ys.length?Math.min(...ys)+90:230};let next={id,title,description:'',x:base.x,y:base.y,lineIds:lids||a?.lineIds?.slice(0,1)||[state.lanes[0].id],size:'normal',status:'approved',parent:state.view};commit(()=>{state.nodes.push(next);if(a)state.edges.push({id:'e'+state.nextEdge++,from:a.id,to:id,type:'precedes'})},'Событие добавлено');selected={type:'node',id};render()}
 function addAfter(id){notifyModal('Продолжить сюжет','Новое событие появится справа; связь означает порядок, не причину.','Что происходит дальше?',v=>addNode(v,id))}
 function createNode(at=null){notifyModal('Новое событие','Добавьте мысль на полотно. Положение можно изменить в любой момент.','Название события',v=>addNode(v,null,null,at))}
+// CW-003: one temporary overlay. It is not part of the graph and does
+// not change the canonical edge until a server revision is read back.
+let cwActiveLinkGesture=null;
+function cwLinkOverlay(){
+ const world=$('world');
+ let svg=world.querySelector('#cw-link-overlay');
+ if(svg)return svg;
+ const ns='http://www.w3.org/2000/svg';
+ svg=document.createElementNS(ns,'svg');
+ svg.id='cw-link-overlay';svg.classList.add('cw-link-overlay');
+ svg.setAttribute('aria-hidden','true');svg.hidden=true;
+ const line=document.createElementNS(ns,'path');line.classList.add('cw-link-guide');
+ const dot=document.createElementNS(ns,'circle');dot.classList.add('cw-link-candidate');
+ dot.setAttribute('r','6');dot.hidden=true;
+ svg.append(line,dot);world.append(svg);return svg;
+}
+function cwClearLinkTarget(){
+ for(const node of document.querySelectorAll('.cw-link-target'))
+  node.classList.remove('cw-link-target');
+}
+function cwEligibleLinkTarget(from,to){
+ if(!from||!to||from===to)return false;
+ const shown=new Set(visible().map(n=>n.id));
+ if(!shown.has(from)||!shown.has(to))return false;
+ if(state.edges.some(e=>e.from===from&&e.to===to&&!e.workspaceId))return false;
+ return true;
+}
+function cwLinkHitTarget(x,y,sourceId){
+ // A captured pointer never fires normal target pointerenter events.
+ const hit=document.elementFromPoint(x,y);
+ const el=hit?.closest?.('[data-node]');
+ const id=el?.dataset.node;
+ return cwEligibleLinkTarget(sourceId,id)?id:null;
+}
+function cwDrawLinkOverlay(from,to,valid){
+ const svg=cwLinkOverlay();
+ const dx=Math.max(65,Math.abs(to.x-from.x)*.42);
+ const path=svg.querySelector('.cw-link-guide');
+ path.setAttribute('d','M'+from.x+','+from.y+' C'+(from.x+dx)+','+from.y+
+  ' '+(to.x-dx)+','+to.y+' '+to.x+','+to.y);
+ svg.dataset.valid=valid?'true':'false';
+ svg.hidden=false;
+ const candidate=svg.querySelector('.cw-link-candidate');
+ candidate.hidden=!valid;
+ if(valid){candidate.setAttribute('cx',to.x);candidate.setAttribute('cy',to.y)}
+}
+function cwHideLinkOverlay(){
+ const svg=$('cw-link-overlay');if(svg)svg.hidden=true;
+ cwClearLinkTarget();
+}
+function cwBeginCanonicalLinkDrag(event,sourceId,handle){
+ if(event.button!==0||event.ctrlKey||event.metaKey)return;
+ event.preventDefault();event.stopPropagation();
+ if(cwActiveLinkGesture||cwAcceptanceBusy||cwDraftMoveEdits.size){
+  note('Дождитесь завершения сохранения');return;
+ }
+ if(!remote.connected||remote.blocked){
+  note('Для создания стрелки подключите локальный проект');return;
+ }
+ if(!visible().some(n=>n.id===sourceId))return;
+ const source=proposeFreeSocket({nodeId:sourceId,role:'source',
+  layout:cwCanonicalSocketLayout,bounds:cwCanonicalSocketBounds});
+ const startX=event.clientX,startY=event.clientY;
+ let dragged=false,target=null;
+ const cleanup=()=>{
+  handle.removeEventListener('pointermove',move);
+  handle.removeEventListener('pointerup',end);
+  handle.removeEventListener('pointercancel',cancel);
+  cwActiveLinkGesture=null;cwHideLinkOverlay();
+ };
+ const move=e=>{
+  e.preventDefault();e.stopPropagation();
+  if(!dragged&&Math.hypot(e.clientX-startX,e.clientY-startY)<5)return;
+  dragged=true;target=cwLinkHitTarget(e.clientX,e.clientY,sourceId);
+  cwClearLinkTarget();
+  if(target)document.querySelector('[data-node="'+target+'"]')?.classList.add('cw-link-target');
+  const point=target?proposeFreeSocket({nodeId:target,role:'target',
+   layout:cwCanonicalSocketLayout,bounds:cwCanonicalSocketBounds})
+   :pointerToWorld(e.clientX,e.clientY);
+  cwDrawLinkOverlay(source,point,!!target);
+ };
+ const end=e=>{
+  e.preventDefault();e.stopPropagation();
+  if(dragged)target=cwLinkHitTarget(e.clientX,e.clientY,sourceId);
+  cleanup();
+  if(!dragged){
+   linkFrom=sourceId;selected={type:'node',id:sourceId};
+   render();note('Выберите другое событие или протяните стрелку мышью');
+  }else if(target){
+   void cwCommitCanonicalLink(sourceId,target);
+  }
+ };
+ const cancel=e=>{e?.stopPropagation();cleanup()};
+ cwActiveLinkGesture={cancel};
+ handle.setPointerCapture(event.pointerId);
+ handle.addEventListener('pointermove',move);
+ handle.addEventListener('pointerup',end);
+ handle.addEventListener('pointercancel',cancel);
+}
+async function cwCommitCanonicalLink(from,to){
+ if(cwAcceptanceBusy)return;
+ if(cwDraftMoveEdits.size){note('Дождитесь сохранения черновиков');return}
+ cwAcceptanceBusy=true;
+ let projectId=null,edgeId=null,submitted=false,verified=false;
+ let prior=null;
+ const acceptReadback=(latest)=>{
+  if(activeProjectId!==projectId||remote.dirty||!Number.isSafeInteger(latest.revision))
+   throw Error('Проект изменился до подтверждения записи');
+  const edge=latest.graph?.edges?.find(e=>e.id===edgeId);
+  if(!edge||edge.from!==from||edge.to!==to||edge.type!=='precedes'||edge.workspaceId)
+   throw Error('Новая стрелка не подтверждена сервером');
+  history.push(prior);if(history.length>60)history.shift();
+  state=validateImported(latest.graph);remote.revision=latest.revision;
+  remote.blocked=false;remote.dirty=false;verified=true;
+  try{localStorage.removeItem(PENDING_PREFIX+projectId)}catch{}
+  selected={type:'edge',id:edgeId};selectedNodeIds.clear();
+  recomputeFieldTags();save(false);render();
+  note('Стрелка создана · тип связи можно изменить');
+ };
+ try{
+  projectId=activeProjectId;
+  if(!remote.connected||remote.blocked)throw Error('Проект не подключён');
+  if(remote.busy||remote.dirty)await flushRemote();
+  if(activeProjectId!==projectId||remote.blocked||remote.dirty||remote.busy)
+   throw Error('Проект изменился во время синхронизации');
+  if(!cwEligibleLinkTarget(from,to))throw Error('Недопустимое или повторное соединение');
+  const before=persistentGraph();prior=JSON.stringify(before);
+  const next=structuredClone(before);
+  let number=next.nextEdge;
+  while(next.edges.some(e=>e.id==='e'+number))number++;
+  edgeId='e'+number;next.nextEdge=number+1;
+  next.edges.push({id:edgeId,from,to,type:'precedes'});
+  next.revision=(state.revision||0)+1;
+  const expectedRevision=remote.revision;
+  submitted=true;
+  const applied=await apiRequest('/api/projects/'+encodeURIComponent(projectId),{
+   method:'PUT',body:{expectedRevision,name:projectName(),graph:next,
+    message:'Стрелка создана перетаскиванием'}
+  });
+  const latest=await apiRequest('/api/projects/'+encodeURIComponent(projectId));
+  if(latest.revision<applied.revision)throw Error('Сервер вернул устаревшую ревизию');
+  acceptReadback(latest);
+ }catch(err){
+  // A lost HTTP response does not authorize a second POST/PUT. Inspect the
+  // actual server result once before reporting an uncertain outcome.
+  if(submitted&&!verified&&projectId===activeProjectId&&edgeId){
+   try{
+    const latest=await apiRequest('/api/projects/'+encodeURIComponent(projectId));
+    const match=latest.graph?.edges?.find(e=>e.id===edgeId);
+    if(match?.from===from&&match?.to===to&&match?.type==='precedes')
+     acceptReadback(latest);
+   }catch{}
+  }
+  if(!verified)note('Стрелка не сохранена: '+err.message);
+ }finally{cwAcceptanceBusy=false}
+}
 function finishLink(to){const from=linkFrom;linkFrom=null;if(!from||from===to){note('Связь отменена');render();return}if(state.edges.some(e=>e.from===from&&e.to===to)){note('Такая связь уже существует');render();return}commit(()=>state.edges.push({id:'e'+state.nextEdge++,from,to,type:'precedes'}),'Создана последовательность: слева → направо')}
 function addLine(){notifyModal('Новая сюжетная линия','Линия — смысловая принадлежность, а не ограничение движения.', 'Название линии',v=>commit(()=>{state.lanes.push({id:'l'+state.nextLine++,title:v,color:COLORS[(state.lanes.length)%COLORS.length],y:Math.max(...state.lanes.map(x=>x.y))+260})},'Линия добавлена'))}
 function arrange(){const vis=visible();let levels=new Map(vis.map(n=>[n.id,0]));const seq=currentEdges().filter(e=>e.type==='precedes');let max=0,changed=true;for(let it=0;it<vis.length&&changed;it++){changed=false;for(const e of seq){let v=(levels.get(e.from)||0)+1;if(v>(levels.get(e.to)||0)&&v<=vis.length){levels.set(e.to,v);changed=true;max=Math.max(max,v)}}}if(changed){note('В последовательности есть цикл — невозможно упорядочить');return}const grouped=new Map();for(const n of vis){let k=levels.get(n.id)||0;if(!grouped.has(k))grouped.set(k,[]);grouped.get(k).push(n)}const future=new Map();for(const [level,ns] of grouped){ns.sort((a,b)=>(a.y||0)-(b.y||0));ns.forEach((n,i)=>future.set(n.id,{x:140+level*355,y:175+i*238}))}
@@ -2231,6 +2387,9 @@ $('export').onclick=()=>exportProject();
 document.addEventListener('keydown',e=>{
  if(e.code==='Space'&&!modalOpen&&!e.target.closest('input,textarea,select,button')){spacePan=true;e.preventDefault()}
  if(e.key==='Escape'){
+  if(cwActiveLinkGesture){
+   e.preventDefault();cwActiveLinkGesture.cancel();return;
+  }
   if(cwActiveDraftDragCancel){
    e.preventDefault();cwActiveDraftDragCancel();return;
   }
@@ -2256,6 +2415,7 @@ document.addEventListener('keyup',e=>{if(e.code==='Space')spacePan=false;if(!e.c
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&!modalOpen)document.body.classList.add('pa-multi-modifier')},true);
 window.addEventListener('blur',()=>{
  spacePan=false;document.body.classList.remove('pa-multi-modifier');
+ if(cwActiveLinkGesture)cwActiveLinkGesture.cancel();
  if(cwActiveDraftDragCancel)cwActiveDraftDragCancel();
  if(interaction)cancelGesture();
 });
