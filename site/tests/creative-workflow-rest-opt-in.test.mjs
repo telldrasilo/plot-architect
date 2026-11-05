@@ -240,3 +240,44 @@ test('legacy generic PUT still cannot update moved draft coordinates',async()=>{
  assert.equal(response.status,422);
  assert.equal((await graph(env,id)).graph.nodes.find(n=>n.id==='draft-a').x,230);
 });
+
+test('edit_draft_text uses one guarded SQLite transaction, receipt replay and canonical isolation',async()=>{
+ const {db,sql}=storage(),env={DB:db,CW_WORKFLOW_ENABLED:'true'},id=await create(env);
+ assert.equal((await apply(env,id,0,'stage-edit',stage())).status,200);
+ const before=(await graph(env,id)).graph;
+ const command={kind:'edit_draft_text',workspaceId:'w1',nodeId:'draft-a',
+  title:'Точная новая идея',description:'Деталь черновой последовательности'};
+ const p=await preview(env,id,1,command);
+ assert.equal(p.status,200,JSON.stringify(p.data));
+ assert.equal(p.data.preview.before.title,'Иной путь');
+ assert.equal(p.data.preview.after.title,command.title);
+ assert.deepEqual(counts(sql,id),{revision:1,history:2,receipts:1});
+ const body={expectedRevision:1,operationId:'edit-once',
+  command:{...command,expectedPreview:p.data.preview}};
+ const a=await request(env,'POST',path(id)+'apply',body);
+ assert.equal(a.status,200,JSON.stringify(a.data));
+ const b=await request(env,'POST',path(id)+'apply',body);
+ assert.equal(b.status,200);assert.equal(b.data.replayed,true);
+ assert.deepEqual(counts(sql,id),{revision:2,history:3,receipts:2});
+ const changed=(await graph(env,id)).graph;
+ assert.equal(changed.nodes.find(n=>n.id==='draft-a').title,command.title);
+ assert.equal(changed.nodes.find(n=>n.id==='draft-a').description,command.description);
+ assert.equal(changed.nodes.find(n=>n.id==='draft-a').workspaceId,'w1');
+ assert.deepEqual(changed.edges,before.edges);
+ assert.deepEqual(changed.workspaces,before.workspaces);
+ assert.deepEqual(changed.nodes.filter(n=>n.id!=='draft-a'),
+  before.nodes.filter(n=>n.id!=='draft-a'));
+ const read=await request(env,'POST','/mcp',{jsonrpc:'2.0',id:5,method:'tools/call',
+  params:{name:'get_project',arguments:{project_id:id,detail:'full'}}});
+ assert.equal(read.status,200);
+ assert.equal(JSON.stringify(read.data).includes(command.title),false);
+ const tampered=structuredClone(body);tampered.command.description='different';
+ const c=await request(env,'POST',path(id)+'apply',tampered);
+ assert.equal(c.status,409);assert.equal(c.data.error,'OPERATION_ID_REUSED');
+ const forged=structuredClone(changed);
+ forged.nodes.find(n=>n.id==='draft-a').title='generic bypass';
+ const put=await request(env,'PUT','/api/projects/'+id,{name:'Synthetic',
+  expectedRevision:2,graph:forged});
+ assert.equal(put.status,422);
+ assert.deepEqual(counts(sql,id),{revision:2,history:3,receipts:2});
+});
