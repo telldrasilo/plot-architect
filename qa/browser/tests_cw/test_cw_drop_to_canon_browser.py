@@ -15,6 +15,9 @@ PROJECT="cw-draft-drop-qa"
 
 def main():
     graph=story()
+    # A tall card reproduces the real reported overlap: a fixed 125px
+    # drop-review offset previously covered the lower part of its text.
+    graph["nodes"][1]["description"]="Длинное описание подготовленного события. " * 13
     graph["workspaces"].append({"id":"w2","taskId":"gn2","x":1260,"y":450,"width":420,"height":400})
     graph["nodes"].append({"id":"d","title":"Независимая версия","description":"Вторая область",
                             "x":1300,"y":510,"parent":None,"workspaceId":"w2","draftBranchId":"gamma"})
@@ -133,6 +136,31 @@ def main():
         page.mouse.move(x+dx,y+dy,steps=12)
         page.mouse.up()
 
+    def assert_review_next_to_card(page,node_id):
+        geometry=page.evaluate("""nodeId => {
+            const panel=document.querySelector('.cw-accept-review.cw-drop-review');
+            const card=[...document.querySelectorAll('.cw-preview-card')]
+                .find(el=>el.dataset.cwNode===nodeId);
+            if(!panel||!card)return null;
+            const a=panel.getBoundingClientRect(),b=card.getBoundingClientRect();
+            const w=Math.max(0,Math.min(a.right,b.right)-Math.max(a.left,b.left));
+            const h=Math.max(0,Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top));
+            return {
+                overlap:w*h,
+                gap:Math.min(
+                    Math.abs(a.left-b.right),Math.abs(b.left-a.right),
+                    Math.abs(a.top-b.bottom),Math.abs(b.top-a.bottom)
+                ),
+                visible:a.left>=8&&a.top>=8
+                    &&a.right<=document.documentElement.clientWidth-8
+                    &&a.bottom<=document.documentElement.clientHeight-8,
+                cardHeight:b.height
+            };
+        }""",node_id)
+        assert geometry is not None
+        assert geometry["overlap"]==0, geometry
+        assert geometry["visible"], geometry
+
     with sync_playwright() as playwright:
         browser=playwright.chromium.launch(headless=True,args=["--no-sandbox","--disable-dev-shm-usage"])
         context=browser.new_context(viewport={"width":1440,"height":920})
@@ -156,6 +184,8 @@ def main():
         drag(page,"a",20,-178)
         page.locator(".cw-accept-review.cw-drop-review").wait_for()
         assert page.locator(".cw-drop-ghost").count()==1
+        assert_review_next_to_card(page,"a")
+        assert page.locator('[data-cw-node="a"]').bounding_box()["height"]>125
         assert page.evaluate("() => __graphite.getState()")==state_before, "ghost preview must not mutate any plot node"
         assert "1 событие" in page.locator(".cw-accept-review").inner_text()
         assert db["previews"]==1 and db["applies"]==0 and db["put"]==0
@@ -174,6 +204,7 @@ def main():
         drag(page,"a",20,-178)
         page.locator(".cw-accept-review.cw-drop-review").wait_for()
         assert page.locator(".cw-drop-ghost").count()==2
+        assert_review_next_to_card(page,"a")
         assert db["reviewed"]["acceptNodeIds"]==["a","b"]
         assert db["reviewed"]["promoteEdgeIds"]==["ea"]
         assert len(db["reviewed"]["positionChanges"])==2
@@ -215,6 +246,7 @@ def main():
         page.evaluate("() => __graphite.fit()")
         drag(page,"c",0,-300)
         page.locator(".cw-accept-review.cw-drop-review").wait_for()
+        assert_review_next_to_card(page,"c")
         db["force_conflict"]=True
         page.get_by_role("button",name="Принять в сюжет").click()
         page.wait_for_function("() => !document.querySelector('.cw-accept-review')")
@@ -227,7 +259,8 @@ def main():
 
     print(json.dumps({"result":"PASS","accepted":2,"batches":db["applies"],
       "cases":["drag-out preview no write","Escape cancel","group coordinates",
-        "one accepted revision","reload","stale CAS rejected","canon isolation"]},
+        "one accepted revision","reload","stale CAS rejected","canon isolation",
+        "nonoverlap for tall, grouped and remaining cards"]},
       ensure_ascii=False))
 
 
