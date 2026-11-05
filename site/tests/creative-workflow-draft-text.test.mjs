@@ -59,7 +59,7 @@ test('new text is bounded; rejected before any mutation',()=>{
   command('','valid'),command('  ','valid'),command(' leading','valid'),
   command('trailing ','valid'),command('x'.repeat(301),'valid'),
   command('valid','x'.repeat(20001)),command('valid',null),
-  command(42,'valid'),command('valid',undefined)
+  command(42,'valid'),{...command(),description:undefined}
  ])assert.throws(()=>previewEditDraftText(g,args),error('DRAFT_TEXT_INVALID'));
  assert.throws(()=>previewEditDraftText(g,{...command(),title:'Черновик А',description:'Первый вариант'}),
   error('DRAFT_TEXT_UNCHANGED'));
