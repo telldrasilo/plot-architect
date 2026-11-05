@@ -49,6 +49,14 @@ def main():
         page.evaluate("()=>__graphite.setZoomForTest(1)")
         result=socket_snapshot(page)
         assert result["mode"]=="full",result["mode"]
+        visual=page.evaluate("""() => [...document.querySelectorAll('[data-edge-socket]')].map(
+          el=>el.getBoundingClientRect().width)""")
+        assert all(abs(d-10)<1.5 for d in visual),visual
+        page.evaluate("()=>__graphite.setZoomForTest(.75)")
+        scaled=page.evaluate("""() => [...document.querySelectorAll('[data-edge-socket]')].map(
+          el=>el.getBoundingClientRect().width)""")
+        assert all(abs(d-10)<1.5 for d in scaled),scaled
+        page.evaluate("()=>__graphite.setZoomForTest(1)")
         assert len(result["ports"])==8,result
         ports={v["key"]:v for v in result["ports"]}
         for e in fixture["edges"]:
