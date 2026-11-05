@@ -12,12 +12,12 @@
  * Existing Worker REST/MCP logic and business validations are unchanged.
  */
 import {createServer} from 'node:http';
-import {randomBytes, timingSafeEqual} from 'node:crypto';
+import {timingSafeEqual} from 'node:crypto';
 import worker from './worker.mjs';
 import {createNodeSqliteD1Adapter} from './node_sqlite_d1_adapter.mjs';
+import {createGraphiteBrowserSessionStore} from './node_local_browser_sessions.mjs';
 
 const COOKIE = 'graphite_local_session';
-const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const MAX_BODY = 2_300_000;
 const MCP_MAX_BODY = 200_000;
 const loginHtml = [
@@ -69,14 +69,21 @@ const readBody = async (req, maxBytes) => {
   return Buffer.concat(parts).toString('utf8');
 };
 
-export function createGraphiteLoopbackServer({database, editorHtml, token, workflowEnabled = false} = {}) {
+export function createGraphiteLoopbackServer({database, editorHtml, token,
+  workflowEnabled = false, browserSessions} = {}) {
   if (!database || typeof database.prepare !== 'function') throw new TypeError('SQLite DB required');
   if (typeof editorHtml !== 'string' || !editorHtml.includes('<!doctype html>')) {
     throw new TypeError('Canonical Graphite editor HTML required');
   }
   if (typeof token !== 'string' || token.length < 40) throw new TypeError('Strong local token required');
   const db = createNodeSqliteD1Adapter(database);
-  const sessions = new Map();
+  const sessions = browserSessions ?? createGraphiteBrowserSessionStore();
+  if (typeof sessions.issue !== 'function' ||
+    typeof sessions.isValid !== 'function' ||
+    typeof sessions.revoke !== 'function' ||
+    !Number.isSafeInteger(sessions.maxAgeSeconds)) {
+    throw new TypeError('Browser session store invalid');
+  }
   let failedLogins = 0, failedWindow = Date.now();
   const server = createServer((req, res) => {
     void handle(req, res).catch(error => {
@@ -102,9 +109,7 @@ export function createGraphiteLoopbackServer({database, editorHtml, token, workf
       ? req.headers.authorization.slice(7) : '';
     const tokenOk = safeMatch(bearer, token);
     const session = readCookie(req.headers.cookie);
-    const expires = sessions.get(session);
-    const cookieOk = !!session && !!expires && expires > Date.now();
-    if (session && expires && expires <= Date.now()) sessions.delete(session);
+    const cookieOk = !!session && sessions.isValid(session);
     const foreignOrigin = !!req.headers.origin && req.headers.origin !== origin;
     const mutating = !['GET', 'HEAD', 'OPTIONS'].includes(method);
 
@@ -129,15 +134,13 @@ export function createGraphiteLoopbackServer({database, editorHtml, token, workf
         return deny(res);
       }
       failedLogins = 0;
-      const sid = randomBytes(32).toString('base64url');
-      sessions.set(sid, Date.now() + SESSION_TTL_MS);
-      if (sessions.size > 10) sessions.delete(sessions.keys().next().value);
+      const sid = sessions.issue();
       return reply(res, 303, '', {'Location': '/',
-        'Set-Cookie': COOKIE + '=' + sid + '; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800'});
+        'Set-Cookie': COOKIE + '=' + sid + '; HttpOnly; SameSite=Strict; Path=/; Max-Age=' + sessions.maxAgeSeconds});
     }
     if (path === '/__local/logout' && method === 'POST') {
       if (!cookieOk || req.headers.origin !== origin) return deny(res, 403);
-      sessions.delete(session);
+      sessions.revoke(session);
       return reply(res, 303, '', {'Location': '/__local/login',
         'Set-Cookie': COOKIE + '=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0'});
     }
@@ -203,7 +206,6 @@ export function createGraphiteLoopbackServer({database, editorHtml, token, workf
       return 'http://127.0.0.1:' + server.address().port;
     },
     async close() {
-      sessions.clear();
       if (server.listening) await new Promise((resolve, reject) =>
         server.close(error => error ? reject(error) : resolve()));
     },
