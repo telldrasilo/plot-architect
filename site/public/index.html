@@ -1092,7 +1092,9 @@ function cwPersistedWorkspaceScene(){
  const ownerIds=new Set(owned.map(a=>a.id));
  const nodes=state.nodes.filter(n=>n.workspaceId&&ownerIds.has(n.workspaceId)).map(n=>{
   const position=cwDraftMoveEdits.get(n.id);
-  return position?{...n,x:position.x,y:position.y}:n;
+  // All canvas previews must work on copies. Never change state.nodes
+  // before the reviewed server acceptance has been confirmed.
+  return {...n,...(position?{x:position.x,y:position.y}:{})};
  });
  // Frame expands around moved drafts without altering stored workspace bounds.
  const workspaces=owned.map(area=>({...area,...cwDropRectFor(area)}));
