@@ -1487,6 +1487,7 @@ function gapAnchor(end){if(end.kind==='gap_note'){const n=gnby(end.id);if(!n||n.
  if(end.kind==='semantic_field'){const f=fby(end.id);return f&&f.parent===state.view?{x:f.x+f.width/2,y:f.y+f.height/2}:null;}
  if(end.kind==='plot_node'){const n=nby(end.id);return n&&n.parent===state.view?nodeCenter(n):null;}return null;}
 
+let cwCanonicalSocketLayout=null,cwCanonicalSocketBounds=null;
 function renderEdges(){
  memoRender={dims:new Map(),homes:new Map()};
  const keep=focusIds(),selectedId=selected?.type==='node'?selected.id:null,selectedEdge=selected?.type==='edge'?selected.id:null;
@@ -1499,6 +1500,16 @@ function renderEdges(){
  }));
  const sockets=layoutEdgeSockets({nodes:visibleNodes,edges:currentEdges(),
    bounds,mode:semanticZoomLevel()});
+ cwCanonicalSocketLayout=sockets;cwCanonicalSocketBounds=bounds;
+ for(const node of visibleNodes){
+  const handle=[...document.querySelectorAll('[data-link-source]')]
+   .find(el=>el.dataset.linkSource===node.id);
+  if(!handle)continue;
+  const free=proposeFreeSocket({nodeId:node.id,role:'source',
+   layout:sockets,bounds});
+  handle.style.left=(free.x-node.x)+'px';
+  handle.style.top=(free.y-node.y)+'px';
+ }
  const marker='<defs><marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#93908b" stroke-width="1.8"/></marker><marker id="arrOn" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#e4c78c" stroke-width="1.8"/></marker></defs>';
  let c=marker;
  for(const e of plan.visibleEdges){
@@ -1751,7 +1762,17 @@ function renderFieldInspector(el,f){el.hidden=false;
  $('f-zoom').onclick=()=>jumpToField(f.id);$('f-delete').onclick=()=>deleteField(f.id);$('close-inspect').onclick=()=>{selected=null;render()};
 }
 
-function renderNodes(){const host=$('nodes');host.innerHTML='';const keep=focusIds(),chosen=new Set(groupIds()),parentsWithChildren=new Set(state.nodes.filter(k=>k.parent).map(k=>k.parent));for(const n of visible()){const rewrite=rewriteBy(n.id);const el=document.createElement('article');el.className='node '+(n.size||'normal')+(rewrite?' rewrite-draft':'')+(chosen.has(n.id)?' selected':'')+(n.status==='proposed'?' node-proposed':'')+(keep&&!keep.has(n.id)?' focus-muted':'');el.dataset.node=n.id;el.style.left=n.x+'px';el.style.top=n.y+'px';if(Number.isFinite(n.width)||Number.isFinite(n.height))el.classList.add('node-custom-size');if(Number.isFinite(n.width))el.style.width=widthOf(n)+'px';if(Number.isFinite(n.height))el.style.minHeight=heightOf(n)+'px';el.style.setProperty('--color',colorOf(n));el.tabIndex=0;el.setAttribute('aria-label',(rewrite?'Заметка переработки: ':'Событие: ')+n.title);el.innerHTML=`${chosen.size===1&&chosen.has(n.id)?`<div class="node-actions">${!rewrite?'<button data-command="inside" title="Открыть детали">↗ Внутрь</button><button data-command="link" title="Соединить с другим событием">↗ Связать</button>':''}<button data-command="edit" title="Редактировать">⋯</button></div>`:''}${rewrite?'<div class="ux014-node-kind">▤ Заметка · переработка</div>':''}<div class="node-header"><div class="node-marker"></div><div class="node-title">${esc(n.title)}</div></div><div class="node-note">${esc(rewrite?(rewrite.taskText||'Что изменить?'):(n.description||'Добавьте короткое описание события'))}</div><div class="node-foot">${rewrite?`<span class="ux014-rewrite-status">Исходник сохранён · задание на переработку</span>`:tagNames(n).map(tag=>`<span class="field-chip ${tag.manual?'manual-chip':''}" title="${tag.manual?'Закреплённый тег':'Назначен полем'}">${esc(tag.name)}</span>`).join('')}${!rewrite&&!tagNames(n).length?'<span>Без поля</span>':''}${!rewrite?editorialInView().filter(ef=>ef.memberIds.includes(n.id)).map(ef=>`<span class="editorial-chip" title="Редакторское задание, не смысловой тег">▨ ${esc(ef.title)}</span>`).join(''):''}${!rewrite&&parentsWithChildren.has(n.id)?'<span class="tag">Есть детали</span>':''}</div>${rewrite?'':'<button class="node-add" title="Продолжить сюжет" data-command="after">+</button>'}${chosen.size===1&&chosen.has(n.id)?'<button class="node-resize-grip" title="Изменить ширину и высоту карточки" aria-label="Изменить размер ноды">⤡</button>':''}`;host.append(el);
+function renderNodes(){const host=$('nodes');host.innerHTML='';const keep=focusIds(),chosen=new Set(groupIds()),parentsWithChildren=new Set(state.nodes.filter(k=>k.parent).map(k=>k.parent));for(const n of visible()){const rewrite=rewriteBy(n.id);const el=document.createElement('article');el.className='node '+(n.size||'normal')+(rewrite?' rewrite-draft':'')+(chosen.has(n.id)?' selected':'')+(n.status==='proposed'?' node-proposed':'')+(keep&&!keep.has(n.id)?' focus-muted':'');el.dataset.node=n.id;el.style.left=n.x+'px';el.style.top=n.y+'px';if(Number.isFinite(n.width)||Number.isFinite(n.height))el.classList.add('node-custom-size');if(Number.isFinite(n.width))el.style.width=widthOf(n)+'px';if(Number.isFinite(n.height))el.style.minHeight=heightOf(n)+'px';el.style.setProperty('--color',colorOf(n));el.tabIndex=0;el.setAttribute('aria-label',(rewrite?'Заметка переработки: ':'Событие: ')+n.title);el.innerHTML=`${chosen.size===1&&chosen.has(n.id)?`<div class="node-actions">${!rewrite?'<button data-command="inside" title="Открыть детали">↗ Внутрь</button><button data-command="link" title="Соединить с другим событием">↗ Связать</button>':''}<button data-command="edit" title="Редактировать">⋯</button></div>`:''}${rewrite?'<div class="ux014-node-kind">▤ Заметка · переработка</div>':''}<div class="node-header"><div class="node-marker"></div><div class="node-title">${esc(n.title)}</div></div><div class="node-note">${esc(rewrite?(rewrite.taskText||'Что изменить?'):(n.description||'Добавьте короткое описание события'))}</div><div class="node-foot">${rewrite?`<span class="ux014-rewrite-status">Исходник сохранён · задание на переработку</span>`:tagNames(n).map(tag=>`<span class="field-chip ${tag.manual?'manual-chip':''}" title="${tag.manual?'Закреплённый тег':'Назначен полем'}">${esc(tag.name)}</span>`).join('')}${!rewrite&&!tagNames(n).length?'<span>Без поля</span>':''}${!rewrite?editorialInView().filter(ef=>ef.memberIds.includes(n.id)).map(ef=>`<span class="editorial-chip" title="Редакторское задание, не смысловой тег">▨ ${esc(ef.title)}</span>`).join(''):''}${!rewrite&&parentsWithChildren.has(n.id)?'<span class="tag">Есть детали</span>':''}</div>${rewrite?'':'<button class="node-add" title="Продолжить сюжет" data-command="after">+</button>'}${chosen.size===1&&chosen.has(n.id)?'<button class="node-resize-grip" title="Изменить ширину и высоту карточки" aria-label="Изменить размер ноды">⤡</button>':''}`;if(!rewrite){
+  const socket=document.createElement('button');
+  socket.type='button';socket.className='cw-free-source';
+  socket.dataset.linkSource=n.id;
+  socket.setAttribute('aria-label','Начать стрелку от события «'+n.title+'»');
+  socket.title='Протяните стрелку к другому событию';
+  socket.addEventListener('pointerdown',e=>cwBeginCanonicalLinkDrag(e,n.id,socket));
+  socket.addEventListener('click',e=>e.stopPropagation());
+  el.append(socket);
+ }
+ host.append(el);
  el.onclick=e=>{if(e.target.closest('button'))return;e.stopPropagation();if(dragCompletedFor===n.id){dragCompletedFor=null;return}if(completeGapLink('plot_node',n.id))return;if(linkFrom){finishLink(n.id);return}if(e.ctrlKey||e.metaKey){toggleNodeSelection(n.id);return}setNodeSelection([n.id],n.id)};el.ondblclick=e=>{if(e.target.closest('button'))return;e.stopPropagation();notifyModal('Переименовать','Изменение не затронет связи.', 'Название',v=>commit(()=>{nby(n.id).title=v},'Название изменено'),n.title)};
  el.querySelectorAll('[data-command]').forEach(b=>b.onclick=e=>{e.stopPropagation();const id=n.id;const c=b.dataset.command;if(c==='after')addAfter(id);if(c==='link'){linkFrom=id;selected={type:'node',id};render();note('Нажмите на другую карточку — создадим последовательность')}if(c==='edit'){selected={type:'node',id};renderInspector()}if(c==='inside'){state.view=id;selected=null;pan={x:110,y:95,scale:1};render();note('Внутренний уровень — отдельное полотно')}});
  const grip=el.querySelector('.node-resize-grip');
@@ -1838,6 +1859,163 @@ function deleteSelected(){if(!selected)return;let s=selected;if(s.type==='gapNot
 function addNode(title,after=null,lids=null,at=null){let a=after?nby(after):null;const id='n'+state.nextNode++;const ys=visible().map(n=>n.y),mx=Math.max(170,...visible().map(n=>n.x));let base= at?{x:Math.round(at.x),y:Math.round(at.y)}:a?{x:a.x+350,y:a.y}: {x:mx+45,y:ys.length?Math.min(...ys)+90:230};let next={id,title,description:'',x:base.x,y:base.y,lineIds:lids||a?.lineIds?.slice(0,1)||[state.lanes[0].id],size:'normal',status:'approved',parent:state.view};commit(()=>{state.nodes.push(next);if(a)state.edges.push({id:'e'+state.nextEdge++,from:a.id,to:id,type:'precedes'})},'Событие добавлено');selected={type:'node',id};render()}
 function addAfter(id){notifyModal('Продолжить сюжет','Новое событие появится справа; связь означает порядок, не причину.','Что происходит дальше?',v=>addNode(v,id))}
 function createNode(at=null){notifyModal('Новое событие','Добавьте мысль на полотно. Положение можно изменить в любой момент.','Название события',v=>addNode(v,null,null,at))}
+// CW-003: one temporary overlay. It is not part of the graph and does
+// not change the canonical edge until a server revision is read back.
+let cwActiveLinkGesture=null;
+function cwLinkOverlay(){
+ const world=$('world');
+ let svg=world.querySelector('#cw-link-overlay');
+ if(svg)return svg;
+ const ns='http://www.w3.org/2000/svg';
+ svg=document.createElementNS(ns,'svg');
+ svg.id='cw-link-overlay';svg.classList.add('cw-link-overlay');
+ svg.setAttribute('aria-hidden','true');svg.setAttribute('hidden','');
+ const line=document.createElementNS(ns,'path');line.classList.add('cw-link-guide');
+ const dot=document.createElementNS(ns,'circle');dot.classList.add('cw-link-candidate');
+ dot.setAttribute('r','6');dot.setAttribute('hidden','');
+ svg.append(line,dot);world.append(svg);return svg;
+}
+function cwClearLinkTarget(){
+ for(const node of document.querySelectorAll('.cw-link-target'))
+  node.classList.remove('cw-link-target');
+}
+function cwEligibleLinkTarget(from,to){
+ if(!from||!to||from===to)return false;
+ const shown=new Set(visible().map(n=>n.id));
+ if(!shown.has(from)||!shown.has(to))return false;
+ if(state.edges.some(e=>e.from===from&&e.to===to&&!e.workspaceId))return false;
+ return true;
+}
+function cwLinkHitTarget(x,y,sourceId){
+ // A captured pointer never fires normal target pointerenter events.
+ const hit=document.elementFromPoint(x,y);
+ const el=hit?.closest?.('[data-node]');
+ const id=el?.dataset.node;
+ return cwEligibleLinkTarget(sourceId,id)?id:null;
+}
+function cwDrawLinkOverlay(from,to,valid){
+ const svg=cwLinkOverlay();
+ const dx=Math.max(65,Math.abs(to.x-from.x)*.42);
+ const path=svg.querySelector('.cw-link-guide');
+ path.setAttribute('d','M'+from.x+','+from.y+' C'+(from.x+dx)+','+from.y+
+  ' '+(to.x-dx)+','+to.y+' '+to.x+','+to.y);
+ svg.dataset.valid=valid?'true':'false';
+ svg.removeAttribute('hidden');
+ const candidate=svg.querySelector('.cw-link-candidate');
+ candidate.toggleAttribute('hidden',!valid);
+ if(valid){candidate.setAttribute('cx',to.x);candidate.setAttribute('cy',to.y)}
+}
+function cwHideLinkOverlay(){
+ const svg=$('cw-link-overlay');if(svg)svg.setAttribute('hidden','');
+ cwClearLinkTarget();
+}
+function cwBeginCanonicalLinkDrag(event,sourceId,handle){
+ if(event.button!==0||event.ctrlKey||event.metaKey)return;
+ event.preventDefault();event.stopPropagation();
+ if(cwActiveLinkGesture||cwAcceptanceBusy||cwDraftMoveEdits.size){
+  note('Дождитесь завершения сохранения');return;
+ }
+ if(!remote.connected||remote.blocked){
+  note('Для создания стрелки подключите локальный проект');return;
+ }
+ if(!visible().some(n=>n.id===sourceId))return;
+ linkFrom=null;
+ const source=proposeFreeSocket({nodeId:sourceId,role:'source',
+  layout:cwCanonicalSocketLayout,bounds:cwCanonicalSocketBounds});
+ const startX=event.clientX,startY=event.clientY;
+ let dragged=false,target=null;
+ const cleanup=()=>{
+  handle.removeEventListener('pointermove',move);
+  handle.removeEventListener('pointerup',end);
+  handle.removeEventListener('pointercancel',cancel);
+  cwActiveLinkGesture=null;cwHideLinkOverlay();
+ };
+ const move=e=>{
+  e.preventDefault();e.stopPropagation();
+  if(!dragged&&Math.hypot(e.clientX-startX,e.clientY-startY)<5)return;
+  dragged=true;target=cwLinkHitTarget(e.clientX,e.clientY,sourceId);
+  cwClearLinkTarget();
+  if(target)document.querySelector('[data-node="'+target+'"]')?.classList.add('cw-link-target');
+  const point=target?proposeFreeSocket({nodeId:target,role:'target',
+   layout:cwCanonicalSocketLayout,bounds:cwCanonicalSocketBounds})
+   :pointerToWorld(e.clientX,e.clientY);
+  cwDrawLinkOverlay(source,point,!!target);
+ };
+ const end=e=>{
+  e.preventDefault();e.stopPropagation();
+  if(dragged)target=cwLinkHitTarget(e.clientX,e.clientY,sourceId);
+  cleanup();
+  if(!dragged){
+   linkFrom=sourceId;selected={type:'node',id:sourceId};
+   render();note('Выберите другое событие или протяните стрелку мышью');
+  }else if(target){
+   void cwCommitCanonicalLink(sourceId,target);
+  }
+ };
+ const cancel=e=>{e?.stopPropagation();cleanup()};
+ cwActiveLinkGesture={cancel};
+ handle.setPointerCapture(event.pointerId);
+ handle.addEventListener('pointermove',move);
+ handle.addEventListener('pointerup',end);
+ handle.addEventListener('pointercancel',cancel);
+}
+async function cwCommitCanonicalLink(from,to){
+ if(cwAcceptanceBusy)return;
+ if(cwDraftMoveEdits.size){note('Дождитесь сохранения черновиков');return}
+ cwAcceptanceBusy=true;
+ let projectId=null,edgeId=null,submitted=false,verified=false;
+ let prior=null;
+ const acceptReadback=(latest)=>{
+  if(activeProjectId!==projectId||remote.dirty||!Number.isSafeInteger(latest.revision))
+   throw Error('Проект изменился до подтверждения записи');
+  const edge=latest.graph?.edges?.find(e=>e.id===edgeId);
+  if(!edge||edge.from!==from||edge.to!==to||edge.type!=='precedes'||edge.workspaceId)
+   throw Error('Новая стрелка не подтверждена сервером');
+  history.push(prior);if(history.length>60)history.shift();
+  state=validateImported(latest.graph);remote.revision=latest.revision;
+  remote.blocked=false;remote.dirty=false;verified=true;
+  try{localStorage.removeItem(PENDING_PREFIX+projectId)}catch{}
+  selected={type:'edge',id:edgeId};selectedNodeIds.clear();
+  recomputeFieldTags();save(false);render();
+  note('Стрелка создана · тип связи можно изменить');
+ };
+ try{
+  projectId=activeProjectId;
+  if(!remote.connected||remote.blocked)throw Error('Проект не подключён');
+  if(remote.busy||remote.dirty)await flushRemote();
+  if(activeProjectId!==projectId||remote.blocked||remote.dirty||remote.busy)
+   throw Error('Проект изменился во время синхронизации');
+  if(!cwEligibleLinkTarget(from,to))throw Error('Недопустимое или повторное соединение');
+  const before=persistentGraph();prior=JSON.stringify(before);
+  const next=structuredClone(before);
+  let number=next.nextEdge;
+  while(next.edges.some(e=>e.id==='e'+number))number++;
+  edgeId='e'+number;next.nextEdge=number+1;
+  next.edges.push({id:edgeId,from,to,type:'precedes'});
+  next.revision=(state.revision||0)+1;
+  const expectedRevision=remote.revision;
+  submitted=true;
+  const applied=await apiRequest('/api/projects/'+encodeURIComponent(projectId),{
+   method:'PUT',body:{expectedRevision,name:projectName(),graph:next,
+    message:'Стрелка создана перетаскиванием'}
+  });
+  const latest=await apiRequest('/api/projects/'+encodeURIComponent(projectId));
+  if(latest.revision<applied.revision)throw Error('Сервер вернул устаревшую ревизию');
+  acceptReadback(latest);
+ }catch(err){
+  // A lost HTTP response does not authorize a second POST/PUT. Inspect the
+  // actual server result once before reporting an uncertain outcome.
+  if(submitted&&!verified&&projectId===activeProjectId&&edgeId){
+   try{
+    const latest=await apiRequest('/api/projects/'+encodeURIComponent(projectId));
+    const match=latest.graph?.edges?.find(e=>e.id===edgeId);
+    if(match?.from===from&&match?.to===to&&match?.type==='precedes')
+     acceptReadback(latest);
+   }catch{}
+  }
+  if(!verified)note('Стрелка не сохранена: '+err.message);
+ }finally{cwAcceptanceBusy=false}
+}
 function finishLink(to){const from=linkFrom;linkFrom=null;if(!from||from===to){note('Связь отменена');render();return}if(state.edges.some(e=>e.from===from&&e.to===to)){note('Такая связь уже существует');render();return}commit(()=>state.edges.push({id:'e'+state.nextEdge++,from,to,type:'precedes'}),'Создана последовательность: слева → направо')}
 function addLine(){notifyModal('Новая сюжетная линия','Линия — смысловая принадлежность, а не ограничение движения.', 'Название линии',v=>commit(()=>{state.lanes.push({id:'l'+state.nextLine++,title:v,color:COLORS[(state.lanes.length)%COLORS.length],y:Math.max(...state.lanes.map(x=>x.y))+260})},'Линия добавлена'))}
 function arrange(){const vis=visible();let levels=new Map(vis.map(n=>[n.id,0]));const seq=currentEdges().filter(e=>e.type==='precedes');let max=0,changed=true;for(let it=0;it<vis.length&&changed;it++){changed=false;for(const e of seq){let v=(levels.get(e.from)||0)+1;if(v>(levels.get(e.to)||0)&&v<=vis.length){levels.set(e.to,v);changed=true;max=Math.max(max,v)}}}if(changed){note('В последовательности есть цикл — невозможно упорядочить');return}const grouped=new Map();for(const n of vis){let k=levels.get(n.id)||0;if(!grouped.has(k))grouped.set(k,[]);grouped.get(k).push(n)}const future=new Map();for(const [level,ns] of grouped){ns.sort((a,b)=>(a.y||0)-(b.y||0));ns.forEach((n,i)=>future.set(n.id,{x:140+level*355,y:175+i*238}))}
@@ -2210,6 +2388,9 @@ $('export').onclick=()=>exportProject();
 document.addEventListener('keydown',e=>{
  if(e.code==='Space'&&!modalOpen&&!e.target.closest('input,textarea,select,button')){spacePan=true;e.preventDefault()}
  if(e.key==='Escape'){
+  if(cwActiveLinkGesture){
+   e.preventDefault();cwActiveLinkGesture.cancel();return;
+  }
   if(cwActiveDraftDragCancel){
    e.preventDefault();cwActiveDraftDragCancel();return;
   }
@@ -2235,6 +2416,7 @@ document.addEventListener('keyup',e=>{if(e.code==='Space')spacePan=false;if(!e.c
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&!modalOpen)document.body.classList.add('pa-multi-modifier')},true);
 window.addEventListener('blur',()=>{
  spacePan=false;document.body.classList.remove('pa-multi-modifier');
+ if(cwActiveLinkGesture)cwActiveLinkGesture.cancel();
  if(cwActiveDraftDragCancel)cwActiveDraftDragCancel();
  if(interaction)cancelGesture();
 });
