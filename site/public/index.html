@@ -3,6 +3,9 @@
 <style>
 :root{color-scheme:dark;--canvas:#181818;--panel:#252525;--raised:#2b2b2b;--line:#363636;--text:#efefed;--sub:#acaaa7;--quiet:#858585;--accent:#baab85;--sage:#98ac92;--rose:#b88981;--lav:#9f93b6;--focus:#d6c69e;font-family:Inter,ui-sans-serif,'Segoe UI',system-ui,sans-serif;font-synthesis:none}
 *{box-sizing:border-box}body{margin:0;background:var(--canvas);color:var(--text);overflow:hidden}button,input,textarea,select{font:inherit}button{cursor:pointer;color:var(--text);border:1px solid #3b3b3b;background:#292929;border-radius:10px;padding:8px 12px;font-size:12px}button:hover{background:#353535;border-color:#5a5a5a}button:disabled{opacity:.35;cursor:default}button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--focus);outline-offset:2px}button.primary{background:#827254;border-color:#9b8965;color:#fff}button.primary:hover{background:#948263}header{height:62px;border-bottom:1px solid #2e2e2e;display:flex;align-items:center;padding:0 25px;gap:16px;background:#1c1c1c}header .logo{width:31px;height:31px;background:#37332d;border:1px solid #514a3d;border-radius:10px;display:grid;place-items:center;color:#d9c49b;font-size:20px}.project-label{display:flex;flex-direction:column;gap:1px}.project-label b{font-size:14px;font-weight:630}.project-label span{font-size:11px;color:#92908c}.spacer{flex:1}.top-actions{display:flex;gap:7px;align-items:center}.top-actions button{background:transparent;border-color:transparent;color:#bcbab6}.top-actions button:hover{background:#2c2c2c}.saved{font-size:11px;color:#8ea38b;white-space:nowrap}main{height:calc(100vh - 62px);position:relative;overflow:hidden;cursor:default;background-color:var(--canvas);background-image:radial-gradient(#313131 0.85px,transparent 0.85px);background-size:24px 24px}.viewport{position:absolute;inset:0;overflow:hidden}.world{position:absolute;transform-origin:0 0;width:4200px;height:2800px}.edges{position:absolute;inset:0;width:4200px;height:2800px;overflow:visible;pointer-events:none;z-index:1}.edge{stroke:#787772;stroke-width:1.6;fill:none;opacity:.8;pointer-events:stroke;cursor:pointer}.edge.causal{stroke:#c1a47e;stroke-dasharray:6 3}.edge.enable{stroke:#89a88e;stroke-dasharray:3 5}.edge.selected{stroke:#e4c78c;stroke-width:2.5;opacity:1}.edge.faded{opacity:.17}.edge-hit{stroke:transparent;stroke-width:16;fill:none;pointer-events:stroke;cursor:pointer}.edge-label{font-size:11px;fill:#c7b9a1;pointer-events:none}.direction{position:absolute;top:31px;left:34px;z-index:3;color:#b8b4ae;font-size:11px;letter-spacing:.13em;text-transform:uppercase;pointer-events:none}.direction strong{color:#dad4c8;font-weight:650}.direction .arrow{color:#c1ac87;font-size:18px;vertical-align:-2px;margin-left:12px}.lane-guide{position:absolute;left:220px;right:0;min-width:3700px;pointer-events:none;display:flex;align-items:start}.lane-guide .label{font-size:12px;letter-spacing:.02em;font-weight:560;color:#a6a39e;background:#20201f;padding:8px 12px;border:1px solid #343433;border-radius:9px;display:flex;align-items:center;gap:9px}.lane-guide .label i{width:7px;height:7px;border-radius:50%;background:var(--color)}.lane-guide::after{content:'';height:1px;position:absolute;top:17px;left:190px;right:0;background:linear-gradient(90deg,#3b3b3b44,#3b3b3b16,transparent)}
+.edge-socket{fill:#28272a;stroke:#b7a68c;stroke-width:1.5;opacity:.48;pointer-events:none}
+[data-edge]:hover .edge-socket,.edge-socket.edge-socket-active{fill:#40382c;stroke:#e1c99a;opacity:1}
+.world.pa-lod-compact .edge-socket,.world.pa-lod-map .edge-socket{display:none}
 .node{position:absolute;z-index:2;width:258px;border-radius:14px;background:var(--panel);border:1px solid #393939;box-shadow:0 8px 30px #00000020;user-select:none;cursor:grab;touch-action:none}.node:active{cursor:grabbing}.node:hover{border-color:#62605b}.node.selected{border-color:#ad9972;box-shadow:0 0 0 1px #b29e7966,0 13px 34px #00000055}.node-header{padding:17px 17px 10px;display:flex;gap:12px;align-items:flex-start}.node-marker{width:3px;border-radius:3px;align-self:stretch;min-height:20px;background:var(--color);opacity:.9}.node-title{font-size:14px;line-height:1.42;font-weight:620;flex:1;letter-spacing:-.01em}.node-note{font-size:12px;line-height:1.6;color:#bcbab5;padding:0 17px 15px 32px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}.node-foot{padding:0 17px 14px 32px;display:flex;gap:6px;align-items:center;color:#999791;font-size:10.5px}.node-foot .tag{background:#353533;color:#bcb8ae;border-radius:5px;padding:4px 6px}.node.mini{width:208px}.node.mini .node-header{padding:13px 13px}.node.mini .node-title{font-size:13px}.node.expanded{width:316px}.node.expanded .node-note{display:block;-webkit-line-clamp:unset;color:#cfccc7;font-size:13px;line-height:1.7}.node.expanded .node-foot{padding-top:5px}.node-proposed{border-style:dashed}.node-actions{position:absolute;top:-41px;right:0;display:flex;gap:5px;padding:4px;border:1px solid #3c3b39;background:#242423ee;border-radius:10px;box-shadow:0 6px 20px #0008}.node-actions button{background:transparent;border:0;border-radius:6px;padding:6px 9px;color:#d7d2c9;white-space:nowrap}.node-actions button:hover{background:#424039}.node-add{position:absolute;top:50%;right:-13px;transform:translateY(-50%);width:26px;height:26px;border-radius:50%;background:#332e26;color:#e2c797;border:1px solid #74664e;display:grid;place-items:center;padding:0;font-size:19px;opacity:0}.node:hover .node-add,.node.selected .node-add{opacity:1}.node.inspect .node-foot{display:none}
 .float-toolbar{position:absolute;left:50%;bottom:25px;transform:translateX(-50%);display:flex;align-items:center;gap:4px;padding:7px;background:#262625f2;border:1px solid #41403d;border-radius:15px;box-shadow:0 15px 38px #0008;z-index:8}.float-toolbar button{border:0;background:transparent;font-size:13px;border-radius:9px;padding:10px 12px;white-space:nowrap}.float-toolbar button:hover{background:#3d3b37}.float-toolbar button.highlight{background:#484031;color:#e7d4b0}.float-toolbar .sep{width:1px;height:25px;background:#44423f;margin:0 4px}.float-toolbar button.small{min-width:36px}.nav-mini{position:absolute;bottom:27px;left:25px;display:flex;gap:6px;z-index:5}.nav-mini button{border:1px solid #3c3c3c;background:#242424dd}.breadcrumbs{position:absolute;left:26px;top:74px;display:flex;gap:7px;z-index:7}.breadcrumbs button{background:#262626d9;border:1px solid #414141;color:#cbc6bd}.hint{position:absolute;right:25px;bottom:28px;font-size:11px;color:#a7a39c;background:#20201fd9;border:1px solid #323232;border-radius:10px;padding:10px 12px;z-index:4}.inspector{position:absolute;right:24px;top:25px;width:324px;max-height:calc(100% - 100px);overflow:auto;background:#262626f7;border:1px solid #42413e;box-shadow:0 14px 38px #0009;border-radius:16px;padding:18px;z-index:7}.inspector[hidden]{display:none}.inspect-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}.inspect-head b{font-size:13px}.inspect-head button{border:0;background:transparent;padding:3px 8px;font-size:20px}.field{margin:15px 0}.field label{font-size:11px;color:#b7b2aa;display:block;margin-bottom:7px}.field input,.field textarea,.field select,.modal input{width:100%;background:#1e1e1e;border:1px solid #4a4a48;color:#eee;border-radius:9px;padding:10px 11px;font-size:13px}.field textarea{min-height:95px;resize:vertical}.muted{color:#a4a09a;font-size:12px;line-height:1.6}.check-row{display:flex;align-items:center;gap:8px;margin:8px 0;font-size:12px}.check-row input{accent-color:#b6a077}.inspect-actions{display:flex;flex-wrap:wrap;gap:6px}.inspect-actions button{padding:8px 9px}.inspector hr{border:0;border-top:1px solid #42403b;margin:15px 0}.status-chip{display:inline-block;background:#3b372f;color:#d8c5a0;border-radius:7px;padding:6px 9px;font-size:11px}.notice{position:absolute;top:27px;left:50%;transform:translateX(-50%);background:#302b23;border:1px solid #7b6542;border-radius:10px;padding:11px 15px;color:#eddec1;font-size:12px;z-index:9;max-width:470px;box-shadow:0 10px 22px #0008}.toast{position:absolute;left:50%;bottom:90px;transform:translateX(-50%);background:#3a362f;border:1px solid #635744;border-radius:10px;padding:10px 14px;color:#e6ddce;font-size:12px;opacity:0;transition:opacity .15s;pointer-events:none;z-index:10}.toast.on{opacity:1}.backdrop{position:fixed;inset:0;background:#0009;display:grid;place-items:center;z-index:20}.modal{width:min(480px,calc(100vw - 28px));background:#292929;border:1px solid #4b4b4b;padding:26px;border-radius:18px;box-shadow:0 28px 80px #0009}.modal h2{font-size:19px;margin:0 0 9px}.modal p{color:#aaa7a2;font-size:13px;line-height:1.6}.modal .buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}.modal .results{max-height:260px;overflow:auto;margin-top:9px;display:flex;flex-direction:column;gap:6px}.modal .results button{text-align:left}.footer-version{position:absolute;top:20px;right:20px;color:#65625d;font-size:10px;z-index:4}.hide{display:none!important}@media(max-width:760px){header{padding:0 12px;gap:6px}.top-actions button.opt,.saved{display:none}.float-toolbar{bottom:15px;padding:5px;gap:1px}.float-toolbar button{font-size:11px;padding:8px}.float-toolbar button.small{padding:8px}.hint,.nav-mini{display:none}.inspector{right:8px;top:10px;width:calc(100% - 16px);max-width:350px}.direction{left:13px;top:18px}}
 
@@ -313,6 +316,121 @@ body.pa-multi-modifier .inspector{pointer-events:none;opacity:.35}/* allows Ctrl
 </style>
 <script>
 (()=>{'use strict';
+/* CW-004 generated geometry start: site/src/edge_socket_geometry.mjs */
+/**
+ * CW-004: deterministic, data-only geometry for independent per-edge sockets.
+ *
+ * This module never mutates a graph, stores coordinates, measures the DOM,
+ * or implies anything about causality. Callers provide measured world-space
+ * rectangles and active edges from ONE visible scope (canon or workspace).
+ */
+const finite=n=>typeof n==='number'&&Number.isFinite(n);
+const validRect=r=>r&&[r.x,r.y,r.width,r.height].every(finite)
+  &&r.width>0&&r.height>0;
+const socketKey=(edgeId,role)=>edgeId+':'+role;
+const centerY=r=>r.y+r.height/2;
+const cmp=(a,b)=>a<b?-1:a>b?1:0;
+const DEFAULTS=Object.freeze({minGap:20,maxGap:30,inset:16,railOffset:16});
+
+function rectFor(node,bounds){
+ const b=bounds instanceof Map?bounds.get(node.id):bounds?.[node.id];
+ const r=b??node;
+ return validRect(r)?{x:r.x,y:r.y,width:r.width,height:r.height}:null;
+}
+
+/**
+ * Returns independent ports for every visible edge endpoint.
+ * Maps retain stable insertion order by node ID, role, opposite-center Y
+ * and finally edge ID; input edge array order does not change the output.
+ */
+function layoutEdgeSockets({nodes=[],edges=[],bounds={},mode='full',options={}}={}){
+ const ports=new Map(),byNode=new Map(),warnings=[];
+ if(mode!=='full')return {ports,byNode,warnings};
+ const cfg={...DEFAULTS,...options};
+ if(!finite(cfg.minGap)||cfg.minGap<=0||!finite(cfg.maxGap)
+   ||cfg.maxGap<cfg.minGap||!finite(cfg.inset)||cfg.inset<0
+   ||!finite(cfg.railOffset)||cfg.railOffset<0)
+  throw new TypeError('Invalid socket spacing options');
+ const cards=new Map();
+ for(const node of nodes){
+  if(!node||typeof node.id!=='string'||cards.has(node.id))
+   throw new TypeError('Duplicate or invalid node ID');
+  const rect=rectFor(node,bounds);
+  if(!rect)throw new TypeError('Invalid card dimensions: '+node.id);
+  cards.set(node.id,rect);
+  byNode.set(node.id,{incoming:[],outgoing:[]});
+ }
+ const groups=new Map();
+ for(const edge of edges){
+  if(!edge||typeof edge.id!=='string'||typeof edge.from!=='string'
+    ||typeof edge.to!=='string'||edge.from===edge.to)
+   throw new TypeError('Invalid edge identity');
+  if(!cards.has(edge.from)||!cards.has(edge.to))continue;
+  for(const [nodeId,role,otherId] of [
+   [edge.from,'source',edge.to],[edge.to,'target',edge.from]
+  ]){
+   const key=socketKey(edge.id,role);
+   if(ports.has(key))throw new TypeError('Duplicate edge endpoint: '+key);
+   const scope=edge.workspaceId??'plot';
+   const port={key,edgeId:edge.id,role,nodeId,otherId,scope,
+     side:role==='source'?'right':'left',x:0,y:0,rail:false,ordinal:0};
+   ports.set(key,port);
+   const groupKey=nodeId+'\u0000'+role;
+   if(!groups.has(groupKey))groups.set(groupKey,[]);
+   groups.get(groupKey).push(port);
+  }
+ }
+ for(const nodeId of [...cards.keys()].sort()){
+  const rect=cards.get(nodeId);
+  for(const role of ['source','target']){
+   const group=groups.get(nodeId+'\u0000'+role)??[];
+   group.sort((a,b)=>cmp(centerY(cards.get(a.otherId)),centerY(cards.get(b.otherId)))
+     ||cmp(a.otherId,b.otherId)||cmp(a.edgeId,b.edgeId));
+   const available=Math.max(0,rect.height-2*cfg.inset);
+   const overflowing=group.length>1&&(group.length-1)*cfg.minGap>available;
+   const gap=group.length<=1?0:overflowing?cfg.minGap
+     :Math.max(cfg.minGap,Math.min(cfg.maxGap,available/(group.length-1)));
+   const first=centerY(rect)-(group.length-1)*gap/2;
+   const x=role==='source'?rect.x+rect.width+(overflowing?cfg.railOffset:0)
+    :rect.x-(overflowing?cfg.railOffset:0);
+   for(let i=0;i<group.length;i++){
+    const p=group[i];p.x=x;p.y=first+i*gap;p.rail=overflowing;p.ordinal=i;
+    byNode.get(nodeId)[role==='source'?'outgoing':'incoming'].push(p);
+   }
+   if(overflowing)warnings.push({code:'SOCKET_RAIL',nodeId,role,
+     count:group.length,requiredHeight:(group.length-1)*cfg.minGap+cfg.inset*2,
+     actualHeight:rect.height});
+  }
+ }
+ return {ports,byNode,warnings};
+}
+
+/** Compute an unused temporary socket without displacing existing endpoints. */
+function proposeFreeSocket({nodeId,role,layout,bounds,options={}}={}){
+ if(role!=='source'&&role!=='target')throw new TypeError('Invalid socket role');
+ const cfg={...DEFAULTS,...options};
+ const rect=rectFor({id:nodeId},bounds);
+ if(!rect)throw new TypeError('Unknown card dimensions: '+nodeId);
+ const occupied=layout?.byNode?.get(nodeId)?.[role==='source'?'outgoing':'incoming']??[];
+ const cy=centerY(rect);
+ let y=cy;
+ for(let i=0;i<=occupied.length*3+3;i++){
+  const offset=i===0?0:(Math.ceil(i/2)*cfg.minGap)*(i%2?1:-1);
+  const candidate=cy+offset;
+  if(occupied.every(p=>Math.abs(candidate-p.y)>=cfg.minGap-1e-8)){
+   y=candidate;break;
+  }
+ }
+ const rail=y<rect.y+cfg.inset||y>rect.y+rect.height-cfg.inset
+  ||occupied.some(p=>p.rail);
+ const x=role==='source'?rect.x+rect.width+(rail?cfg.railOffset:0)
+  :rect.x-(rail?cfg.railOffset:0);
+ return {key:'new:'+nodeId+':'+role,nodeId,role,
+  side:role==='source'?'right':'left',x,y,rail,temporary:true};
+}
+
+/* CW-004 generated geometry end */
+
 const LEGACY_KEY='plot-architect-edge-clarity-v09-20261101';
 const REGISTRY_KEY='pa-site01-project-registry';
 const SITE_REGISTRY_KEY='pa-site01-site-project-registry';
@@ -1383,15 +1501,18 @@ function positionInspector(){
 }
 
 function itemDims(n){if(memoRender?.dims.has(n.id))return memoRender.dims.get(n.id);let el=document.querySelector(`[data-node="${n.id}"]`);const d={w:widthOf(n),h:Math.max(heightOf(n)||0,el?.offsetHeight||105)};if(memoRender)memoRender.dims.set(n.id,d);return d}
-function connector(e){const a=nby(e.from),b=nby(e.to);if(!a||!b)return '';const ad=itemDims(a),bd=itemDims(b);
- // UX-015: overview edges attach to the fixed semantic anchor at the REAL card's
- // center, regardless of how a collision-avoiding screen label is displaced.
+function connector(e,sockets=null){const a=nby(e.from),b=nby(e.to);if(!a||!b)return '';const ad=itemDims(a),bd=itemDims(b);
+ // UX-015: compact anchors remain on the real card, not displaced labels.
  const compact=semanticZoomLevel()!=='full';
- const x1=compact?a.x+ad.w/2:a.x+ad.w,y1=a.y+ad.h/2;
- const x2=compact?b.x+bd.w/2:b.x,y2=b.y+bd.h/2;
+ const source=!compact?sockets?.ports.get(socketKey(e.id,'source')):null;
+ const target=!compact?sockets?.ports.get(socketKey(e.id,'target')):null;
+ const x1=source?.x??(compact?a.x+ad.w/2:a.x+ad.w);
+ const y1=source?.y??(a.y+ad.h/2);
+ const x2=target?.x??(compact?b.x+bd.w/2:b.x);
+ const y2=target?.y??(b.y+bd.h/2);
  const dx=Math.max(compact?22:65,Math.abs(x2-x1)*.42),warn=x2<x1+25;
  const d=`M${x1},${y1} C${x1+dx},${y1} ${x2-dx},${y2} ${x2},${y2}`;
- return {d,warn,x1,x2}}
+ return {d,warn,x1,y1,x2,y2}}
 
 function directionIssues(){const keep=focusIds();return currentEdges().filter(e=>e.type==='precedes'&&(!keep||(keep.has(e.from)&&keep.has(e.to)))&&connector(e)?.warn).length}
 function focusIds(){
@@ -1461,12 +1582,13 @@ function rectHit(seg,r){
   if(Math.abs(x2-x1)<.01)return x1>=r.x&&x1<=r.x+r.w&&Math.max(y1,y2)>=r.y&&Math.min(y1,y2)<=r.y+r.h;
   return false;
 }
-function smartConnector(edge){
-  if(semanticZoomLevel()!=='full')return connector(edge);
-  const a=nby(edge.from),b=nby(edge.to);if(!a||!b)return connector(edge);
+function smartConnector(edge,sockets=null){
+  if(semanticZoomLevel()!=='full')return connector(edge,sockets);
+  const a=nby(edge.from),b=nby(edge.to);if(!a||!b)return connector(edge,sockets);
   const f1=visualHome(a),f2=visualHome(b);
-  const ad=itemDims(a),bd=itemDims(b),x1=a.x+ad.w,y1=a.y+ad.h/2,x2=b.x,y2=b.y+bd.h/2;
-  if(f1===f2||Math.abs(x2-x1)<650)return connector(edge);
+  const point=connector(edge,sockets);
+  const {x1,y1,x2,y2}=point;
+  if(f1===f2||Math.abs(x2-x1)<650)return point;
   const objects=visible().filter(n=>n.id!==a.id&&n.id!==b.id).map(n=>{const d=itemDims(n);return {x:n.x-18,y:n.y-18,w:d.w+36,h:d.h+36}});
   const headingRects=fieldInView().map(f=>({x:f.x+8,y:f.y-43,w:Math.min(240,f.width*.5),h:42}));
   const rects=[...objects,...headingRects];
@@ -1481,10 +1603,10 @@ function smartConnector(edge){
     const score=collisions*15000+length;
     if(!best||score<best.score)best={score,segments};
   }
-  if(!best)return connector(edge);
+  if(!best)return point;
   const pieces=best.segments.map(s=>[s[2],s[3]]);
   const path=`M${x1},${y1} `+pieces.map(p=>`L${p[0]},${p[1]}`).join(' ');
-  return {d:path,warn:x2<x1+25,x1,x2,routed:true};
+  return {d:path,warn:x2<x1+25,x1,y1,x2,y2,routed:true};
 }
 function connectionPlan(){
  const edges=currentEdges(),overview=useOverview();
@@ -1639,14 +1761,25 @@ function renderEdges(){
  memoRender={dims:new Map(),homes:new Map()};
  const keep=focusIds(),selectedId=selected?.type==='node'?selected.id:null,selectedEdge=selected?.type==='edge'?selected.id:null;
  const plan=connectionPlan();
+ // Layout all active canon edges (not just the currently revealed subset),
+ // so selection and overview aggregation never reassign socket identities.
+ const visibleNodes=visible();
+ const bounds=Object.fromEntries(visibleNodes.map(n=>{
+   const d=itemDims(n);return [n.id,{x:n.x,y:n.y,width:d.w,height:d.h}];
+ }));
+ const sockets=layoutEdgeSockets({nodes:visibleNodes,edges:currentEdges(),
+   bounds,mode:semanticZoomLevel()});
  const marker='<defs><marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#93908b" stroke-width="1.8"/></marker><marker id="arrOn" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#e4c78c" stroke-width="1.8"/></marker></defs>';
  let c=marker;
  for(const e of plan.visibleEdges){
-   const q=routeMode==='smart'?smartConnector(e):connector(e);if(!q)continue;
+   const q=routeMode==='smart'?smartConnector(e,sockets):connector(e,sockets);if(!q)continue;
    const active=e.id===selectedEdge||e.from===selectedId||e.to===selectedId||plan.reveal.has(e.id);
    const faded=(selectedId||selectedEdge)&&!active;
    const kind=e.type==='causes'?'causal':e.type==='enables'?'enable':'';
-   c+=`<g data-edge="${esc(e.id)}" data-routed="${q.routed?'yes':'no'}"><path class="edge ${kind} ${active?'selected':''} ${faded?'faded':''} ${keep&&!(keep.has(e.from)&&keep.has(e.to))?'focus-muted':''}" marker-end="url(#${active?'arrOn':'arr'})" d="${q.d}"/><path class="edge-hit" d="${q.d}" data-edge-target="${esc(e.id)}"/></g>`;
+   const start=sockets.ports.get(socketKey(e.id,'source'));
+   const finish=sockets.ports.get(socketKey(e.id,'target'));
+   const portMarkup=(port)=>port?`<circle class="edge-socket ${active?'edge-socket-active':''}" data-edge-socket="${esc(port.key)}" data-socket-node="${esc(port.nodeId)}" data-socket-role="${port.role}" cx="${port.x}" cy="${port.y}" r="5"/>`:'';
+   c+=`<g data-edge="${esc(e.id)}" data-routed="${q.routed?'yes':'no'}"><path class="edge ${kind} ${active?'selected':''} ${faded?'faded':''} ${keep&&!(keep.has(e.from)&&keep.has(e.to))?'focus-muted':''}" marker-end="url(#${active?'arrOn':'arr'})" d="${q.d}"/><path class="edge-hit" d="${q.d}" data-edge-target="${esc(e.id)}"/>${portMarkup(start)}${portMarkup(finish)}</g>`;
  }
  for(const g of plan.bridges){
    const c0=bridgeCoordinates(g);if(!c0)continue;
