@@ -635,15 +635,18 @@ function cwDraftTargetAt(x,y,workspaceId,sourceId,exceptEdgeId=null){
   &&e.to===nodeId&&e.id!==exceptEdgeId))return null;
  return nodeId;
 }
-function cwBeginDraftLinkDrag(event,source,area,handle,svg,getSockets,getBounds){
+function cwBeginDraftLinkDrag(event,source,area,handle,svg,getSockets,getBounds,existingEdge=null){
  event.preventDefault();event.stopPropagation();
  if(event.button!==0||event.ctrlKey||event.metaKey||!cwWorkflowEnabled()
   ||cwActiveDraftLinkGesture||cwAcceptanceBusy||cwDragDropReview)return;
  if(!cwCleanForOperation()){
   note('Завершите сохранение проекта перед созданием стрелки');return;
  }
- const sourcePort=proposeFreeSocket({nodeId:source.id,role:'source',
-  layout:getSockets(),bounds:getBounds()});
+ const sourcePort=existingEdge
+  ?getSockets()?.ports.get(socketKey(existingEdge.id,'source'))
+  :proposeFreeSocket({nodeId:source.id,role:'source',
+   layout:getSockets(),bounds:getBounds()});
+ if(!sourcePort)return;
  const startX=event.clientX,startY=event.clientY;
  let moved=false,targetId=null;
  const ns='http://www.w3.org/2000/svg';
@@ -667,7 +670,7 @@ function cwBeginDraftLinkDrag(event,source,area,handle,svg,getSockets,getBounds)
   e.preventDefault();e.stopPropagation();
   if(!moved&&Math.hypot(e.clientX-startX,e.clientY-startY)<5)return;
   moved=true;
-  targetId=cwDraftTargetAt(e.clientX,e.clientY,area.id,source.id);
+  targetId=cwDraftTargetAt(e.clientX,e.clientY,area.id,source.id,existingEdge?.id);
   clearTarget();
   if(targetId)document.querySelector('[data-cw-node="'+targetId+'"]')
    ?.classList.add('cw-draft-link-target');
@@ -685,12 +688,16 @@ function cwBeginDraftLinkDrag(event,source,area,handle,svg,getSockets,getBounds)
  };
  const end=e=>{
   e.preventDefault();e.stopPropagation();
-  if(moved)targetId=cwDraftTargetAt(e.clientX,e.clientY,area.id,source.id);
+  if(moved)targetId=cwDraftTargetAt(e.clientX,e.clientY,area.id,source.id,existingEdge?.id);
   cleanup();
-  if(moved&&targetId)void cwCommitDraftEdge({
-   kind:'add_draft_edge',workspaceId:area.id,
-   edge:{id:'dedge-'+crypto.randomUUID(),from:source.id,to:targetId,type:'precedes'}
-  });
+  if(moved&&targetId&&targetId!==existingEdge?.to){
+   const command=existingEdge
+    ?{kind:'rewire_draft_edge',workspaceId:area.id,
+      edgeId:existingEdge.id,to:targetId}
+    :{kind:'add_draft_edge',workspaceId:area.id,
+      edge:{id:'dedge-'+crypto.randomUUID(),from:source.id,to:targetId,type:'precedes'}};
+   void cwCommitDraftEdge(command);
+  }
  };
  const cancel=e=>{e?.stopPropagation();cleanup()};
  cwActiveDraftLinkGesture={cancel};
@@ -1312,6 +1319,27 @@ function renderCreativeWorkspacePreview(){
    dot.dataset.cwSocketNode=port.nodeId;
    dot.setAttribute('r','5');
    svg.append(dot);
+  }
+  if(persisted&&cwWorkflowEnabled()&&!cwDragDropReview){
+   for(const edge of internals){
+    const target=nodeById.get(edge.to),source=nodeById.get(edge.from);
+    const port=drawnSockets.ports.get(socketKey(edge.id,'target'));
+    if(!port||!source||!target)continue;
+    const card=[...box.querySelectorAll('[data-cw-node]')]
+      .find(el=>el.dataset.cwNode===edge.to);
+    if(!card)continue;
+    const handle=document.createElement('button');handle.type='button';
+    handle.className='cw-draft-rewire';handle.dataset.cwRewireEdge=edge.id;
+    handle.setAttribute('aria-label','Перенести конец черновой стрелки от «'+
+      source.title+'» к «'+target.title+'»');
+    handle.title='Перенести конец черновой стрелки';
+    handle.style.left=(port.x-target.x)+'px';
+    handle.style.top=(port.y-target.y)+'px';
+    handle.addEventListener('pointerdown',e=>cwBeginDraftLinkDrag(
+      e,source,area,handle,svg,()=>drawnSockets,()=>socketBounds,edge));
+    handle.addEventListener('click',e=>e.stopPropagation());
+    card.append(handle);
+   }
   }
   cwDrawDraftConnections(svg,area,internals,drawnSockets);
   if(dropReviewPanel)cwPositionDropReview(dropReviewPanel,box,dropReviewIds);
