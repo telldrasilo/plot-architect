@@ -3,6 +3,7 @@ import {randomBytes} from 'node:crypto';
 import {mkdtempSync, readFileSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {request as httpRequest} from 'node:http';
 import {DatabaseSync} from 'node:sqlite';
 import test from 'node:test';
 import {openGraphiteLocalStorage} from '../src/node_local_storage.mjs';
@@ -99,9 +100,18 @@ test('local-only listener, forbidden native identity spoof, cookie isolation and
   assert.equal((await h.call('/api/projects', 'GET', {
     cookie, headers: {'oai-authenticated-user-id': 'injected'}
   })).status, 200);
-  assert.equal((await h.call('/api/projects', 'GET', {
-    headers: {Host: 'external.example', Authorization: 'Bearer ' + h.key}
-  })).status, 403);
+  // fetch() normalizes Host; a raw Node HTTP request exercises Host denial.
+  const spoofedHostStatus = await new Promise((resolve, reject) => {
+    const request = httpRequest(h.origin + '/api/projects', {
+      headers: {Host: 'external.example', Authorization: 'Bearer ' + h.key}
+    }, response => {
+      response.resume();
+      response.once('end', () => resolve(response.statusCode));
+    });
+    request.once('error', reject);
+    request.end();
+  });
+  assert.equal(spoofedHostStatus, 403);
   const logout = await h.call('/__local/logout', 'POST', {cookie, originHeader: h.origin});
   assert.equal(logout.status, 303);
   assert.equal((await h.call('/api/projects', 'GET', {cookie})).status, 401);
