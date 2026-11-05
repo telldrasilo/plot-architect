@@ -25,6 +25,7 @@ def snap(page):
         const transform=arrow.transform.baseVal.consolidate()?.matrix;
         return {id:arrow.dataset.cwEdgeDirection,
           centered:!!mid&&!!transform&&Math.hypot(transform.e-mid.x,transform.f-mid.y)<.01,
+          x:transform?.e,y:transform?.f,
           pointer:getComputedStyle(arrow).pointerEvents,
           length:path?.getTotalLength()};
       }),
@@ -102,6 +103,17 @@ def main():
         page.evaluate("()=>__graphite.setZoomForTest(1)")
         assert {(v["key"],v["x"],v["y"]) for v in snap(page)["ports"]}==initial
         assert page.evaluate("()=>__graphite.getState().edges.length")==6
+        # Reflow from measured positions must move the arrow, not detach it.
+        before_direction={a["id"]:(a["x"],a["y"]) for a in snap(page)["directions"]}
+        moved_graph=json.loads(json.dumps(g))
+        next(n for n in moved_graph["nodes"] if n["id"]=="b")["x"]+=120
+        page.evaluate("(graph)=>__graphite.loadFixture(graph)",moved_graph)
+        moved_snap=snap(page)
+        assert {a["id"] for a in moved_snap["directions"]}==set(before_direction)
+        assert all(a["centered"] for a in moved_snap["directions"]),moved_snap
+        assert any((a["x"],a["y"])!=before_direction[a["id"]]
+                   for a in moved_snap["directions"]),moved_snap
+        assert page.evaluate("()=>__graphite.getState().revision")==g["revision"]
         assert not errors,errors
         browser.close()
     print(json.dumps({"result":"PASS","ports":6,
