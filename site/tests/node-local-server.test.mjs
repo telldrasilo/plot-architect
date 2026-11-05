@@ -64,6 +64,12 @@ test('local-only listener, forbidden native identity spoof, cookie isolation and
   const anon = await h.call('/api/projects');
   assert.equal(anon.status, 401);
   assert.equal((await h.call('/')).headers.get('location'), '/__local/login');
+  const loginPage = await h.call('/__local/login');
+  assert.equal(loginPage.status, 200);
+  // Native form submissions preserve Origin only under a compatible
+  // Referrer-Policy; the default no-referrer yields Origin: null in Chrome.
+  assert.equal(loginPage.headers.get('referrer-policy'), 'same-origin');
+  assert.equal((await h.call('/api/projects')).headers.get('referrer-policy'), 'no-referrer');
   assert.equal((await h.call('/api/projects', 'GET', {
     headers: {'oai-authenticated-user-id': 'fake-owner'}
   })).status, 401);
@@ -72,6 +78,14 @@ test('local-only listener, forbidden native identity spoof, cookie isolation and
   assert.equal((await h.call('/__local/login', 'POST', {
     headers: {'Content-Type': 'application/x-www-form-urlencoded'},
     body: 'key=' + encodeURIComponent(h.key)
+  })).status, 403);
+  assert.equal((await h.call('/__local/login', 'POST', {
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    originHeader: 'null', body: 'key=' + encodeURIComponent(h.key)
+  })).status, 403);
+  assert.equal((await h.call('/__local/login', 'POST', {
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    originHeader: 'https://attacker.invalid', body: 'key=' + encodeURIComponent(h.key)
   })).status, 403);
   assert.equal((await h.call('/__local/login', 'POST', {
     headers: {'Content-Type': 'application/x-www-form-urlencoded'},

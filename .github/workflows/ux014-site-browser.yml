@@ -21,6 +21,11 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check playwright==1.56.0
           python -m playwright install --with-deps chromium
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Exercise real Chromium login against isolated Node + SQLite
+        run: python qa/browser/tests_node/test_node_local_login_browser.py
       - name: Exercise real Graphite HTML with synthetic Site API
         run: python qa/browser/tests_ux014/test_ux014_hosted_site.py
       - name: Exercise standalone note and editorial link on synthetic Site API

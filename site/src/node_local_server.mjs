@@ -109,7 +109,11 @@ export function createGraphiteLoopbackServer({database, editorHtml, token, workf
     const mutating = !['GET', 'HEAD', 'OPTIONS'].includes(method);
 
     if (path === '/__local/login' && method === 'GET') {
+      // The default no-referrer policy makes browsers send Origin: null for
+      // ordinary HTML form POSTs. Keep the exact-origin check on POST and
+      // use same-origin only for this local login document (no cross-site Referer).
       return reply(res, 200, loginHtml, {'Content-Type': 'text/html; charset=utf-8',
+        'Referrer-Policy': 'same-origin',
         'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"});
     }
     if (path === '/__local/login' && method === 'POST') {
