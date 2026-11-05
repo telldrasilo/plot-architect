@@ -31,6 +31,29 @@ def initial_graph():
     }
 
 
+def assert_note_inspector_adjacent(page, note_id):
+    geometry = page.evaluate("""id => {
+      const card=[...document.querySelectorAll('[data-gap-note]')]
+        .find(n=>n.dataset.gapNote===id);
+      const inspector=document.querySelector('#inspector');
+      const canvas=document.querySelector('#canvas');
+      if(!card||!inspector||inspector.hidden)return null;
+      const a=card.getBoundingClientRect(),b=inspector.getBoundingClientRect();
+      const frame=canvas.getBoundingClientRect();
+      const overlap=Math.max(0,Math.min(a.right,b.right)-Math.max(a.left,b.left))
+        *Math.max(0,Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top));
+      return {overlap,visible:b.left>=frame.left+7&&b.top>=frame.top+7
+        &&b.right<=frame.right-7&&b.bottom<=frame.bottom-7,
+        near:inspector.classList.contains('near-node'),
+        distance:Math.min(Math.abs(b.left-a.right),Math.abs(a.left-b.right),
+          Math.abs(b.top-a.bottom),Math.abs(a.top-b.bottom))};
+    }""",note_id)
+    assert geometry is not None, "note inspector was not rendered"
+    assert geometry["near"] and geometry["visible"], geometry
+    assert geometry["overlap"] == 0, geometry
+    assert geometry["distance"] <= 24, geometry
+
+
 def main():
     db = {"revision": 0, "graph": initial_graph(), "writes": 0}
     errors = []
@@ -79,6 +102,18 @@ def main():
         )
         note_id = page.evaluate("() => __graphite.newGapNote({x:120,y:370})")
         assert note_id.startswith("gn")
+        page.locator("#inspector:not([hidden])").wait_for()
+        assert_note_inspector_adjacent(page, note_id)
+        # A user may still deliberately pin the same settings on the right.
+        page.locator("#pin-inspect").click()
+        assert not page.locator("#inspector").evaluate(
+            "(el) => el.classList.contains('near-node')"
+        )
+        assert "Рядом" in page.locator("#pin-inspect").inner_text()
+        page.locator("#pin-inspect").click()
+        assert_note_inspector_adjacent(page, note_id)
+        page.evaluate("() => __graphite.setZoomForTest(0.85)")
+        assert_note_inspector_adjacent(page, note_id)
         page.wait_for_function("() => __graphite.getRemote().revision >= 1 && !__graphite.getRemote().dirty && !__graphite.getRemote().busy")
         page.evaluate("([id, text]) => __graphite.setGapNoteText(id,text)", [note_id, task])
         try:
@@ -122,13 +157,16 @@ def main():
         assert note.count() == 1
         assert "не сюжетное событие" in note.inner_text()
         assert page.evaluate("() => __graphite.getGapLinks().length") == 1
+        note.click()
+        assert_note_inspector_adjacent(page, note_id)
         assert len(db["graph"]["nodes"]) == 2
         assert not errors, errors
         context.close()
         browser.close()
     print(json.dumps({"result": "PASS", "writes": db["writes"],
                       "scenarios": ["create note", "edit task", "link to canonical event",
-                                    "persist via synthetic Site API", "reload and isolate editorial link"]},
+                                    "persist via synthetic Site API", "reload and isolate editorial link",
+                                    "note inspector adjacent and right dock", "zoom/reload layout"]},
                      ensure_ascii=False))
 
 
