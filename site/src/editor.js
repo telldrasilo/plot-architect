@@ -435,6 +435,7 @@ async function cwRunDraftMoveSave(){
      throw Error('Сохранённые координаты не подтверждены');
    }
    state=next;remote.revision=latest.revision;remote.dirty=false;
+   ensureEditorialState(state); // Same normalization as full render after server readback.
    for(const move of operation.command.moves){
     const pending=cwDraftMoveEdits.get(move.nodeId);
     if(pending?.x===move.x&&pending?.y===move.y)cwDraftMoveEdits.delete(move.nodeId);
