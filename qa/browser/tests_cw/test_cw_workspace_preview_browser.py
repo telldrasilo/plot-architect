@@ -87,7 +87,10 @@ def main():
         page.goto("https://plot.local/")
         page.wait_for_function(
             "() => window.__graphite && __graphite.getRemote().connected "
-            "&& __graphite.getState().nodes.some(n => n.id === 'n2')"
+            "&& __graphite.getProjectIndex().activeId === 'qa-cw-preview' "
+            "&& __graphite.getState().nodes.length === 2 "
+            "&& __graphite.getState().nodes[0].title === 'Завязка' "
+            "&& !__graphite.getRemote().busy && !__graphite.getRemote().dirty"
         )
         before = page.evaluate("() => __graphite.getState()")
         remote_before = page.evaluate("() => __graphite.getRemote().revision")
@@ -139,7 +142,10 @@ def main():
         page.reload()
         page.wait_for_function(
             "() => window.__graphite && __graphite.getRemote().connected "
-            "&& __graphite.getState().nodes.some(n => n.id === 'n2')"
+            "&& __graphite.getProjectIndex().activeId === 'qa-cw-preview' "
+            "&& __graphite.getState().nodes.length === 2 "
+            "&& __graphite.getState().nodes[0].title === 'Завязка' "
+            "&& !__graphite.getRemote().busy && !__graphite.getRemote().dirty"
         )
         assert page.locator(".cw-preview-card").count() == 0
         assert db["writes"] == 0
