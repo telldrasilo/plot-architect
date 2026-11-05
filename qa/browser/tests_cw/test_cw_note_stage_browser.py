@@ -250,6 +250,11 @@ def main():
         assert db["graph"]["workspaces"][0]["taskId"] == NOTE
         assert len([n for n in db["graph"]["nodes"] if "workspaceId" in n]) == 7
         assert page.locator(".cw-preview-link").count() == 3
+        # A staged note is replaced visually, while the source task and
+        # editorial context remain in the saved graph for provenance.
+        assert page.locator('[data-gap-note="gn1"]').count() == 0
+        assert page.locator('[data-gap-link="gl1"]').count() == 0
+        assert page.evaluate("() => __graphite.getSelected()") is None
         assert page.locator('[data-node="v1-n1"]').count() == 0
         assert page.locator('[data-edge="e1"]').count() == 1
         assert page.locator('[data-edge="e2"]').count() == 1
@@ -263,6 +268,8 @@ def main():
             "&& document.querySelectorAll('.cw-preview-card').length === 7"
         )
         assert page.locator(".cw-preview-area").count() == 1
+        assert page.locator('[data-gap-note="gn1"]').count() == 0
+        assert page.locator('[data-gap-link="gl1"]').count() == 0
         assert page.locator(".cw-accept-trigger").count() == 0
         assert page.locator('[data-node="v2-n1"]').count() == 0
         assert db["generic_puts"] == 0
