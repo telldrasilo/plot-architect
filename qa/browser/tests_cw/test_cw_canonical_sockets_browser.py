@@ -49,6 +49,15 @@ def main():
         page.evaluate("()=>__graphite.setZoomForTest(1)")
         result=socket_snapshot(page)
         assert result["mode"]=="full",result["mode"]
+        # Actual rendered circles must be centered on the measured card edge.
+        alignment=page.evaluate("""() => [...document.querySelectorAll('[data-edge-socket]')].map(el=>{
+          const card=document.querySelector('[data-node="'+el.dataset.socketNode+'"]');
+          const r=el.getBoundingClientRect(),b=card.getBoundingClientRect();
+          const center=r.left+r.width/2;
+          return Math.abs(center-(el.dataset.socketRole==='source'?b.right:b.left));
+        })""")
+        assert all(delta<1.5 for delta in alignment),alignment
+
         # Canonical selection gets a viewport-space relation toolbar.
         page.locator('[data-edge-target="e1"]').click(force=True)
         toolbar=page.locator('[data-cw-edge-toolbar="canon:e1"]')
