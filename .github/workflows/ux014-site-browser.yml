@@ -40,6 +40,8 @@ jobs:
         run: python qa/browser/tests_cw/test_cw_group_acceptance_browser.py
       - name: Verify reviewed draft coordinate saving in synthetic browser
         run: python qa/browser/tests_cw/test_cw_draft_move_browser.py
+      - name: Verify draft drag-out, cancellation and atomic placement acceptance
+        run: python qa/browser/tests_cw/test_cw_drop_to_canon_browser.py
       - name: Verify pending note geometry recovery in synthetic Chromium
         run: python qa/browser/tests_cw/test_cw_pending_geometry_browser.py
       - name: Verify ChatGPT manual JSON handoff and isolated staging
