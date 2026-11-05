@@ -1869,10 +1869,10 @@ function cwLinkOverlay(){
  const ns='http://www.w3.org/2000/svg';
  svg=document.createElementNS(ns,'svg');
  svg.id='cw-link-overlay';svg.classList.add('cw-link-overlay');
- svg.setAttribute('aria-hidden','true');svg.hidden=true;
+ svg.setAttribute('aria-hidden','true');svg.setAttribute('hidden','');
  const line=document.createElementNS(ns,'path');line.classList.add('cw-link-guide');
  const dot=document.createElementNS(ns,'circle');dot.classList.add('cw-link-candidate');
- dot.setAttribute('r','6');dot.hidden=true;
+ dot.setAttribute('r','6');dot.setAttribute('hidden','');
  svg.append(line,dot);world.append(svg);return svg;
 }
 function cwClearLinkTarget(){
@@ -1900,13 +1900,13 @@ function cwDrawLinkOverlay(from,to,valid){
  path.setAttribute('d','M'+from.x+','+from.y+' C'+(from.x+dx)+','+from.y+
   ' '+(to.x-dx)+','+to.y+' '+to.x+','+to.y);
  svg.dataset.valid=valid?'true':'false';
- svg.hidden=false;
+ svg.removeAttribute('hidden');
  const candidate=svg.querySelector('.cw-link-candidate');
- candidate.hidden=!valid;
+ candidate.toggleAttribute('hidden',!valid);
  if(valid){candidate.setAttribute('cx',to.x);candidate.setAttribute('cy',to.y)}
 }
 function cwHideLinkOverlay(){
- const svg=$('cw-link-overlay');if(svg)svg.hidden=true;
+ const svg=$('cw-link-overlay');if(svg)svg.setAttribute('hidden','');
  cwClearLinkTarget();
 }
 function cwBeginCanonicalLinkDrag(event,sourceId,handle){
@@ -1919,6 +1919,7 @@ function cwBeginCanonicalLinkDrag(event,sourceId,handle){
   note('Для создания стрелки подключите локальный проект');return;
  }
  if(!visible().some(n=>n.id===sourceId))return;
+ linkFrom=null;
  const source=proposeFreeSocket({nodeId:sourceId,role:'source',
   layout:cwCanonicalSocketLayout,bounds:cwCanonicalSocketBounds});
  const startX=event.clientX,startY=event.clientY;
