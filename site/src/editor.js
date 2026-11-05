@@ -1487,6 +1487,7 @@ function gapAnchor(end){if(end.kind==='gap_note'){const n=gnby(end.id);if(!n||n.
  if(end.kind==='semantic_field'){const f=fby(end.id);return f&&f.parent===state.view?{x:f.x+f.width/2,y:f.y+f.height/2}:null;}
  if(end.kind==='plot_node'){const n=nby(end.id);return n&&n.parent===state.view?nodeCenter(n):null;}return null;}
 
+let cwCanonicalSocketLayout=null,cwCanonicalSocketBounds=null;
 function renderEdges(){
  memoRender={dims:new Map(),homes:new Map()};
  const keep=focusIds(),selectedId=selected?.type==='node'?selected.id:null,selectedEdge=selected?.type==='edge'?selected.id:null;
@@ -1499,6 +1500,16 @@ function renderEdges(){
  }));
  const sockets=layoutEdgeSockets({nodes:visibleNodes,edges:currentEdges(),
    bounds,mode:semanticZoomLevel()});
+ cwCanonicalSocketLayout=sockets;cwCanonicalSocketBounds=bounds;
+ for(const node of visibleNodes){
+  const handle=[...document.querySelectorAll('[data-link-source]')]
+   .find(el=>el.dataset.linkSource===node.id);
+  if(!handle)continue;
+  const free=proposeFreeSocket({nodeId:node.id,role:'source',
+   layout:sockets,bounds});
+  handle.style.left=(free.x-node.x)+'px';
+  handle.style.top=(free.y-node.y)+'px';
+ }
  const marker='<defs><marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#93908b" stroke-width="1.8"/></marker><marker id="arrOn" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#e4c78c" stroke-width="1.8"/></marker></defs>';
  let c=marker;
  for(const e of plan.visibleEdges){
@@ -1751,7 +1762,17 @@ function renderFieldInspector(el,f){el.hidden=false;
  $('f-zoom').onclick=()=>jumpToField(f.id);$('f-delete').onclick=()=>deleteField(f.id);$('close-inspect').onclick=()=>{selected=null;render()};
 }
 
-function renderNodes(){const host=$('nodes');host.innerHTML='';const keep=focusIds(),chosen=new Set(groupIds()),parentsWithChildren=new Set(state.nodes.filter(k=>k.parent).map(k=>k.parent));for(const n of visible()){const rewrite=rewriteBy(n.id);const el=document.createElement('article');el.className='node '+(n.size||'normal')+(rewrite?' rewrite-draft':'')+(chosen.has(n.id)?' selected':'')+(n.status==='proposed'?' node-proposed':'')+(keep&&!keep.has(n.id)?' focus-muted':'');el.dataset.node=n.id;el.style.left=n.x+'px';el.style.top=n.y+'px';if(Number.isFinite(n.width)||Number.isFinite(n.height))el.classList.add('node-custom-size');if(Number.isFinite(n.width))el.style.width=widthOf(n)+'px';if(Number.isFinite(n.height))el.style.minHeight=heightOf(n)+'px';el.style.setProperty('--color',colorOf(n));el.tabIndex=0;el.setAttribute('aria-label',(rewrite?'Заметка переработки: ':'Событие: ')+n.title);el.innerHTML=`${chosen.size===1&&chosen.has(n.id)?`<div class="node-actions">${!rewrite?'<button data-command="inside" title="Открыть детали">↗ Внутрь</button><button data-command="link" title="Соединить с другим событием">↗ Связать</button>':''}<button data-command="edit" title="Редактировать">⋯</button></div>`:''}${rewrite?'<div class="ux014-node-kind">▤ Заметка · переработка</div>':''}<div class="node-header"><div class="node-marker"></div><div class="node-title">${esc(n.title)}</div></div><div class="node-note">${esc(rewrite?(rewrite.taskText||'Что изменить?'):(n.description||'Добавьте короткое описание события'))}</div><div class="node-foot">${rewrite?`<span class="ux014-rewrite-status">Исходник сохранён · задание на переработку</span>`:tagNames(n).map(tag=>`<span class="field-chip ${tag.manual?'manual-chip':''}" title="${tag.manual?'Закреплённый тег':'Назначен полем'}">${esc(tag.name)}</span>`).join('')}${!rewrite&&!tagNames(n).length?'<span>Без поля</span>':''}${!rewrite?editorialInView().filter(ef=>ef.memberIds.includes(n.id)).map(ef=>`<span class="editorial-chip" title="Редакторское задание, не смысловой тег">▨ ${esc(ef.title)}</span>`).join(''):''}${!rewrite&&parentsWithChildren.has(n.id)?'<span class="tag">Есть детали</span>':''}</div>${rewrite?'':'<button class="node-add" title="Продолжить сюжет" data-command="after">+</button>'}${chosen.size===1&&chosen.has(n.id)?'<button class="node-resize-grip" title="Изменить ширину и высоту карточки" aria-label="Изменить размер ноды">⤡</button>':''}`;host.append(el);
+function renderNodes(){const host=$('nodes');host.innerHTML='';const keep=focusIds(),chosen=new Set(groupIds()),parentsWithChildren=new Set(state.nodes.filter(k=>k.parent).map(k=>k.parent));for(const n of visible()){const rewrite=rewriteBy(n.id);const el=document.createElement('article');el.className='node '+(n.size||'normal')+(rewrite?' rewrite-draft':'')+(chosen.has(n.id)?' selected':'')+(n.status==='proposed'?' node-proposed':'')+(keep&&!keep.has(n.id)?' focus-muted':'');el.dataset.node=n.id;el.style.left=n.x+'px';el.style.top=n.y+'px';if(Number.isFinite(n.width)||Number.isFinite(n.height))el.classList.add('node-custom-size');if(Number.isFinite(n.width))el.style.width=widthOf(n)+'px';if(Number.isFinite(n.height))el.style.minHeight=heightOf(n)+'px';el.style.setProperty('--color',colorOf(n));el.tabIndex=0;el.setAttribute('aria-label',(rewrite?'Заметка переработки: ':'Событие: ')+n.title);el.innerHTML=`${chosen.size===1&&chosen.has(n.id)?`<div class="node-actions">${!rewrite?'<button data-command="inside" title="Открыть детали">↗ Внутрь</button><button data-command="link" title="Соединить с другим событием">↗ Связать</button>':''}<button data-command="edit" title="Редактировать">⋯</button></div>`:''}${rewrite?'<div class="ux014-node-kind">▤ Заметка · переработка</div>':''}<div class="node-header"><div class="node-marker"></div><div class="node-title">${esc(n.title)}</div></div><div class="node-note">${esc(rewrite?(rewrite.taskText||'Что изменить?'):(n.description||'Добавьте короткое описание события'))}</div><div class="node-foot">${rewrite?`<span class="ux014-rewrite-status">Исходник сохранён · задание на переработку</span>`:tagNames(n).map(tag=>`<span class="field-chip ${tag.manual?'manual-chip':''}" title="${tag.manual?'Закреплённый тег':'Назначен полем'}">${esc(tag.name)}</span>`).join('')}${!rewrite&&!tagNames(n).length?'<span>Без поля</span>':''}${!rewrite?editorialInView().filter(ef=>ef.memberIds.includes(n.id)).map(ef=>`<span class="editorial-chip" title="Редакторское задание, не смысловой тег">▨ ${esc(ef.title)}</span>`).join(''):''}${!rewrite&&parentsWithChildren.has(n.id)?'<span class="tag">Есть детали</span>':''}</div>${rewrite?'':'<button class="node-add" title="Продолжить сюжет" data-command="after">+</button>'}${chosen.size===1&&chosen.has(n.id)?'<button class="node-resize-grip" title="Изменить ширину и высоту карточки" aria-label="Изменить размер ноды">⤡</button>':''}`;if(!rewrite){
+  const socket=document.createElement('button');
+  socket.type='button';socket.className='cw-free-source';
+  socket.dataset.linkSource=n.id;
+  socket.setAttribute('aria-label','Начать стрелку от события «'+n.title+'»');
+  socket.title='Протяните стрелку к другому событию';
+  socket.addEventListener('pointerdown',e=>cwBeginCanonicalLinkDrag(e,n.id,socket));
+  socket.addEventListener('click',e=>e.stopPropagation());
+  el.append(socket);
+ }
+ host.append(el);
  el.onclick=e=>{if(e.target.closest('button'))return;e.stopPropagation();if(dragCompletedFor===n.id){dragCompletedFor=null;return}if(completeGapLink('plot_node',n.id))return;if(linkFrom){finishLink(n.id);return}if(e.ctrlKey||e.metaKey){toggleNodeSelection(n.id);return}setNodeSelection([n.id],n.id)};el.ondblclick=e=>{if(e.target.closest('button'))return;e.stopPropagation();notifyModal('Переименовать','Изменение не затронет связи.', 'Название',v=>commit(()=>{nby(n.id).title=v},'Название изменено'),n.title)};
  el.querySelectorAll('[data-command]').forEach(b=>b.onclick=e=>{e.stopPropagation();const id=n.id;const c=b.dataset.command;if(c==='after')addAfter(id);if(c==='link'){linkFrom=id;selected={type:'node',id};render();note('Нажмите на другую карточку — создадим последовательность')}if(c==='edit'){selected={type:'node',id};renderInspector()}if(c==='inside'){state.view=id;selected=null;pan={x:110,y:95,scale:1};render();note('Внутренний уровень — отдельное полотно')}});
  const grip=el.querySelector('.node-resize-grip');
