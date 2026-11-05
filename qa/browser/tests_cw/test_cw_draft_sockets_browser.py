@@ -26,6 +26,10 @@ def snap(page):
 def main():
     errors=[]
     g=story()
+    # loadFixture bypasses the server's normalizer; provide the same
+    # required canonical-node shape that a real project read returns.
+    for node in g["nodes"]:
+        node.setdefault("lineIds",[])
     g["edges"].extend([
       {"id":"eb","from":"c","to":"b","type":"causes",
        "workspaceId":"w1","draftRelation":"internal","draftBranchId":"beta"},
