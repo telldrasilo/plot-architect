@@ -73,6 +73,8 @@ def main():
         assert all(delta<1.5 for delta in alignment),alignment
         assert len(result["paths"])==3,result
         assert len(result["ports"])==6,result
+        # Read-only preview has visible ports but no active rewire controls.
+        assert page.locator('[data-cw-rewire-edge]').count()==0
         assert len(result["directions"])==len(result["paths"])==3,result
         assert all(a["centered"] and a["pointer"]=="none" and a["length"]>0
                    for a in result["directions"]),result["directions"]
