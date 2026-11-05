@@ -177,9 +177,10 @@ def main():
         assert page.get_by_role("button", name="В сюжет").count() == 0
         assert db["generic_writes"] == 0
         page.evaluate("() => __graphite.setCWWorkflowTestMode(true)")
-        assert page.locator(".cw-accept-trigger").count() == 3
+        assert page.locator(".cw-accept-trigger").count() == 0
 
-        page.locator('[data-cw-node="a"] .cw-accept-trigger').click()
+        page.locator('[data-cw-node="a"]').click()
+        page.locator('[data-cw-workspace="w1"] .cw-draft-selection-actions button').first.click()
         page.locator(".cw-accept-review").wait_for()
         assert db["previews"] == 1
         assert "1 событие" in page.locator(".cw-accept-review").inner_text()
@@ -200,7 +201,8 @@ def main():
 
         # Accept the following node separately; the original internal link
         # becomes canonical only when both endpoints are approved.
-        page.locator('[data-cw-node="b"] .cw-accept-trigger').click()
+        page.locator('[data-cw-node="b"]').click()
+        page.locator('[data-cw-workspace="w1"] .cw-draft-selection-actions button').first.click()
         page.locator(".cw-accept-review").wait_for()
         assert "1" in page.locator(".cw-accept-review").inner_text()
         page.get_by_role("button", name="Принять в сюжет").click()
@@ -228,7 +230,8 @@ def main():
         # A second operation from an outdated preview fails; no local
         # canonization, and no generic PUT fallback.
         page.evaluate("() => __graphite.setCWWorkflowTestMode(true)")
-        page.locator('[data-cw-node="c"] .cw-accept-trigger').click()
+        page.locator('[data-cw-node="c"]').click()
+        page.locator('[data-cw-workspace="w1"] .cw-draft-selection-actions button').first.click()
         page.locator(".cw-accept-review").wait_for()
         db["force_conflict"] = True
         page.get_by_role("button", name="Принять в сюжет").click()
