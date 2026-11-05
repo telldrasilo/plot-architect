@@ -12,7 +12,8 @@ import {previewStageNoteAlternatives,applyStageNoteAlternatives} from './creativ
 import {previewMoveDraftNodes,applyMoveDraftNodes} from './creative_workflow_draft_move.mjs';
 import {
   previewAddDraftEdge,applyAddDraftEdge,
-  previewRewireDraftEdge,applyRewireDraftEdge
+  previewRewireDraftEdge,applyRewireDraftEdge,
+  previewSetDraftEdgeType,applySetDraftEdgeType
 } from './creative_workflow_draft_edges.mjs';
 import {
   CreativeWorkflowContractError,
@@ -39,6 +40,7 @@ const fields={
   move_drafts:['workspaceId','moves','expectedPreview'],
   add_draft_edge:['workspaceId','edge','expectedPreview'],
   rewire_draft_edge:['workspaceId','edgeId','to','expectedPreview'],
+  set_draft_edge_type:['workspaceId','edgeId','newType','expectedPreview'],
   accept_draft:['workspaceId','nodeIds','placements','expectedPreview'],
   start_replacement:['replacementId','sourceNodeIds','expectedPreview'],
   reconnect:['replacementId','decisions','expectedPreview'],
@@ -84,6 +86,7 @@ async function runDomain(db,projectId,graph,expectedRevision,command){
     case 'move_drafts':return applyMoveDraftNodes(graph,args);
     case 'add_draft_edge':return applyAddDraftEdge(graph,args);
     case 'rewire_draft_edge':return applyRewireDraftEdge(graph,args);
+    case 'set_draft_edge_type':return applySetDraftEdgeType(graph,args);
     case 'accept_draft':return applyDraftAcceptance(graph,args);
     case 'start_replacement':return applyStartReplacement(graph,args);
     case 'reconnect':return applyReplacementReconnection(graph,args);
@@ -212,6 +215,7 @@ export async function previewWorkflowCommand(db,{projectId,expectedRevision,comm
     case 'move_drafts': preview=previewMoveDraftNodes(graph,command);break;
     case 'add_draft_edge': preview=previewAddDraftEdge(graph,command);break;
     case 'rewire_draft_edge': preview=previewRewireDraftEdge(graph,command);break;
+    case 'set_draft_edge_type': preview=previewSetDraftEdgeType(graph,command);break;
     case 'accept_draft': preview=previewDraftAcceptance(graph,command);break;
     case 'start_replacement': preview=previewReplacementStart(graph,command.sourceNodeIds);break;
     case 'reconnect': preview=previewReplacementReconnection(graph,command);break;
