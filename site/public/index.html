@@ -444,7 +444,7 @@ let cwWorkflowTestMode=false;
 let cwLocalWorkflowEnabled=false;
 // The local server explicitly advertises this capability after authentication;
 // the QA switch remains synthetic. The REST server validates every operation.
-function cwWorkflowEnabled(){return cwWorkflowEnabled()||cwLocalWorkflowEnabled}
+function cwWorkflowEnabled(){return cwWorkflowTestMode||cwLocalWorkflowEnabled}
 const cwDraftMoveEdits=new Map();
 let cwMoveWorkspaceId=null;
 let cwMoveReview=null;
