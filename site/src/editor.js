@@ -1390,6 +1390,20 @@ function renderCreativeWorkspacePreview(){
       e,source,area,handle,svg,()=>drawnSockets,()=>socketBounds,edge));
     handle.addEventListener('click',e=>e.stopPropagation());
     card.append(handle);
+    // A separate type button keeps drag-to-rewire independent of mouse editing.
+    const changeType=document.createElement('button');changeType.type='button';
+    changeType.className='cw-draft-type-trigger';changeType.dataset.cwEdgeTypeTrigger=edge.id;
+    changeType.textContent='≡';
+    changeType.title='Изменить смысл черновой связи';
+    changeType.setAttribute('aria-label','Изменить тип черновой стрелки от «'+
+      source.title+'» к «'+target.title+'»');
+    changeType.style.left=(port.x-target.x-29)+'px';
+    changeType.style.top=(port.y-target.y)+'px';
+    changeType.addEventListener('pointerdown',e=>e.stopPropagation());
+    changeType.addEventListener('click',e=>{
+     e.stopPropagation();cwSelectDraftEdge(area.id,edge.id)
+    });
+    card.append(changeType);
    }
   }
   cwDrawDraftConnections(svg,area,internals,drawnSockets);
