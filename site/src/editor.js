@@ -289,13 +289,16 @@ function cwCancelDropReview(){
  renderCreativeWorkspacePreview();
 }
 let cwSelectedWorkspaceId=null;
+let cwSelectedDraftEdge=null; // transient visual selection only
 const cwSelectedDraftIds=new Set();
 function cwClearDraftSelection(){
+ cwSelectedDraftEdge=null;
  cwSelectedWorkspaceId=null;cwSelectedDraftIds.clear();cwAcceptanceReview=null;
  cwDragDropReview=null;
 }
 function cwToggleDraftSelection(nodeId,workspaceId){
  if(!cwWorkflowEnabled())return;
+ cwSelectedDraftEdge=null;
  if(!state.nodes.some(n=>n.id===nodeId&&n.workspaceId===workspaceId))return;
  if(cwSelectedWorkspaceId!==workspaceId){
   cwSelectedDraftIds.clear();cwSelectedWorkspaceId=workspaceId;
@@ -611,6 +614,7 @@ async function cwRunDraftMoveSave(){
 function cwDrawDraftConnections(svg,area,links,sockets,moves=new Map()){
  if(!sockets)return;
  const paths=new Map([...svg.querySelectorAll('[data-cw-edge]')].map(el=>[el.dataset.cwEdge,el]));
+ const hitPaths=new Map([...svg.querySelectorAll('[data-cw-edge-hit]')].map(el=>[el.dataset.cwEdgeHit,el]));
  const circles=new Map([...svg.querySelectorAll('[data-cw-socket]')].map(el=>[el.dataset.cwSocket,el]));
  for(const edge of links){
   const from=sockets.ports.get(socketKey(edge.id,'source'));
@@ -620,7 +624,9 @@ function cwDrawDraftConnections(svg,area,links,sockets,moves=new Map()){
   const ax=from.x+a.dx-area.x,ay=from.y+a.dy-area.y;
   const bx=to.x+b.dx-area.x,by=to.y+b.dy-area.y;
   const path=paths.get(edge.id);
-  if(path)path.setAttribute('d','M '+ax+' '+ay+' L '+bx+' '+by);
+  const d='M '+ax+' '+ay+' L '+bx+' '+by;
+  if(path)path.setAttribute('d',d);
+  hitPaths.get(edge.id)?.setAttribute('d',d);
   const left=circles.get(from.key),right=circles.get(to.key);
   if(left){left.setAttribute('cx',ax);left.setAttribute('cy',ay)}
   if(right){right.setAttribute('cx',bx);right.setAttribute('cy',by)}
@@ -706,8 +712,31 @@ function cwBeginDraftLinkDrag(event,source,area,handle,svg,getSockets,getBounds,
  handle.addEventListener('pointerup',end);
  handle.addEventListener('pointercancel',cancel);
 }
+const cwDraftRelationOptions=[
+ ['precedes','Предшествует','А происходит раньше Б, не обязательно вызывает Б'],
+ ['causes','Вызывает','А является причиной Б'],
+ ['enables','Создаёт условия','А делает Б возможным'],
+ ['hinders','Препятствует','А мешает Б']
+];
+function cwSelectDraftEdge(workspaceId,edgeId){
+ if(!cwWorkflowEnabled()||cwAcceptanceBusy||cwDragDropReview)return;
+ const edge=state.edges.find(e=>e.id===edgeId&&e.workspaceId===workspaceId&&e.draftRelation==='internal');
+ if(!edge)return;
+ cwSelectedDraftEdge=cwSelectedDraftEdge?.edgeId===edgeId?null:{workspaceId,edgeId};
+ renderCreativeWorkspacePreview();
+}
 async function cwCommitDraftEdge(command){
  if(!cwCleanForOperation()){note('Проект ещё синхронизируется');return}
+ const before=state.edges.find(e=>e.id===(command.edge?.id||command.edgeId));
+ const confirmed=edge=>!!edge&&edge.workspaceId===command.workspaceId&&(
+  command.kind==='add_draft_edge'
+   ?edge.from===command.edge.from&&edge.to===command.edge.to&&edge.type===command.edge.type
+   :command.kind==='rewire_draft_edge'
+   ?edge.id===before?.id&&edge.from===before?.from&&edge.to===command.to&&edge.type===before?.type
+   :command.kind==='set_draft_edge_type'
+   ?edge.id===before?.id&&edge.from===before?.from&&edge.to===before?.to
+    &&edge.draftRelation==='internal'&&edge.type===command.newType
+   :false);
  cwAcceptanceBusy=true;
  const projectId=activeProjectId,revision=remote.revision;
  let sent=false,verified=false;
@@ -716,14 +745,11 @@ async function cwCommitDraftEdge(command){
     !Number.isSafeInteger(latest.revision)||latest.revision<=revision)
    throw Error('Версия проекта изменилась во время записи');
   let edge=latest.graph?.edges?.find(e=>e.id===(command.edge?.id||command.edgeId));
-  if(!edge||edge.workspaceId!==command.workspaceId||
-   (command.kind==='add_draft_edge'
-    ?edge.from!==command.edge.from||edge.to!==command.edge.to||edge.type!==command.edge.type
-    :edge.to!==command.to))
-   throw Error('Черновая стрелка не подтверждена');
+  if(!confirmed(edge))throw Error('Черновая стрелка не подтверждена');
   state=validateImported(latest.graph);remote.revision=latest.revision;
   remote.dirty=false;verified=true;
   try{localStorage.removeItem(PENDING_PREFIX+projectId)}catch{}
+  if(command.kind==='set_draft_edge_type')cwSelectedDraftEdge=null;
   recomputeFieldTags();save(false);render();
   note('Черновая стрелка сохранена');
  };
@@ -742,6 +768,14 @@ async function cwCommitDraftEdge(command){
   if(command.kind==='rewire_draft_edge'&&(
     plan.edgeId!==command.edgeId||plan.after?.to!==command.to))
    throw Error('Сервер вернул неожиданное переподключение');
+  if(command.kind==='set_draft_edge_type'&&(
+    !before||before.draftRelation!=='internal'||plan.operation!=='type'||
+    plan.edgeId!==command.edgeId||plan.before?.type!==before.type||
+    plan.before?.from!==before.from||plan.before?.to!==before.to||
+    plan.after?.from!==before.from||plan.after?.to!==before.to||
+    plan.after?.id!==before.id||plan.after?.type!==command.newType||
+    plan.after?.workspaceId!==command.workspaceId))
+   throw Error('Сервер вернул неожиданное изменение отношения');
   sent=true;
   const receipt=await cwWorkflowRequest(projectId,'apply',{
    expectedRevision:revision,operationId:crypto.randomUUID(),
@@ -755,11 +789,7 @@ async function cwCommitDraftEdge(command){
    try{
     const latest=await apiRequest('/api/projects/'+encodeURIComponent(projectId));
     const edge=latest.graph?.edges?.find(e=>e.id===(command.edge?.id||command.edgeId));
-    if(edge?.workspaceId===command.workspaceId&&(
-      command.kind==='add_draft_edge'
-        ?edge.from===command.edge.from&&edge.to===command.edge.to
-        :edge.to===command.to
-    ))applyReadback(latest);
+    if(confirmed(edge))applyReadback(latest);
    }catch{}
   }
   if(!verified){
@@ -1138,7 +1168,9 @@ function renderCreativeWorkspacePreview(){
   let drawnSockets=null;
   const svg=document.createElementNS(namespace,'svg');svg.setAttribute('class','cw-preview-arrows');
   svg.setAttribute('width',String(area.width));svg.setAttribute('height',String(area.height));
-  svg.setAttribute('aria-hidden','true');
+  const edgeEditable=persisted&&cwWorkflowEnabled()&&!cwDragDropReview;
+  svg.setAttribute('aria-hidden',edgeEditable?'false':'true');
+  if(edgeEditable)svg.setAttribute('aria-label','Черновые сюжетные связи');
   const markerId='cw-draft-arrow-'+area.id;
   const defs=document.createElementNS(namespace,'defs');
   const arrow=document.createElementNS(namespace,'marker');
@@ -1156,9 +1188,28 @@ function renderCreativeWorkspacePreview(){
    path.setAttribute('d','M '+ax+' '+ay+' L '+bx+' '+by);
    const style= ['precedes','causes','enables','hinders'].includes(edge.type)
     ?edge.type:'precedes';
-   path.setAttribute('class','cw-preview-link cw-preview-link-'+style);
+   path.setAttribute('class','cw-preview-link cw-preview-link-'+style+
+    (cwSelectedDraftEdge?.workspaceId===area.id&&cwSelectedDraftEdge.edgeId===edge.id
+     ?' cw-draft-edge-active':''));
    path.setAttribute('marker-end','url(#'+markerId+')');
    path.dataset.cwEdge=edge.id;svg.append(path);
+   if(edgeEditable&&edge.draftRelation==='internal'){
+    const hit=document.createElementNS(namespace,'path');
+    hit.classList.add('cw-draft-edge-hit');
+    hit.setAttribute('d',path.getAttribute('d'));
+    hit.dataset.cwEdgeHit=edge.id;hit.setAttribute('role','button');
+    hit.setAttribute('tabindex','0');
+    hit.setAttribute('aria-label','Изменить тип связи «'+from.title+'» — «'+to.title+'»');
+    hit.addEventListener('click',e=>{
+     e.preventDefault();e.stopPropagation();cwSelectDraftEdge(area.id,edge.id)
+    });
+    hit.addEventListener('keydown',e=>{
+     if(e.key==='Enter'||e.key===' '){
+      e.preventDefault();e.stopPropagation();cwSelectDraftEdge(area.id,edge.id)
+     }
+    });
+    svg.append(hit);
+   }
   }
   box.append(svg);
   const nodes=data.nodes.filter(n=>n.workspaceId===area.id);
@@ -1339,9 +1390,66 @@ function renderCreativeWorkspacePreview(){
       e,source,area,handle,svg,()=>drawnSockets,()=>socketBounds,edge));
     handle.addEventListener('click',e=>e.stopPropagation());
     card.append(handle);
+    // A separate type button keeps drag-to-rewire independent of mouse editing.
+    const changeType=document.createElement('button');changeType.type='button';
+    changeType.className='cw-draft-type-trigger';changeType.dataset.cwEdgeTypeTrigger=edge.id;
+    changeType.textContent='≡';
+    changeType.title='Изменить смысл черновой связи';
+    changeType.setAttribute('aria-label','Изменить тип черновой стрелки от «'+
+      source.title+'» к «'+target.title+'»');
+    changeType.style.left=(port.x-target.x-29)+'px';
+    changeType.style.top=(port.y-target.y)+'px';
+    changeType.addEventListener('pointerdown',e=>e.stopPropagation());
+    changeType.addEventListener('click',e=>{
+     e.stopPropagation();cwSelectDraftEdge(area.id,edge.id)
+    });
+    card.append(changeType);
    }
   }
   cwDrawDraftConnections(svg,area,internals,drawnSockets);
+  if(edgeEditable&&cwSelectedDraftEdge?.workspaceId===area.id){
+   const edge=internals.find(e=>e.id===cwSelectedDraftEdge.edgeId&&e.draftRelation==='internal');
+   const from=edge&&drawnSockets.ports.get(socketKey(edge.id,'source'));
+   const to=edge&&drawnSockets.ports.get(socketKey(edge.id,'target'));
+   if(edge&&from&&to){
+    const panel=document.createElement('section');
+    panel.className='cw-draft-type-panel';panel.dataset.cwEdgeTypePanel=edge.id;
+    panel.setAttribute('role','group');panel.setAttribute('aria-label','Тип черновой стрелки');
+    panel.addEventListener('pointerdown',e=>e.stopPropagation());
+    panel.addEventListener('click',e=>e.stopPropagation());
+    panel.style.left=Math.max(8,Math.min(Math.max(8,area.width-314),
+     (from.x+to.x)/2-area.x-155))+'px';
+    panel.style.top=Math.max(8,Math.min(Math.max(8,area.height-150),
+     (from.y+to.y)/2-area.y+20))+'px';
+    const label=document.createElement('label');label.textContent='Смысл связи';
+    label.setAttribute('for','cw-type-'+edge.id);
+    const select=document.createElement('select');select.id='cw-type-'+edge.id;
+    select.dataset.cwEdgeType=edge.id;
+    for(const [value,title] of cwDraftRelationOptions){
+     const opt=document.createElement('option');opt.value=value;opt.textContent=title;select.append(opt);
+    }
+    select.value=edge.type;
+    const help=document.createElement('small');
+    const actions=document.createElement('div');actions.className='cw-draft-type-actions';
+    const approve=document.createElement('button');approve.type='button';approve.textContent='Сохранить';
+    const cancel=document.createElement('button');cancel.type='button';cancel.textContent='Отмена';
+    const update=()=>{
+     help.textContent=cwDraftRelationOptions.find(x=>x[0]===select.value)?.[2]||'';
+     approve.disabled=select.value===edge.type||cwAcceptanceBusy||!cwCleanForOperation();
+    };
+    select.addEventListener('change',update);
+    approve.addEventListener('click',e=>{
+     e.stopPropagation();if(approve.disabled)return;
+     void cwCommitDraftEdge({kind:'set_draft_edge_type',workspaceId:area.id,
+      edgeId:edge.id,newType:select.value});
+    });
+    cancel.addEventListener('click',e=>{
+     e.stopPropagation();cwSelectedDraftEdge=null;renderCreativeWorkspacePreview();
+    });
+    actions.append(approve,cancel);label.append(select);
+    panel.append(label,help,actions);box.append(panel);update();
+   }
+  }
   if(dropReviewPanel)cwPositionDropReview(dropReviewPanel,box,dropReviewIds);
  }
 }
