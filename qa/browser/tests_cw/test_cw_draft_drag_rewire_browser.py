@@ -103,8 +103,7 @@ def main():
 
     def drag(page,edge_id,target_id=None,finish=True):
         handle=page.locator('[data-cw-rewire-edge="'+edge_id+'"]')
-        target_card=handle.locator("xpath=..")
-        target_card.hover(position={"x":45,"y":25})
+        # No parent-card hover or selected edge is required to grab this port.
         rect=handle.bounding_box()
         assert rect is not None,edge_id
         start=(rect["x"]+rect["width"]/2,rect["y"]+rect["height"]/2)
@@ -124,7 +123,17 @@ def main():
             "&&document.querySelectorAll('[data-cw-node]').length===3"
         )
         page.evaluate("()=>__graphite.fit()")
-        assert page.locator('[data-cw-rewire-edge="ea"]').count()==1
+        handle=page.locator('[data-cw-rewire-edge="ea"]')
+        assert handle.count()==1
+        style=handle.evaluate("""el=>({
+          pointer:getComputedStyle(el).pointerEvents,
+          rest:getComputedStyle(el,'::after').opacity,
+          radius:getComputedStyle(el,'::after').borderRadius
+        })""")
+        assert style=={"pointer":"auto","rest":"0","radius":"50%"},style
+        handle.hover()
+        assert handle.evaluate("el=>getComputedStyle(el,'::after').opacity")=="1"
+        assert page.locator('[data-cw-socket="ea:target"].cw-preview-socket-hover').count()==1
         assert db["apply"]==db["put"]==0
         old=copy.deepcopy(db["graph"]["edges"])
         drag(page,"ea","c",finish=False)
@@ -167,7 +176,8 @@ def main():
         assert not errors,errors
         context.close();browser.close()
     print(json.dumps({"result":"PASS","writes":db["apply"],
-      "cases":["immutable preview","Esc","off-target","same ID and type",
+      "cases":["ready on direct hover","no square",
+       "immutable preview","Esc","off-target","same ID and type",
        "server readback","reload","stale CAS"]}))
 
 if __name__=="__main__":
