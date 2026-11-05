@@ -117,7 +117,10 @@ def main():
         if path == "/" and method == "GET":
             route.fulfill(status=200, content_type="text/html; charset=utf-8", body=HTML)
         elif path == "/api/health":
-            reply({"ok": True, "authenticated": True, "authMode": "sites-native"})
+            is_local = urlsplit(request.url).hostname == "127.0.0.1"
+            reply({"ok": True, "authenticated": True,
+                   "authMode": "node-loopback" if is_local else "sites-native",
+                   "workflowEnabled": is_local})
         elif path == "/api/projects" and method == "GET":
             reply({"projects": [{"id": PROJECT_ID, "name": "Synthetic stage note",
                                  "revision": db["revision"]}]})
@@ -275,6 +278,27 @@ def main():
         assert db["generic_puts"] == 0
         assert not errors, errors
         context.close()
+
+        # The ordinary authenticated Node loopback advertises its workflow
+        # feature. No QA switch is needed to interact with persisted drafts.
+        local = browser.new_context(viewport={"width": 1365, "height": 920})
+        local.route("http://127.0.0.1:8788/**", serve)
+        local_page = local.new_page()
+        local_page.on("pageerror", lambda exception: errors.append(str(exception)))
+        local_page.goto("http://127.0.0.1:8788/")
+        local_page.wait_for_function(
+            "() => __graphite.getRemote().connected "
+            "&& document.querySelectorAll('.cw-accept-trigger').length === 7"
+        )
+        assert local_page.evaluate("() => __graphite.getCWWorkflowTestMode()") is False
+        assert local_page.locator(".cw-movable-draft").count() == 7
+        assert local_page.locator(".cw-draft-check").count() == 7
+        assert local_page.locator('[data-gap-note="gn1"]').count() == 0
+        local_page.locator(".cw-draft-check").first.check()
+        assert local_page.locator(".cw-draft-selection-actions").count() == 1
+        assert db["applies"] == 1 and db["generic_puts"] == 0
+        assert not errors, errors
+        local.close()
         browser.close()
 
     print(json.dumps({
@@ -283,7 +307,7 @@ def main():
         "generic_puts": db["generic_puts"],
         "cases": ["disabled by default", "prepared branches", "preview",
                   "cancel", "concurrent conflict", "explicit save",
-                  "canonical isolation", "reload"]
+                  "canonical isolation", "reload", "local workflow auto-activation"]
     }, ensure_ascii=False))
 
 
