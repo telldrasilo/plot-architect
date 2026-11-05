@@ -326,6 +326,13 @@ body.pa-multi-modifier .inspector{pointer-events:none;opacity:.35}/* allows Ctrl
 .cw-draft-type-panel small{display:block;font-size:11px;line-height:1.45;color:#b9b5be;margin-top:7px;min-height:16px}
 .cw-draft-type-actions{display:flex;gap:7px;margin-top:10px}
 .cw-draft-type-actions button{padding:6px 10px}
+/* Secondary per-edge control near each input socket; visible on hover/focus only. */
+.cw-preview-card .cw-draft-type-trigger{position:absolute;width:22px;height:22px;min-height:22px;
+ transform:translate(-50%,-50%);padding:0;border-radius:7px;border:1px solid #b6a1ce;
+ background:#30283a;font-size:16px;line-height:1;z-index:11;opacity:0;pointer-events:none}
+.cw-preview-card:hover .cw-draft-type-trigger,.cw-preview-card:focus-within .cw-draft-type-trigger,
+.cw-preview-card.cw-draft-selected .cw-draft-type-trigger{opacity:1;pointer-events:auto}
+.cw-draft-type-trigger:focus-visible{outline:2px solid #d6c69e;outline-offset:2px}
 
 .cw-preview-card.cw-draft-link-target{outline:2px solid #d2bded;outline-offset:3px}
 .cw-draft-link-guide{fill:none;stroke:#bcb0d8;stroke-width:2;stroke-dasharray:8 5;
@@ -1780,6 +1787,20 @@ function renderCreativeWorkspacePreview(){
       e,source,area,handle,svg,()=>drawnSockets,()=>socketBounds,edge));
     handle.addEventListener('click',e=>e.stopPropagation());
     card.append(handle);
+    // A separate type button keeps drag-to-rewire independent of mouse editing.
+    const changeType=document.createElement('button');changeType.type='button';
+    changeType.className='cw-draft-type-trigger';changeType.dataset.cwEdgeTypeTrigger=edge.id;
+    changeType.textContent='≡';
+    changeType.title='Изменить смысл черновой связи';
+    changeType.setAttribute('aria-label','Изменить тип черновой стрелки от «'+
+      source.title+'» к «'+target.title+'»');
+    changeType.style.left=(port.x-target.x-29)+'px';
+    changeType.style.top=(port.y-target.y)+'px';
+    changeType.addEventListener('pointerdown',e=>e.stopPropagation());
+    changeType.addEventListener('click',e=>{
+     e.stopPropagation();cwSelectDraftEdge(area.id,edge.id)
+    });
+    card.append(changeType);
    }
   }
   cwDrawDraftConnections(svg,area,internals,drawnSockets);
