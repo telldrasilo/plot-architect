@@ -42,7 +42,7 @@ try {
   console.log('Database: ' + path);
   console.log('Temporary local access key (keep private): ' + token);
   console.log('The key also authenticates local MCP Bearer calls.');
-  console.log('No OpenAI API calls. No Beget, Sites, D1 or plugin changes.');
+  console.log('No OpenAI model API calls. No Beget, Sites, D1 or plugin changes.');
   console.log('Stop with Ctrl+C. This key expires when the process exits.\n');
   if (withTunnel) {
     const invocation = localTunnelLaunchOptions({
