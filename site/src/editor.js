@@ -798,6 +798,49 @@ function cwPersistedWorkspaceScene(){
   &&ids.has(e.from)&&ids.has(e.to)&&ids.get(e.from).workspaceId===e.workspaceId&&ids.get(e.to).workspaceId===e.workspaceId);
  return {workspaces,nodes,edges};
 }
+// Position the reviewed drop beside the *rendered* card. Cards have
+// variable heights and the canvas may be zoomed, so world-space fixed offsets
+// can overlap the text. Compare real viewport rectangles after DOM insertion.
+function cwPositionDropReview(panel,box,nodeIds){
+ const cards=[...box.querySelectorAll('.cw-preview-card')];
+ const lead=cards.find(card=>card.dataset.cwNode===nodeIds[0]);
+ if(!lead)return;
+ const anchor=lead.getBoundingClientRect(),boxRect=box.getBoundingClientRect();
+ const panelRect=panel.getBoundingClientRect();
+ const scale=box.offsetWidth?boxRect.width/box.offsetWidth:0;
+ if(!Number.isFinite(scale)||scale<=0||!panelRect.width||!panelRect.height)return;
+ const width=panelRect.width,height=panelRect.height;
+ const viewportWidth=document.documentElement.clientWidth;
+ const viewportHeight=document.documentElement.clientHeight;
+ const margin=12,gap=12;
+ const clamp=(value,low,high)=>Math.max(low,Math.min(value,Math.max(low,high)));
+ const intersection=(left,top,right,bottom,other)=>{
+  const w=Math.max(0,Math.min(right,other.right)-Math.max(left,other.left));
+  const h=Math.max(0,Math.min(bottom,other.bottom)-Math.max(top,other.top));
+  return w*h;
+ };
+ const obstacles=cards.map(card=>({rect:card.getBoundingClientRect(),lead:card===lead}));
+ const candidates=[
+  {x:anchor.right+gap,y:anchor.top}, // Right of the card is the default.
+  {x:anchor.left-width-gap,y:anchor.top},
+  {x:anchor.left,y:anchor.bottom+gap},
+  {x:anchor.left,y:anchor.top-height-gap}
+ ];
+ let best=null;
+ for(const [rank,candidate] of candidates.entries()){
+  const x=clamp(candidate.x,margin,viewportWidth-width-margin);
+  const y=clamp(candidate.y,margin,viewportHeight-height-margin);
+  // A non-overlapping position always wins; among those prefer the nearest
+  // original candidate, with right/left ahead of above/below.
+  const overlap=obstacles.reduce((total,item)=>
+   total+intersection(x,y,x+width,y+height,item.rect)*(item.lead?100:15),0);
+  const adjustment=Math.abs(x-candidate.x)+Math.abs(y-candidate.y);
+  const score=overlap*100+adjustment+rank*2;
+  if(!best||score<best.score)best={x,y,score};
+ }
+ panel.style.left=((best.x-boxRect.left)/scale)+'px';
+ panel.style.top=((best.y-boxRect.top)/scale)+'px';
+}
 function renderCreativeWorkspacePreview(){
  const host=$('cw-workspace-preview');if(!host)return;
  host.replaceChildren();
@@ -927,6 +970,7 @@ function renderCreativeWorkspacePreview(){
    cancel.addEventListener('click',e=>{e.stopPropagation();cwCancelDropReview()});
    pending.append(cancel);box.append(pending);
   }
+  let dropReviewPanel=null,dropReviewIds=null;
   if(persisted&&cwWorkflowEnabled()&&cwAcceptanceReview?.workspaceId===area.id){
    const p=cwAcceptanceReview,review=document.createElement('section');
    review.className='cw-accept-review';review.setAttribute('role','group');
@@ -937,11 +981,10 @@ function renderCreativeWorkspacePreview(){
     +' · связей для отдельного решения: '+p.plan.reviewEdgeIds.length
     +' · внешние связи не подключаются автоматически';
    if(p.placements){
-    const lead=p.placements.find(v=>v.nodeId===p.nodeIds[0])||p.placements[0];
     review.classList.add('cw-drop-review');
     review.style.right='auto';review.style.transform='none';
-    review.style.left=Math.max(0,lead.x-area.x)+'px';
-    review.style.top=(lead.y-area.y+125)+'px';
+    review.style.left='0';review.style.top='0';
+    dropReviewPanel=review;dropReviewIds=p.nodeIds;
    }
    const approve=document.createElement('button');approve.type='button';approve.textContent='Принять в сюжет';
    approve.disabled=cwAcceptanceBusy;approve.addEventListener('click',e=>{e.stopPropagation();void cwConfirmAccept()});
@@ -954,6 +997,7 @@ function renderCreativeWorkspacePreview(){
    review.append(desc,approve,back);box.append(review);
   }
   host.append(box);
+  if(dropReviewPanel)cwPositionDropReview(dropReviewPanel,box,dropReviewIds);
  }
 }
 
