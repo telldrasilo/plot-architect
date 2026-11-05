@@ -265,3 +265,44 @@ test('same note cannot be staged twice with different request ID, without a new 
   await fails(()=>send(db,initialCommand,1,'stage-two'),'WORKSPACE_CONFLICT');
   assert.deepEqual(counts(sqlite),{revision:1,history:2,receipts:1});
 });
+
+test('drop acceptance writes placement plus membership in one CAS, history and receipt',async()=>{
+ const {db,sqlite}=syntheticDB();seed(sqlite);
+ const before=current(sqlite),nodeIds=['a','b'];
+ const placements=[{nodeId:'b',x:790,y:-120},{nodeId:'a',x:560,y:-120}];
+ const command={kind:'accept_draft',workspaceId:'w1',nodeIds,placements,
+  expectedPreview:previewDraftAcceptance(before,{workspaceId:'w1',nodeIds,placements})};
+ const first=await send(db,command,0,'drop-a-b');
+ assert.equal(first.revision,1);
+ assert.deepEqual(counts(sqlite),{revision:1,history:2,receipts:1});
+ const saved=current(sqlite);
+ for(const p of placements){
+  const n=saved.nodes.find(n=>n.id===p.nodeId);
+  assert.equal(n.workspaceId,undefined);
+  assert.deepEqual({x:n.x,y:n.y},{x:p.x,y:p.y});
+ }
+ assert.equal(saved.nodes.find(n=>n.id==='c').workspaceId,'w1');
+ assert.equal(saved.edges.find(e=>e.id==='ea').workspaceId,undefined);
+ assert.equal(saved.edges.find(e=>e.id==='eb').workspaceId,'w1');
+ assert.deepEqual(saved.edges.slice(0,2),before.edges.slice(0,2));
+ assert.deepEqual(historical(sqlite,1),saved);
+ assert.equal((await send(db,command,0,'drop-a-b')).replayed,true);
+ assert.deepEqual(counts(sqlite),{revision:1,history:2,receipts:1});
+ await fails(()=>send(db,{...command,placements:[{nodeId:'a',x:570,y:-120},
+  {nodeId:'b',x:790,y:-120}]},0,'drop-a-b'),'OPERATION_ID_REUSED');
+ assert.deepEqual(counts(sqlite),{revision:1,history:2,receipts:1});
+});
+test('preview placement cannot mutate data and concurrent stale write fails closed',async()=>{
+ const {db,sqlite}=syntheticDB();seed(sqlite);
+ const before=current(sqlite),nodeIds=['a','b'];
+ const placements=[{nodeId:'a',x:550,y:-220},{nodeId:'b',x:790,y:-220}];
+ const command={kind:'accept_draft',workspaceId:'w1',nodeIds,placements,
+  expectedPreview:previewDraftAcceptance(before,{workspaceId:'w1',nodeIds,placements})};
+ const snapshot=JSON.stringify(current(sqlite));
+ await send(db,command(current(sqlite),'accept_draft',{nodeIds:['c']}),0,'second-editor');
+ await fails(()=>send(db,command,0,'stale-drop'),'REVISION_CONFLICT');
+ assert.equal(current(sqlite).nodes.find(n=>n.id==='a').workspaceId,'w1');
+ assert.equal(current(sqlite).nodes.find(n=>n.id==='a').x,0);
+ assert.deepEqual(counts(sqlite),{revision:1,history:2,receipts:1});
+ assert.ok(snapshot.includes('"workspaceId":"w1"'));
+});
