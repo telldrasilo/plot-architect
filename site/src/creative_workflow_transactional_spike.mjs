@@ -11,6 +11,10 @@ import {validateServerGraph} from './creative_workflow_server_boundary.mjs';
 import {previewStageNoteAlternatives,applyStageNoteAlternatives} from './creative_workflow_note_staging.mjs';
 import {previewMoveDraftNodes,applyMoveDraftNodes} from './creative_workflow_draft_move.mjs';
 import {
+  previewAddDraftEdge,applyAddDraftEdge,
+  previewRewireDraftEdge,applyRewireDraftEdge
+} from './creative_workflow_draft_edges.mjs';
+import {
   CreativeWorkflowContractError,
   validateCreativeWorkflowGraph,
   previewDraftAcceptance,
@@ -33,6 +37,8 @@ const validRevision=x=>Number.isSafeInteger(x)&&x>=0;
 const fields={
   stage_note:['noteId','workspaceId','workspace','branches','expectedPreview'],
   move_drafts:['workspaceId','moves','expectedPreview'],
+  add_draft_edge:['workspaceId','edge','expectedPreview'],
+  rewire_draft_edge:['workspaceId','edgeId','to','expectedPreview'],
   accept_draft:['workspaceId','nodeIds','placements','expectedPreview'],
   start_replacement:['replacementId','sourceNodeIds','expectedPreview'],
   reconnect:['replacementId','decisions','expectedPreview'],
@@ -76,6 +82,8 @@ async function runDomain(db,projectId,graph,expectedRevision,command){
   switch(command.kind){
     case 'stage_note':return applyStageNoteAlternatives(graph,args);
     case 'move_drafts':return applyMoveDraftNodes(graph,args);
+    case 'add_draft_edge':return applyAddDraftEdge(graph,args);
+    case 'rewire_draft_edge':return applyRewireDraftEdge(graph,args);
     case 'accept_draft':return applyDraftAcceptance(graph,args);
     case 'start_replacement':return applyStartReplacement(graph,args);
     case 'reconnect':return applyReplacementReconnection(graph,args);
@@ -202,6 +210,8 @@ export async function previewWorkflowCommand(db,{projectId,expectedRevision,comm
   switch(command.kind){
     case 'stage_note': preview=previewStageNoteAlternatives(graph,command);break;
     case 'move_drafts': preview=previewMoveDraftNodes(graph,command);break;
+    case 'add_draft_edge': preview=previewAddDraftEdge(graph,command);break;
+    case 'rewire_draft_edge': preview=previewRewireDraftEdge(graph,command);break;
     case 'accept_draft': preview=previewDraftAcceptance(graph,command);break;
     case 'start_replacement': preview=previewReplacementStart(graph,command.sourceNodeIds);break;
     case 'reconnect': preview=previewReplacementReconnection(graph,command);break;
