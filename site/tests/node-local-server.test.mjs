@@ -88,7 +88,9 @@ test('local-only listener, forbidden native identity spoof, cookie isolation and
   const ui = await h.call('/', 'GET', {cookie});
   assert.equal(ui.status, 200);
   assert.match(await ui.text(), /Plot Architect · Graphite/);
-  assert.equal((await h.call('/api/health', 'GET', {cookie})).status, 200);
+  const health = await (await h.call('/api/health', 'GET', {cookie})).json();
+  assert.equal(health.ok, true);
+  assert.equal(health.authMode, 'node-loopback');
   assert.equal((await h.call('/api/projects', 'POST', {cookie, json: {}})).status, 403);
   assert.equal((await h.call('/api/projects', 'POST', {
     cookie, originHeader: 'https://attacker.test', json: {}
