@@ -657,10 +657,15 @@ async function cwPrepareAccept(nodeIds,workspaceId,placements){
  try{
   await cwEnsureDraftsSynced();
   if(remote.connected&&(remote.dirty||remote.busy))await flushRemote();
- }catch(err){note('Принятие пока недоступно: '+err.message);return}
- if(!cwCleanForOperation()){note(remote.blocked?'Конфликт сохранения проекта: проверьте локальную копию':'Проект изменился. Повторите действие');return}
+ }catch(err){if(dropRef&&cwDragDropReview===dropRef)cwCancelDropReview();note('Принятие пока недоступно: '+err.message);return}
+ if(dropRef&&cwDragDropReview!==dropRef)return;
+ if(!cwCleanForOperation()){
+  if(dropRef)cwCancelDropReview();
+  note(remote.blocked?'Конфликт сохранения проекта: проверьте локальную копию':'Проект изменился. Повторите действие');return
+ }
  if(!Array.isArray(nodeIds)||!nodeIds.length||new Set(nodeIds).size!==nodeIds.length
    ||nodeIds.some(id=>!state.nodes.some(n=>n.id===id&&n.workspaceId===workspaceId))){
+  if(dropRef)cwCancelDropReview();
   note('Выберите черновики одной рабочей области');return
  }
  const id=activeProjectId,revision=remote.revision,selection=[...nodeIds];
@@ -806,7 +811,10 @@ function renderCreativeWorkspacePreview(){
   const head=document.createElement('div');head.className='cw-preview-area-head';
   head.textContent=persisted?'Рабочая область · сохранённые черновики':'Рабочая область · черновики';
   const hint=document.createElement('span');hint.className='cw-preview-area-hint';
-  hint.textContent=persisted?'Вне сюжета':'Предпросмотр · не в сюжете';head.append(hint);box.append(head);
+  hint.textContent=persisted&&cwDragDropReview?.workspaceId===area.id
+   ?'Перенос в сюжет · ещё не сохранено'
+   :persisted?'Вне сюжета':'Предпросмотр · не в сюжете';
+  head.append(hint);box.append(head);
   const internals=data.edges.filter(e=>e.workspaceId===area.id);
   const svg=document.createElementNS(namespace,'svg');svg.setAttribute('class','cw-preview-arrows');
   svg.setAttribute('width',String(area.width));svg.setAttribute('height',String(area.height));
@@ -831,7 +839,7 @@ function renderCreativeWorkspacePreview(){
    retry.addEventListener('click',e=>{e.stopPropagation();void cwSaveDraftMoves().catch(()=>{})});
    actions.append(status,retry);box.append(actions);
   }
-  if(persisted&&cwWorkflowEnabled()&&cwSelectedWorkspaceId===area.id&&cwSelectedDraftIds.size){
+  if(persisted&&!cwDragDropReview&&cwWorkflowEnabled()&&cwSelectedWorkspaceId===area.id&&cwSelectedDraftIds.size){
    const actions=document.createElement('div');actions.className='cw-draft-selection-actions';
    actions.setAttribute('role','group');actions.setAttribute('aria-label','Групповое принятие');
    actions.addEventListener('pointerdown',e=>e.stopPropagation());
@@ -857,6 +865,8 @@ function renderCreativeWorkspacePreview(){
    const title=document.createElement('strong');title.textContent=n.title;
    card.append(kind,title);
    if(n.description){const d=document.createElement('p');d.textContent=n.description;card.append(d)}
+   if(cwDragDropReview?.workspaceId===area.id&&cwDragDropReview.nodeIds.includes(n.id))
+    card.classList.add('cw-drop-ghost');
    if(persisted){
     card.classList.add('cw-persisted-card');
     if(cwWorkflowEnabled())card.classList.add('cw-movable-draft');
@@ -906,6 +916,15 @@ function renderCreativeWorkspacePreview(){
    });
    box.append(card);
   }
+  if(persisted&&cwDragDropReview?.workspaceId===area.id&&cwDragDropReview.phase==='checking'){
+   const pending=document.createElement('div');
+   pending.className='cw-drop-checking';pending.setAttribute('role','status');
+   pending.textContent='Проверяем перенос в сюжет…';
+   const cancel=document.createElement('button');cancel.type='button';
+   cancel.textContent='Отмена';
+   cancel.addEventListener('click',e=>{e.stopPropagation();cwCancelDropReview()});
+   pending.append(cancel);box.append(pending);
+  }
   if(persisted&&cwWorkflowEnabled()&&cwAcceptanceReview?.workspaceId===area.id){
    const p=cwAcceptanceReview,review=document.createElement('section');
    review.className='cw-accept-review';review.setAttribute('role','group');
@@ -915,10 +934,21 @@ function renderCreativeWorkspacePreview(){
    desc.textContent='В сюжет: '+p.nodeIds.length+' событие(ий) · внутренних связей: '+p.plan.promoteEdgeIds.length
     +' · связей для отдельного решения: '+p.plan.reviewEdgeIds.length
     +' · внешние связи не подключаются автоматически';
+   if(p.placements){
+    const lead=p.placements.find(v=>v.nodeId===p.nodeIds[0])||p.placements[0];
+    review.classList.add('cw-drop-review');
+    review.style.right='auto';review.style.transform='none';
+    review.style.left=Math.max(0,lead.x-area.x)+'px';
+    review.style.top=(lead.y-area.y+125)+'px';
+   }
    const approve=document.createElement('button');approve.type='button';approve.textContent='Принять в сюжет';
    approve.disabled=cwAcceptanceBusy;approve.addEventListener('click',e=>{e.stopPropagation();void cwConfirmAccept()});
    const back=document.createElement('button');back.type='button';back.textContent='Отмена';
-   back.disabled=cwAcceptanceBusy;back.addEventListener('click',e=>{e.stopPropagation();cwAcceptanceReview=null;renderCreativeWorkspacePreview()});
+   back.disabled=cwAcceptanceBusy;back.addEventListener('click',e=>{
+    e.stopPropagation();
+    if(cwDragDropReview)cwCancelDropReview();
+    else{cwAcceptanceReview=null;renderCreativeWorkspacePreview()}
+   });
    review.append(desc,approve,back);box.append(review);
   }
   host.append(box);
