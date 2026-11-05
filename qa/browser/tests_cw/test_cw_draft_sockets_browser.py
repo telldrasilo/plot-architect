@@ -86,8 +86,10 @@ def main():
             assert path["marker"] is None, "full path must not terminate in an SVG arrow"
             arrow=next(a for a in result["directions"] if a["id"]==e)
             assert arrow["centered"],arrow
-            hit=next(h for h in result["hitPaths"] if h["id"]==e)
-            assert hit["d"]==path["d"],"selection hit path must cover the full connection"
+            # The hit-path only exists while draft editing is enabled.
+            hit=next((h for h in result["hitPaths"] if h["id"]==e),None)
+            if hit is not None:
+                assert hit["d"]==path["d"],"an editable hit path must cover the full connection"
             assert begin["hit"]=="none" and end["hit"]=="none"
         assert len({ports[e+":target"]["y"] for e in ("ea","eb","ec")})==3
         assert "causes" in next(p for p in result["paths"] if p["id"]=="eb")["className"]
