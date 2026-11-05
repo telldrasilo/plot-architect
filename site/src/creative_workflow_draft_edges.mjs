@@ -106,3 +106,30 @@ export function applyRewireDraftEdge(graph,{workspaceId,edgeId,to,expectedPrevie
  return {graph:next,changes:{workspaceId,edgeId,
   before:plan.before,after:plan.after,autoRewiredEdgeIds:[]}};
 }
+
+/** Review a change of relation meaning without modifying endpoints or canon. */
+export function previewSetDraftEdgeType(graph,{workspaceId,edgeId,newType}={}){
+ const {nodes,edges}=context(graph,workspaceId);
+ if(!id(edgeId)||!type(newType))
+  fail('DRAFT_EDGE_INVALID','edge ID and approved relation type required');
+ const old=edges.get(edgeId);
+ if(!old||old.workspaceId!==workspaceId||old.draftRelation!=='internal')
+  fail('DRAFT_EDGE_NOT_FOUND',String(edgeId));
+ requireNode(nodes,old.from,workspaceId);
+ requireNode(nodes,old.to,workspaceId);
+ if(old.type===newType)fail('DRAFT_EDGE_UNCHANGED',edgeId);
+ const after={...old,type:newType};
+ return {workspaceId,operation:'type',edgeId,before:structuredClone(old),
+  after:structuredClone(after),affectedDraftEdgeIds:[edgeId],
+  autoRewiredEdgeIds:[]};
+}
+export function applySetDraftEdgeType(graph,{workspaceId,edgeId,newType,
+ expectedPreview,expectedRevision}={}){
+ const plan=previewSetDraftEdgeType(graph,{workspaceId,edgeId,newType});
+ verifyReview(plan,expectedPreview,expectedRevision,graph);
+ const next=structuredClone(graph),index=next.edges.findIndex(e=>e.id===edgeId);
+ next.edges[index]=structuredClone(plan.after);
+ isolated(graph,next);
+ return {graph:next,changes:{workspaceId,edgeId,before:plan.before,
+  after:plan.after,autoRewiredEdgeIds:[]}};
+}
