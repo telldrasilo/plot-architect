@@ -1,4 +1,119 @@
 (()=>{'use strict';
+/* CW-004 generated geometry start: site/src/edge_socket_geometry.mjs */
+/**
+ * CW-004: deterministic, data-only geometry for independent per-edge sockets.
+ *
+ * This module never mutates a graph, stores coordinates, measures the DOM,
+ * or implies anything about causality. Callers provide measured world-space
+ * rectangles and active edges from ONE visible scope (canon or workspace).
+ */
+const finite=n=>typeof n==='number'&&Number.isFinite(n);
+const validRect=r=>r&&[r.x,r.y,r.width,r.height].every(finite)
+  &&r.width>0&&r.height>0;
+const socketKey=(edgeId,role)=>edgeId+':'+role;
+const centerY=r=>r.y+r.height/2;
+const cmp=(a,b)=>a<b?-1:a>b?1:0;
+const DEFAULTS=Object.freeze({minGap:20,maxGap:30,inset:16,railOffset:16});
+
+function rectFor(node,bounds){
+ const b=bounds instanceof Map?bounds.get(node.id):bounds?.[node.id];
+ const r=b??node;
+ return validRect(r)?{x:r.x,y:r.y,width:r.width,height:r.height}:null;
+}
+
+/**
+ * Returns independent ports for every visible edge endpoint.
+ * Maps retain stable insertion order by node ID, role, opposite-center Y
+ * and finally edge ID; input edge array order does not change the output.
+ */
+function layoutEdgeSockets({nodes=[],edges=[],bounds={},mode='full',options={}}={}){
+ const ports=new Map(),byNode=new Map(),warnings=[];
+ if(mode!=='full')return {ports,byNode,warnings};
+ const cfg={...DEFAULTS,...options};
+ if(!finite(cfg.minGap)||cfg.minGap<=0||!finite(cfg.maxGap)
+   ||cfg.maxGap<cfg.minGap||!finite(cfg.inset)||cfg.inset<0
+   ||!finite(cfg.railOffset)||cfg.railOffset<0)
+  throw new TypeError('Invalid socket spacing options');
+ const cards=new Map();
+ for(const node of nodes){
+  if(!node||typeof node.id!=='string'||cards.has(node.id))
+   throw new TypeError('Duplicate or invalid node ID');
+  const rect=rectFor(node,bounds);
+  if(!rect)throw new TypeError('Invalid card dimensions: '+node.id);
+  cards.set(node.id,rect);
+  byNode.set(node.id,{incoming:[],outgoing:[]});
+ }
+ const groups=new Map();
+ for(const edge of edges){
+  if(!edge||typeof edge.id!=='string'||typeof edge.from!=='string'
+    ||typeof edge.to!=='string'||edge.from===edge.to)
+   throw new TypeError('Invalid edge identity');
+  if(!cards.has(edge.from)||!cards.has(edge.to))continue;
+  for(const [nodeId,role,otherId] of [
+   [edge.from,'source',edge.to],[edge.to,'target',edge.from]
+  ]){
+   const key=socketKey(edge.id,role);
+   if(ports.has(key))throw new TypeError('Duplicate edge endpoint: '+key);
+   const scope=edge.workspaceId??'plot';
+   const port={key,edgeId:edge.id,role,nodeId,otherId,scope,
+     side:role==='source'?'right':'left',x:0,y:0,rail:false,ordinal:0};
+   ports.set(key,port);
+   const groupKey=nodeId+'\u0000'+role;
+   if(!groups.has(groupKey))groups.set(groupKey,[]);
+   groups.get(groupKey).push(port);
+  }
+ }
+ for(const nodeId of [...cards.keys()].sort()){
+  const rect=cards.get(nodeId);
+  for(const role of ['source','target']){
+   const group=groups.get(nodeId+'\u0000'+role)??[];
+   group.sort((a,b)=>cmp(centerY(cards.get(a.otherId)),centerY(cards.get(b.otherId)))
+     ||cmp(a.otherId,b.otherId)||cmp(a.edgeId,b.edgeId));
+   const available=Math.max(0,rect.height-2*cfg.inset);
+   const overflowing=group.length>1&&(group.length-1)*cfg.minGap>available;
+   const gap=group.length<=1?0:overflowing?cfg.minGap
+     :Math.max(cfg.minGap,Math.min(cfg.maxGap,available/(group.length-1)));
+   const first=centerY(rect)-(group.length-1)*gap/2;
+   const x=role==='source'?rect.x+rect.width+(overflowing?cfg.railOffset:0)
+    :rect.x-(overflowing?cfg.railOffset:0);
+   for(let i=0;i<group.length;i++){
+    const p=group[i];p.x=x;p.y=first+i*gap;p.rail=overflowing;p.ordinal=i;
+    byNode.get(nodeId)[role==='source'?'outgoing':'incoming'].push(p);
+   }
+   if(overflowing)warnings.push({code:'SOCKET_RAIL',nodeId,role,
+     count:group.length,requiredHeight:(group.length-1)*cfg.minGap+cfg.inset*2,
+     actualHeight:rect.height});
+  }
+ }
+ return {ports,byNode,warnings};
+}
+
+/** Compute an unused temporary socket without displacing existing endpoints. */
+function proposeFreeSocket({nodeId,role,layout,bounds,options={}}={}){
+ if(role!=='source'&&role!=='target')throw new TypeError('Invalid socket role');
+ const cfg={...DEFAULTS,...options};
+ const rect=rectFor({id:nodeId},bounds);
+ if(!rect)throw new TypeError('Unknown card dimensions: '+nodeId);
+ const occupied=layout?.byNode?.get(nodeId)?.[role==='source'?'outgoing':'incoming']??[];
+ const cy=centerY(rect);
+ let y=cy;
+ for(let i=0;i<=occupied.length*3+3;i++){
+  const offset=i===0?0:(Math.ceil(i/2)*cfg.minGap)*(i%2?1:-1);
+  const candidate=cy+offset;
+  if(occupied.every(p=>Math.abs(candidate-p.y)>=cfg.minGap-1e-8)){
+   y=candidate;break;
+  }
+ }
+ const rail=y<rect.y+cfg.inset||y>rect.y+rect.height-cfg.inset
+  ||occupied.some(p=>p.rail);
+ const x=role==='source'?rect.x+rect.width+(rail?cfg.railOffset:0)
+  :rect.x-(rail?cfg.railOffset:0);
+ return {key:'new:'+nodeId+':'+role,nodeId,role,
+  side:role==='source'?'right':'left',x,y,rail,temporary:true};
+}
+
+/* CW-004 generated geometry end */
+
 const LEGACY_KEY='plot-architect-edge-clarity-v09-20261101';
 const REGISTRY_KEY='pa-site01-project-registry';
 const SITE_REGISTRY_KEY='pa-site01-site-project-registry';
@@ -1069,15 +1184,18 @@ function positionInspector(){
 }
 
 function itemDims(n){if(memoRender?.dims.has(n.id))return memoRender.dims.get(n.id);let el=document.querySelector(`[data-node="${n.id}"]`);const d={w:widthOf(n),h:Math.max(heightOf(n)||0,el?.offsetHeight||105)};if(memoRender)memoRender.dims.set(n.id,d);return d}
-function connector(e){const a=nby(e.from),b=nby(e.to);if(!a||!b)return '';const ad=itemDims(a),bd=itemDims(b);
- // UX-015: overview edges attach to the fixed semantic anchor at the REAL card's
- // center, regardless of how a collision-avoiding screen label is displaced.
+function connector(e,sockets=null){const a=nby(e.from),b=nby(e.to);if(!a||!b)return '';const ad=itemDims(a),bd=itemDims(b);
+ // UX-015: compact anchors remain on the real card, not displaced labels.
  const compact=semanticZoomLevel()!=='full';
- const x1=compact?a.x+ad.w/2:a.x+ad.w,y1=a.y+ad.h/2;
- const x2=compact?b.x+bd.w/2:b.x,y2=b.y+bd.h/2;
+ const source=!compact?sockets?.ports.get(socketKey(e.id,'source')):null;
+ const target=!compact?sockets?.ports.get(socketKey(e.id,'target')):null;
+ const x1=source?.x??(compact?a.x+ad.w/2:a.x+ad.w);
+ const y1=source?.y??(a.y+ad.h/2);
+ const x2=target?.x??(compact?b.x+bd.w/2:b.x);
+ const y2=target?.y??(b.y+bd.h/2);
  const dx=Math.max(compact?22:65,Math.abs(x2-x1)*.42),warn=x2<x1+25;
  const d=`M${x1},${y1} C${x1+dx},${y1} ${x2-dx},${y2} ${x2},${y2}`;
- return {d,warn,x1,x2}}
+ return {d,warn,x1,y1,x2,y2}}
 
 function directionIssues(){const keep=focusIds();return currentEdges().filter(e=>e.type==='precedes'&&(!keep||(keep.has(e.from)&&keep.has(e.to)))&&connector(e)?.warn).length}
 function focusIds(){
@@ -1147,12 +1265,13 @@ function rectHit(seg,r){
   if(Math.abs(x2-x1)<.01)return x1>=r.x&&x1<=r.x+r.w&&Math.max(y1,y2)>=r.y&&Math.min(y1,y2)<=r.y+r.h;
   return false;
 }
-function smartConnector(edge){
-  if(semanticZoomLevel()!=='full')return connector(edge);
-  const a=nby(edge.from),b=nby(edge.to);if(!a||!b)return connector(edge);
+function smartConnector(edge,sockets=null){
+  if(semanticZoomLevel()!=='full')return connector(edge,sockets);
+  const a=nby(edge.from),b=nby(edge.to);if(!a||!b)return connector(edge,sockets);
   const f1=visualHome(a),f2=visualHome(b);
-  const ad=itemDims(a),bd=itemDims(b),x1=a.x+ad.w,y1=a.y+ad.h/2,x2=b.x,y2=b.y+bd.h/2;
-  if(f1===f2||Math.abs(x2-x1)<650)return connector(edge);
+  const point=connector(edge,sockets);
+  const {x1,y1,x2,y2}=point;
+  if(f1===f2||Math.abs(x2-x1)<650)return point;
   const objects=visible().filter(n=>n.id!==a.id&&n.id!==b.id).map(n=>{const d=itemDims(n);return {x:n.x-18,y:n.y-18,w:d.w+36,h:d.h+36}});
   const headingRects=fieldInView().map(f=>({x:f.x+8,y:f.y-43,w:Math.min(240,f.width*.5),h:42}));
   const rects=[...objects,...headingRects];
@@ -1167,10 +1286,10 @@ function smartConnector(edge){
     const score=collisions*15000+length;
     if(!best||score<best.score)best={score,segments};
   }
-  if(!best)return connector(edge);
+  if(!best)return point;
   const pieces=best.segments.map(s=>[s[2],s[3]]);
   const path=`M${x1},${y1} `+pieces.map(p=>`L${p[0]},${p[1]}`).join(' ');
-  return {d:path,warn:x2<x1+25,x1,x2,routed:true};
+  return {d:path,warn:x2<x1+25,x1,y1,x2,y2,routed:true};
 }
 function connectionPlan(){
  const edges=currentEdges(),overview=useOverview();
@@ -1325,14 +1444,25 @@ function renderEdges(){
  memoRender={dims:new Map(),homes:new Map()};
  const keep=focusIds(),selectedId=selected?.type==='node'?selected.id:null,selectedEdge=selected?.type==='edge'?selected.id:null;
  const plan=connectionPlan();
+ // Layout all active canon edges (not just the currently revealed subset),
+ // so selection and overview aggregation never reassign socket identities.
+ const visibleNodes=visible();
+ const bounds=Object.fromEntries(visibleNodes.map(n=>{
+   const d=itemDims(n);return [n.id,{x:n.x,y:n.y,width:d.w,height:d.h}];
+ }));
+ const sockets=layoutEdgeSockets({nodes:visibleNodes,edges:currentEdges(),
+   bounds,mode:semanticZoomLevel()});
  const marker='<defs><marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#93908b" stroke-width="1.8"/></marker><marker id="arrOn" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#e4c78c" stroke-width="1.8"/></marker></defs>';
  let c=marker;
  for(const e of plan.visibleEdges){
-   const q=routeMode==='smart'?smartConnector(e):connector(e);if(!q)continue;
+   const q=routeMode==='smart'?smartConnector(e,sockets):connector(e,sockets);if(!q)continue;
    const active=e.id===selectedEdge||e.from===selectedId||e.to===selectedId||plan.reveal.has(e.id);
    const faded=(selectedId||selectedEdge)&&!active;
    const kind=e.type==='causes'?'causal':e.type==='enables'?'enable':'';
-   c+=`<g data-edge="${esc(e.id)}" data-routed="${q.routed?'yes':'no'}"><path class="edge ${kind} ${active?'selected':''} ${faded?'faded':''} ${keep&&!(keep.has(e.from)&&keep.has(e.to))?'focus-muted':''}" marker-end="url(#${active?'arrOn':'arr'})" d="${q.d}"/><path class="edge-hit" d="${q.d}" data-edge-target="${esc(e.id)}"/></g>`;
+   const start=sockets.ports.get(socketKey(e.id,'source'));
+   const finish=sockets.ports.get(socketKey(e.id,'target'));
+   const portMarkup=(port)=>port?`<circle class="edge-socket ${active?'edge-socket-active':''}" data-edge-socket="${esc(port.key)}" data-socket-node="${esc(port.nodeId)}" data-socket-role="${port.role}" cx="${port.x}" cy="${port.y}" r="5"/>`:'';
+   c+=`<g data-edge="${esc(e.id)}" data-routed="${q.routed?'yes':'no'}"><path class="edge ${kind} ${active?'selected':''} ${faded?'faded':''} ${keep&&!(keep.has(e.from)&&keep.has(e.to))?'focus-muted':''}" marker-end="url(#${active?'arrOn':'arr'})" d="${q.d}"/><path class="edge-hit" d="${q.d}" data-edge-target="${esc(e.id)}"/>${portMarkup(start)}${portMarkup(finish)}</g>`;
  }
  for(const g of plan.bridges){
    const c0=bridgeCoordinates(g);if(!c0)continue;
