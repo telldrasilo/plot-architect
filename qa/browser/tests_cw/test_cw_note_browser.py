@@ -98,7 +98,7 @@ def main():
         page.goto("https://plot.local/")
         page.wait_for_function(
             "() => window.__graphite && __graphite.getRemote().connected "
-            "&& __graphite.getState().nodes.some(n => n.id === 'n2')"
+            "&& __graphite.getState().nodes.some(n => n.id === 'n2' && n.title === 'Предмет заметки')"
         )
         note_id = page.evaluate("() => __graphite.newGapNote({x:120,y:370})")
         assert note_id.startswith("gn")
