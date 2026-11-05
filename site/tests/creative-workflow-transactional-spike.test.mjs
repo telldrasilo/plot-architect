@@ -350,3 +350,27 @@ test('draft rewire preserves source edge ID and type with CAS and stale rejectio
   0,'stale-draft-create'),'REVISION_CONFLICT');
  assert.equal(current(sqlite).edges.length,g.edges.length);
 });
+
+test('draft relation type is one isolated revision with idempotent receipt',async()=>{
+ const {db,sqlite}=syntheticDB();seed(sqlite);
+ const original=current(sqlite);
+ const command={kind:'set_draft_edge_type',workspaceId:'w1',edgeId:'ea',newType:'enables'};
+ const preview=(await previewWorkflowCommand(db,{
+  projectId:'project-1',expectedRevision:0,command
+ })).preview;
+ assert.equal(preview.before.type,'precedes');
+ assert.equal(preview.after.type,'enables');
+ assert.deepEqual(current(sqlite),original,'preview is read-only');
+ const full={...command,expectedPreview:preview};
+ const applied=await send(db,full,0,'draft-type-1');
+ assert.equal(applied.revision,1);
+ assert.deepEqual(counts(sqlite),{revision:1,history:2,receipts:1});
+ const updated=current(sqlite);
+ assert.equal(updated.edges.find(e=>e.id==='ea').type,'enables');
+ assert.deepEqual(canonicalProjection(updated),canonicalProjection(original));
+ assert.equal((await send(db,full,0,'draft-type-1')).replayed,true);
+ await fails(()=>send(db,{...full,newType:'hinders'},0,'draft-type-1'),'OPERATION_ID_REUSED');
+ await fails(()=>send(db,full,0,'draft-type-stale'),'REVISION_CONFLICT');
+ assert.deepEqual(counts(sqlite),{revision:1,history:2,receipts:1});
+ assert.deepEqual(historical(sqlite,1),updated);
+});
