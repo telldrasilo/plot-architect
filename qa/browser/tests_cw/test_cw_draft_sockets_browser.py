@@ -67,6 +67,10 @@ def main():
         assert "enables" in next(p for p in result["paths"] if p["id"]=="ec")["className"]
         initial={(v["key"],v["x"],v["y"]) for v in result["ports"]}
         page.evaluate("()=>__graphite.setZoomForTest(.55)")
+        # Compact overview simplifies draft socket chrome but never changes edges.
+        assert not snap(page)["ports"]
+        assert page.locator('.cw-draft-edge-select').count()==0
+        page.evaluate("()=>__graphite.setZoomForTest(1)")
         assert {(v["key"],v["x"],v["y"]) for v in snap(page)["ports"]}==initial
         assert page.evaluate("()=>__graphite.getState().edges.length")==6
         assert not errors,errors
