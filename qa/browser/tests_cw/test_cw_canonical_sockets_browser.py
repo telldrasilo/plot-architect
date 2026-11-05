@@ -47,6 +47,21 @@ def main():
         fixture=synthetic()
         page.evaluate("(g)=>__graphite.loadFixture(g)",fixture)
         page.evaluate("()=>__graphite.setZoomForTest(1)")
+        # Variant C: there is no competing large + button on the node boundary.
+        assert page.locator(".node-add").count()==0
+        page.locator('[data-node="n1"]').click(position={"x":50,"y":56})
+        add_action=page.locator('[data-node="n1"] [data-command="after"]')
+        assert add_action.count()==1
+        assert add_action.get_attribute("aria-label")=="Продолжить сюжет"
+        assert page.locator('[data-node="n1"] [data-link-source="n1"]').count()==1
+        add_action.click()
+        assert page.locator("#dialog h2").inner_text()=="Продолжить сюжет"
+        page.locator("#cancel").click()
+        assert page.evaluate("()=>__graphite.getState().edges.length")==4
+        # This test also verifies click-to-select edges. Restore its untouched
+        # synthetic baseline after the selected-node Continue dialog closes.
+        page.evaluate("(g)=>__graphite.loadFixture(g)",fixture)
+        page.evaluate("()=>__graphite.setZoomForTest(1)")
         result=socket_snapshot(page)
         assert result["mode"]=="full",result["mode"]
         # Actual rendered circles must be centered on the measured card edge.
