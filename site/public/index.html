@@ -1944,7 +1944,8 @@ async function cwConfirmDiscard(){
   confirm(latest);
  }catch(err){
   // Ambiguous response: read back before retrying the SAME operation ID.
-  if(!verified&&review.projectId===activeProjectId){
+  if(!verified&&review.projectId===activeProjectId&&
+     !['REVISION_CONFLICT','PREVIEW_STALE','OPERATION_ID_REUSED'].includes(err.code)){
    try{confirm(await apiRequest('/api/projects/'+encodeURIComponent(review.projectId)))}catch{}
   }
   if(!verified){
