@@ -121,9 +121,10 @@ test('preview never writes; save is reviewed, isolated, atomic and replay-safe',
  assert.equal(project.data.graph.workspaces.length,1);
  assert.equal(project.data.graph.nodes.filter(n=>n.workspaceId).length,3);
  assert.equal(project.data.graph.edges.filter(e=>e.workspaceId).length,1);
- assert.equal(project.data.graph.gapNotes[0].text,graph().gapNotes[0].text);
+ assert.deepEqual(project.data.graph.gapNotes.map(n=>n.id),['gn2']);
+ assert.deepEqual(project.data.graph.gapLinks,[]);
  const duplicate=await mcp(env,'preview_note_drafts',args);
- assert.match(duplicate.data.error.message,/WORKSPACE_CONFLICT|REVISION_CONFLICT/);
+ assert.match(duplicate.data.error.message,/NOTE_NOT_FOUND|WORKSPACE_CONFLICT|REVISION_CONFLICT/);
 });
 
 test('disabled workflow and missing receipt store fail closed, while note reads remain possible',async()=>{
