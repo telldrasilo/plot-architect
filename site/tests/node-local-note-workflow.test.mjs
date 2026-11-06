@@ -74,7 +74,7 @@ test('local owner note -> preview -> saved draft workspace; canonical graph isol
  assert.equal(replay.data.replayed,true);
  const staged=await h.rest(path);
  assert.equal(staged.data.revision,2);
- assert.equal(staged.data.graph.gapNotes[0].text,'Объясни систему по шагам');
+ assert.deepEqual(staged.data.graph.gapNotes,[]);
  assert.equal(staged.data.graph.workspaces.length,1);
  assert.equal(staged.data.graph.workspaces[0].taskId,'gn1');
  const drafts=staged.data.graph.nodes.filter(n=>n.workspaceId===staged.data.graph.workspaces[0].id);

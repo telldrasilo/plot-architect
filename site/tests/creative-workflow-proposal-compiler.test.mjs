@@ -94,8 +94,10 @@ test('review and stage remain canonical no-ops until an explicit apply',()=>{
  assert.deepEqual(g,original);
  const saved=applyStageNoteAlternatives(g,{...compiled.command,expectedPreview:preview,expectedRevision:g.revision});
  assert.deepEqual(canonicalProjection(saved.graph),canonicalProjection(g));
- assert.deepEqual(saved.graph.gapNotes,g.gapNotes);
- assert.deepEqual(saved.graph.gapLinks,g.gapLinks);
+ assert.deepEqual(saved.graph.gapNotes,g.gapNotes.filter(n=>n.id!=='gn1'));
+ assert.equal(saved.graph.gapNotes[0].id,'gn2','unrelated pending task survives');
+ assert.deepEqual(saved.graph.gapLinks,[]);
+ assert.equal(saved.changes.removedNoteId,'gn1');
  assert.deepEqual(saved.graph.nodes.slice(0,g.nodes.length),g.nodes);
  assert.deepEqual(saved.graph.edges.slice(0,g.edges.length),g.edges);
  assert.equal(saved.changes.stagedNodeIds.length,6);
@@ -104,7 +106,7 @@ test('same generation is not staged twice for one note',()=>{
  const g=graph(),compiled=compile(g,single(1));
  const preview=previewStageNoteAlternatives(g,compiled.command);
  const saved=applyStageNoteAlternatives(g,{...compiled.command,expectedPreview:preview}).graph;
- fail(()=>compile(saved,single(1)),'WORKSPACE_CONFLICT');
+ fail(()=>compile(saved,single(1)),'NOTE_NOT_FOUND');
 });
 test('unknown injected fields and cross-group references are rejected',()=>{
  const g=graph();

@@ -129,8 +129,10 @@ test('one complete synthetic note → ChatGPT-shaped answer → draft area → a
  assert.deepEqual(counters(sql),{revision:1,history:2,receipts:1});
  const staged=current(sql);
  assert.deepEqual(canonicalReadGraph(staged),{...canonicalBefore,revision:1});
- assert.deepEqual(staged.gapNotes,original.gapNotes);
- assert.deepEqual(staged.gapLinks,original.gapLinks);
+ assert.deepEqual(staged.gapNotes,original.gapNotes.filter(n=>n.id!=='gn1'));
+ assert.deepEqual(staged.gapLinks,original.gapLinks.filter(l=>
+  !(l.from?.kind==='gap_note'&&l.from.id==='gn1')&&
+  !(l.to?.kind==='gap_note'&&l.to.id==='gn1')));
  assert.equal(staged.workspaces.length,2);
  assert.equal(staged.nodes.filter(n=>n.workspaceId===prepared.command.workspaceId).length,7);
  assert.equal(staged.edges.filter(e=>e.workspaceId===prepared.command.workspaceId).length,3);
@@ -139,7 +141,7 @@ test('one complete synthetic note → ChatGPT-shaped answer → draft area → a
  assert.equal(fullMcp.status,200);
  assert.deepEqual(fullMcp.data.result.structuredContent.graph.nodes.map(n=>n.id),['n1','n2','n3']);
  assert.ok(!JSON.stringify(fullMcp.data).includes('Событие 1.1'));
- rejected(()=>prepareNoteProcessingTask(staged,{noteId:'gn1'}),'WORKSPACE_CONFLICT');
+ rejected(()=>prepareNoteProcessingTask(staged,{noteId:'gn1'}),'NOTE_NOT_FOUND');
  rejected(()=>prepareNoteStageWrite(staged,{
   noteId:'gn1',sourceRevision:0,generationId:'anotherGeneration1',proposal:alternatives()
  }),'REVISION_CONFLICT');
@@ -160,7 +162,7 @@ test('one complete synthetic note → ChatGPT-shaped answer → draft area → a
  assert.equal(canon.edges.length,3);
  assert.equal(resulting.nodes.filter(n=>n.workspaceId===prepared.command.workspaceId).length,5);
  assert.equal(resulting.edges.filter(e=>e.workspaceId===prepared.command.workspaceId).length,2);
- assert.deepEqual(resulting.gapNotes,original.gapNotes);
+ assert.deepEqual(resulting.gapNotes,staged.gapNotes);
  assert.deepEqual(resulting.replacements,original.replacements);
 });
 test('one idea can be one concise event; no forced three alternatives',async()=>{

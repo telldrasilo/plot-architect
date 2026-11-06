@@ -223,7 +223,8 @@ test('staging a real-shape standalone note through synthetic CAS keeps canon and
   assert.equal(r.revision,1);assert.equal(r.changes.stagedNodeIds.length,3);
   assert.deepEqual(canonicalProjection(current(sqlite)),before);
   assert.equal(current(sqlite).workspaces.find(w=>w.id==='w-note').taskId,'gn1');
-  assert.equal(current(sqlite).gapLinks[0].id,'gl1');
+  assert.deepEqual(current(sqlite).gapNotes,[]);
+  assert.deepEqual(current(sqlite).gapLinks,[]);
   assert.deepEqual(counts(sqlite),{revision:1,history:2,receipts:1});
 });
 test('one synthetic history from note to alternatives, partial acceptance, replacement and reconnection',async()=>{
@@ -253,8 +254,8 @@ test('one synthetic history from note to alternatives, partial acceptance, repla
   assert.equal(result.replacements[0].state,'completed');
   assert.deepEqual(canonicalProjection(result).edges.map(e=>e.id),['new-ab','edge-new-1','edge-new-2']);
   assert.equal(result.nodes.find(n=>n.id==='new-c').workspaceId,'w-note');
-  assert.equal(result.gapNotes[0].text,noteProject().gapNotes[0].text);
-  assert.equal(result.gapLinks[0].to.id,'n2','editorial note association is retained, not auto-rewired');
+  assert.deepEqual(result.gapNotes,[],'the completed source task is consumed');
+  assert.deepEqual(result.gapLinks,[],'its editorial associations are removed, not rewired');
 });
 test('same note cannot be staged twice with different request ID, without a new story revision',async()=>{
   const {db,sqlite}=syntheticDB();seed(sqlite,'project-1',noteProject());

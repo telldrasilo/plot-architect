@@ -31,6 +31,8 @@ test('legacy gap note and context link produce four independently sized branches
   assert.equal(preview.branchSummaries.length,4);
   assert.deepEqual(preview.branchSummaries.map(v=>v.nodeCount),[1,2,1,2]);
   assert.deepEqual(preview.contextualLinks,g.gapLinks);
+  assert.equal(preview.deleteSourceNoteOnCommit,true);
+  assert.deepEqual(preview.removeSourceLinkIds,['gl1']);
   assert.equal(preview.sourceNote.offerVariants,false,'legacy checkbox must not select count');
   assert.deepEqual(g,original);
 });
@@ -38,8 +40,10 @@ test('staging alters no canonical plot node/edge, never creates a gap by implica
   const g=graph(),original=clone(g),before=canonicalProjection(g),result=stage(g);
   assert.deepEqual(g,original);assert.deepEqual(canonicalProjection(result.graph),before);
   assert.equal(result.graph.replacements,undefined);assert.equal(result.graph.workspaces[0].taskId,'gn1');
-  assert.equal(result.graph.gapNotes[0].text,g.gapNotes[0].text);
-  assert.deepEqual(result.graph.gapLinks,g.gapLinks);
+  assert.deepEqual(result.graph.gapNotes,[]);
+  assert.deepEqual(result.graph.gapLinks,[]);
+  assert.equal(result.changes.removedNoteId,'gn1');
+  assert.deepEqual(result.changes.removedGapLinkIds,['gl1']);
   assert.deepEqual(result.changes.autoRewiredEdgeIds,[]);
   assert.equal(result.graph.revision,7);
 });
@@ -134,15 +138,29 @@ test('technical capacity limits are explicit, independent of a fixed variant cou
   const huge=[branch('large',10,10,257)];
   mustFail(()=>review(g,input(g,huge)),'PROPOSAL_TOO_LARGE');
 });
-test('valid staging survives JSON serialization without changing existing note links',()=>{
+test('valid one-shot staging survives JSON serialization without retaining the source task',()=>{
   const g=stage(graph()).graph,loaded=JSON.parse(JSON.stringify(g));
   assert.doesNotThrow(()=>validateGraph(loaded));
   assert.doesNotThrow(()=>validateCreativeWorkflowGraph(loaded));
-  assert.equal(loaded.gapNotes[0].id,'gn1');
-  assert.equal(loaded.gapLinks[0].id,'gl1');
+  assert.deepEqual(loaded.gapNotes,[]);
+  assert.deepEqual(loaded.gapLinks,[]);
+  assert.equal(loaded.workspaces[0].taskId,'gn1');
 });
 test('an ambiguous note relationship alone never starts a canonical replacement',()=>{
   const g=stage(graph()).graph;
   assert.equal((g.replacements??[]).length,0);
   assert.deepEqual(canonicalProjection(g).edges.map(e=>e.id),['e1','e2']);
+});
+
+test('one-shot cleanup does not remove unrelated pending notes or their links',()=>{
+ const g=graph();
+ g.gapNotes.push({id:'gn2',title:'Later',text:'Independent task',x:200,y:400,status:'pending'});
+ g.gapLinks.push({id:'gl2',from:{kind:'gap_note',id:'gn2'},to:{kind:'plot_node',id:'n3'}});
+ const original=clone(g),plan=review(g),result=stage(g);
+ assert.deepEqual(plan.removeSourceLinkIds,['gl1']);
+ assert.deepEqual(result.graph.gapNotes,[original.gapNotes[1]]);
+ assert.deepEqual(result.graph.gapLinks,[original.gapLinks[1]]);
+ assert.deepEqual(result.graph.nodes.slice(0,3),original.nodes);
+ assert.deepEqual(result.graph.edges.slice(0,2),original.edges);
+ assert.deepEqual(g,original);
 });

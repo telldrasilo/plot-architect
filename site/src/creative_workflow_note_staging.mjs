@@ -3,7 +3,8 @@
  * payload for an existing standalone note into isolated draft graph objects.
  *
  * This does NOT generate with AI, arrange nodes, render workspace UI, or wire
- * any editor/API/MCP route. Existing gapNotes / gapLinks are left intact.
+ * any editor/API/MCP route. A successfully staged one-shot source note
+ * and its editorial links are removed IN THE SAME guarded graph mutation.
  * A note's legacy offerVariants flag is intentionally ignored (CW-006).
  */
 import {validateGraph} from './graph_contract.mjs';
@@ -33,12 +34,14 @@ export function previewStageNoteAlternatives(graph,{noteId,workspaceId,workspace
   validateCreativeWorkflowGraph(graph);
   if(!id(noteId)||!id(workspaceId)||!Array.isArray(graph.gapNotes))
     fail('NOTE_INVALID','existing standalone note required');
+  // After successful staging the source note is gone, but taskId stays
+  // with the workspace. Repeated staging should still fail as a conflict.
+  if((graph.workspaces??[]).some(w=>w.id===workspaceId||w.taskId===noteId))
+    fail('WORKSPACE_CONFLICT','note already has an area or ID is taken');
   const note=graph.gapNotes.find(n=>n.id===noteId);
   if(!obj(note))fail('NOTE_NOT_FOUND',noteId);
   if(!limited(note.text,8000)||!note.text.trim()||note.status!=='pending')
     fail('NOTE_NOT_READY','nonempty pending note required');
-  if((graph.workspaces??[]).some(w=>w.id===workspaceId||w.taskId===noteId))
-    fail('WORKSPACE_CONFLICT','note already has an area or ID is taken');
   if(!obj(workspace)||!allowed(workspace,['x','y','width','height'])||
     ![workspace.x,workspace.y,workspace.width,workspace.height].every(finite)||
     workspace.width<=0||workspace.height<=0)
@@ -94,6 +97,9 @@ export function previewStageNoteAlternatives(graph,{noteId,workspaceId,workspace
     noteId,workspaceId,
     sourceNote:structuredClone(note),
     contextualLinks:structuredClone(contextualLinks),
+    // Author-approved CW-055: the task is consumed, drafts remain indefinitely.
+    deleteSourceNoteOnCommit:true,
+    removeSourceLinkIds:contextualLinks.map(link=>link.id),
     workspace:{id:workspaceId,taskId:noteId,...structuredClone(workspace)},
     branchSummaries:labels,
     proposedNodes:nodes,proposedEdges:edges,
@@ -102,7 +108,8 @@ export function previewStageNoteAlternatives(graph,{noteId,workspaceId,workspace
 }
 /**
  * Stage an already prepared proposal; never accept it automatically.
- * Preserve original story content, note, context links and their coordinates.
+ * Preserve original story facts, but consume the one-shot source task and
+ * its editorial context links only AFTER the workspace was staged successfully.
  * No persistent write or revision bump occurs in this pure operation.
  */
 export function applyStageNoteAlternatives(graph,{noteId,workspaceId,workspace,branches,expectedPreview,expectedRevision}={}){
@@ -118,6 +125,11 @@ export function applyStageNoteAlternatives(graph,{noteId,workspaceId,workspace,b
   next.workspaces.push(structuredClone(plan.workspace));
   next.nodes.push(...structuredClone(plan.proposedNodes));
   next.edges.push(...structuredClone(plan.proposedEdges));
+  // The source task is NOT a long-lived plot object: no user-visible archive.
+  // All affected objects participate in the one graph snapshot transaction.
+  next.gapNotes=next.gapNotes.filter(n=>n.id!==noteId);
+  const links=new Set(plan.removeSourceLinkIds);
+  if(next.gapLinks)next.gapLinks=next.gapLinks.filter(link=>!links.has(link.id));
   validateGraph(next);
   validateCreativeWorkflowGraph(next);
   assertProtectedOriginalsUnchanged(graph,next);
@@ -129,6 +141,7 @@ export function applyStageNoteAlternatives(graph,{noteId,workspaceId,workspace,b
   return {graph:next,changes:{
     noteId,workspaceId,branchIds:plan.branchSummaries.map(b=>b.id),
     stagedNodeIds:plan.proposedNodes.map(n=>n.id),stagedEdgeIds:plan.proposedEdges.map(e=>e.id),
+    removedNoteId:noteId,removedGapLinkIds:[...plan.removeSourceLinkIds],
     autoRewiredEdgeIds:[]
   }};
 }

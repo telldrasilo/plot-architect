@@ -79,6 +79,10 @@ test('staging writes full editor graph while normal MCP full read remains canoni
  const a=await apply(env,id,0,'stage',stage());assert.equal(a.status,200,JSON.stringify(a.data));
  assert.deepEqual(counts(sql,id),{revision:1,history:2,receipts:1});
  const g=await graph(env,id);assert.equal(g.graph.nodes.length,6);assert.equal(g.graph.workspaces[0].taskId,'gn1');
+ assert.deepEqual(g.graph.gapNotes,[],'processed note must not survive staging');
+ assert.deepEqual(g.graph.gapLinks,[],'source note links must be removed in same graph snapshot');
+ assert.equal(a.data.changes?.removedNoteId,'gn1');
+ assert.deepEqual(a.data.changes?.removedGapLinkIds,['gl1']);
  const rpc=await request(env,'POST','/mcp',{jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'get_project',arguments:{project_id:id,detail:'full'}}});
  assert.equal(rpc.status,200);
  assert.deepEqual(rpc.data.result.structuredContent.graph.nodes.map(n=>n.id),['n1','n2','n3']);

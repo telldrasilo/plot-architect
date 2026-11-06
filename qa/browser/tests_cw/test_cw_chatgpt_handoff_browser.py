@@ -70,6 +70,8 @@ def main():
         return {"noteId":"gn1","workspaceId":command["workspaceId"],
                 "sourceNote":copy.deepcopy(db["graph"]["gapNotes"][0]),
                 "contextualLinks":copy.deepcopy(context),
+                "deleteSourceNoteOnCommit":True,
+                "removeSourceLinkIds":[l["id"] for l in context],
                 "workspace":{"id":command["workspaceId"],"taskId":"gn1",**command["workspace"]},
                 "branchSummaries":summaries,"proposedNodes":graph_nodes,
                 "proposedEdges":graph_edges,"replacesCanonicalNodeIds":[],
@@ -106,6 +108,9 @@ def main():
             db["graph"]["workspaces"].append(copy.deepcopy(plan["workspace"]))
             db["graph"]["nodes"].extend(copy.deepcopy(plan["proposedNodes"]))
             db["graph"]["edges"].extend(copy.deepcopy(plan["proposedEdges"]))
+            db["graph"]["gapNotes"]=[n for n in db["graph"]["gapNotes"] if n["id"]!="gn1"]
+            removed=set(plan["removeSourceLinkIds"])
+            db["graph"]["gapLinks"]=[l for l in db["graph"]["gapLinks"] if l["id"] not in removed]
             db["revision"]+=1
             db["graph"]["revision"]=db["revision"]
             db["applies"]+=1
@@ -158,8 +163,8 @@ def main():
         assert db["applies"]==1 and db["put"]==0
         assert db["graph"]["nodes"][:len(original["nodes"])]==original["nodes"]
         assert db["graph"]["edges"][:len(original["edges"])]==original["edges"]
-        assert db["graph"]["gapNotes"]==original["gapNotes"]
-        assert db["graph"]["gapLinks"]==original["gapLinks"]
+        assert db["graph"]["gapNotes"]==[]
+        assert db["graph"]["gapLinks"]==[]
         assert page.locator('[data-node="n2"]').count()==0
         page.reload()
         page.wait_for_function("() => window.__graphite && __graphite.getRemote().connected && __graphite.getRemote().revision===1 && document.querySelectorAll('.cw-preview-card').length===8")
