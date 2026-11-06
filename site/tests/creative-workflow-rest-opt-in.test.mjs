@@ -281,3 +281,74 @@ test('edit_draft_text uses one guarded SQLite transaction, receipt replay and ca
  assert.equal(put.status,422);
  assert.deepEqual(counts(sql,id),{revision:2,history:3,receipts:2});
 });
+
+test('discard_drafts is atomic, replay-safe and preserves every canonical fact',async()=>{
+ const {db,sql}=storage(),env={DB:db,CW_WORKFLOW_ENABLED:'true'},id=await create(env);
+ assert.equal((await apply(env,id,0,'stage-delete',stage())).status,200);
+ const before=(await graph(env,id)).graph;
+ const command={kind:'discard_drafts',workspaceId:'w1',nodeIds:['draft-a']};
+ const p=await preview(env,id,1,command);
+ assert.equal(p.status,200,JSON.stringify(p.data));
+ assert.deepEqual(p.data.preview.affectedRelations.map(x=>x.id),['draft-ab']);
+ assert.equal(p.data.preview.removeWorkspace,false);
+ assert.equal(p.data.preview.removeNoteId,null);
+ assert.deepEqual(counts(sql,id),{revision:1,history:2,receipts:1});
+ const payload={expectedRevision:1,operationId:'discard-once',
+  command:{...command,expectedPreview:p.data.preview}};
+ const first=await request(env,'POST',path(id)+'apply',payload);
+ const replayed=await request(env,'POST',path(id)+'apply',payload);
+ assert.equal(first.status,200,JSON.stringify(first.data));
+ assert.equal(replayed.status,200);assert.equal(replayed.data.replayed,true);
+ assert.deepEqual(counts(sql,id),{revision:2,history:3,receipts:2});
+ const after=(await graph(env,id)).graph;
+ assert.equal(after.nodes.some(n=>n.id==='draft-a'),false);
+ assert.equal(after.nodes.some(n=>n.id==='draft-b'),true);
+ assert.equal(after.edges.some(e=>e.id==='draft-ab'),false);
+ assert.deepEqual(after.nodes.filter(n=>!n.workspaceId),
+  before.nodes.filter(n=>!n.workspaceId));
+ assert.deepEqual(after.edges.filter(e=>!e.workspaceId),
+  before.edges.filter(e=>!e.workspaceId));
+ assert.deepEqual(after.gapNotes,before.gapNotes);
+ const mcp=await request(env,'POST','/mcp',{jsonrpc:'2.0',id:17,method:'tools/call',
+  params:{name:'get_project',arguments:{project_id:id,detail:'full'}}});
+ assert.equal(mcp.status,200);
+ assert.deepEqual(mcp.data.result.structuredContent.graph.nodes.map(n=>n.id),
+  ['n1','n2','n3']);
+ const forged=structuredClone(payload);forged.command.nodeIds=['draft-b'];
+ const reused=await request(env,'POST',path(id)+'apply',forged);
+ assert.equal(reused.status,409);assert.equal(reused.data.error,'OPERATION_ID_REUSED');
+ const last={kind:'discard_drafts',workspaceId:'w1',nodeIds:['draft-b','draft-c']};
+ const final=await apply(env,id,2,'discard-final',last);
+ assert.equal(final.status,200,JSON.stringify(final.data));
+ const empty=(await graph(env,id)).graph;
+ assert.equal(empty.workspaces.some(x=>x.id==='w1'),false);
+ assert.equal(empty.gapNotes.some(x=>x.id==='gn1'),false);
+ assert.equal(empty.gapLinks.some(x=>x.id==='gl1'),false);
+ assert.equal(empty.nodes.filter(n=>!n.workspaceId).length,3);
+ assert.deepEqual(counts(sql,id),{revision:3,history:4,receipts:3});
+});
+
+test('discard_drafts stale preview, foreign node and generic PUT fail without writing',async()=>{
+ const {db,sql}=storage(),env={DB:db,CW_WORKFLOW_ENABLED:'true'},id=await create(env);
+ await apply(env,id,0,'stage',stage());
+ const command={kind:'discard_drafts',workspaceId:'w1',nodeIds:['draft-a']};
+ const p=await preview(env,id,1,command);
+ const bad=await preview(env,id,1,{kind:'discard_drafts',workspaceId:'w1',nodeIds:['n2']});
+ assert.equal(bad.status,422);assert.equal(bad.data.error,'DISCARD_TARGET_INVALID');
+ const old=await graph(env,id);
+ const forged=structuredClone(old.graph);
+ forged.nodes=forged.nodes.filter(n=>n.id!=='draft-a');
+ forged.edges=forged.edges.filter(e=>e.id!=='draft-ab');
+ const put=await request(env,'PUT','/api/projects/'+id,
+  {name:old.name,expectedRevision:1,graph:forged});
+ assert.equal(put.status,422);
+ await apply(env,id,1,'move',{kind:'move_drafts',workspaceId:'w1',
+  moves:[{nodeId:'draft-b',x:480,y:540}]});
+ const stale=await request(env,'POST',path(id)+'apply',{
+  expectedRevision:1,operationId:'old-delete',command:{...command,expectedPreview:p.data.preview}});
+ assert.equal(stale.status,409);assert.equal(stale.data.error,'REVISION_CONFLICT');
+ const unchanged=(await graph(env,id)).graph;
+ assert.equal(unchanged.nodes.some(n=>n.id==='draft-a'),true);
+ assert.equal(unchanged.edges.some(e=>e.id==='draft-ab'),true);
+ assert.deepEqual(counts(sql,id),{revision:2,history:3,receipts:2});
+});
