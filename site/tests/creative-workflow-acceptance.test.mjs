@@ -80,3 +80,31 @@ test('unrelated canonical arrow is not retargeted or duplicated',()=>{
  assert.deepEqual(next.edges.slice(0,2),g.edges.slice(0,2));
  assert.equal(next.edges.filter(e=>e.from==='n1'&&e.to==='n2').length,1);
 });
+
+test('partial acceptance retains cross-boundary arrow ID, orientation, semantic type and ownership',()=>{
+ const input=story(),baseline=clone(input);
+ const {graph:after}=applyDraftAcceptance(input,{
+  workspaceId:'w1',nodeIds:['a','b'],expectedRevision:7,
+  expectedPreview:previewDraftAcceptance(input,{workspaceId:'w1',nodeIds:['a','b']})
+ });
+ const pending=after.edges.find(e=>e.id==='eb');
+ assert.deepEqual(pending,baseline.edges.find(e=>e.id==='eb'));
+ assert.equal(after.nodes.find(n=>n.id==='b').workspaceId,undefined);
+ assert.equal(after.nodes.find(n=>n.id==='c').workspaceId,'w1');
+ assert.equal(pending.from,'b');assert.equal(pending.to,'c');
+ assert.equal(pending.type,'precedes');
+ assert.equal(pending.draftRelation,'internal');
+ assert.equal(pending.workspaceId,'w1');
+ assert.equal(canonicalProjection(after).edges.some(e=>e.id==='eb'),false);
+ assert.deepEqual(input,baseline);
+ assert.doesNotThrow(()=>validateCreativeWorkflowGraph(JSON.parse(JSON.stringify(after))));
+});
+test('boundary proposal with two canon endpoints stays editorial until explicit decision',()=>{
+ const input=story();
+ const {graph:after}=applyDraftAcceptance(input,{workspaceId:'w1',nodeIds:['a','b','c']});
+ const proposed=after.edges.find(e=>e.id==='ep');
+ assert.equal(proposed.from,'n1');assert.equal(proposed.to,'a');
+ assert.equal(proposed.workspaceId,'w1');assert.equal(proposed.draftRelation,'boundary-proposal');
+ assert.equal(canonicalProjection(after).edges.some(e=>e.id==='ep'),false);
+ assert.doesNotThrow(()=>validateCreativeWorkflowGraph(after));
+});
