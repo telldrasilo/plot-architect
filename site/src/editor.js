@@ -1365,6 +1365,9 @@ function cwBeginDraftDrag(event,card,node,area,svg,links,byId,getSockets){
  const cardMap=new Map([...card.parentElement.querySelectorAll('[data-cw-node]')]
   .map(el=>[el.dataset.cwNode,el]));
  const startX=event.clientX,startY=event.clientY;
+ // A card already outside a resized frame stays a draft when dragged nearby.
+ // Only an intentional crossing from inside may propose plot acceptance.
+ const startedOutside=cwDropClassification(area.id,node.x+104,node.y+52)!=='inside';
  let dx=0,dy=0,moved=false;
  let hover='inside';
  card.setPointerCapture(event.pointerId);
@@ -1391,6 +1394,7 @@ function cwBeginDraftDrag(event,card,node,area,svg,links,byId,getSockets){
   draw();
   const lead=initial.find(n=>n.id===node.id);
   hover=cwDropClassification(area.id,lead.x+dx+104,lead.y+dy+52);
+  if(startedOutside&&hover==='plot')hover='inside';
   card.classList.toggle('cw-drop-target',hover==='plot');
   card.classList.toggle('cw-drop-invalid',hover==='invalid');
   card.parentElement.classList.toggle('cw-drop-hover',hover==='plot');
@@ -1808,6 +1812,43 @@ function renderCreativeWorkspacePreview(){
    ?'Перенос в сюжет · ещё не сохранено'
    :persisted?'Вне сюжета':'Предпросмотр · не в сюжете';
   head.append(hint);box.append(head);
+  if(persisted&&cwWorkflowEnabled()){
+   box.classList.add('cw-workspace-editable');
+   head.setAttribute('role','button');head.tabIndex=0;
+   head.dataset.cwWorkspaceMove=area.id;
+   head.setAttribute('aria-label','Переместить рабочую область с черновиками');
+   head.title='Перетащите область за заголовок. Стрелки — на 20, Shift+стрелки — на 5.';
+   head.addEventListener('pointerdown',e=>cwBeginFramePointer(e,area,box,'move'));
+   head.addEventListener('keydown',e=>cwFrameKeyboard(e,area,'move'));
+   const resize=document.createElement('button');resize.type='button';
+   resize.className='cw-workspace-resize';resize.dataset.cwWorkspaceResize=area.id;
+   resize.setAttribute('aria-label','Изменить размер рабочей области');
+   resize.title='Потяните за угол. Стрелки меняют ширину и высоту, Shift — точнее.';
+   resize.textContent='↘';
+   resize.addEventListener('pointerdown',e=>cwBeginFramePointer(e,area,box,'resize'));
+   resize.addEventListener('keydown',e=>cwFrameKeyboard(e,area,'resize'));
+   resize.addEventListener('click',e=>e.stopPropagation());
+   box.append(resize);
+  }
+  if(persisted&&cwFrameError?.workspaceId===area.id){
+   const warning=document.createElement('div');warning.className='cw-workspace-save-error';
+   warning.setAttribute('role','alert');
+   const message=document.createElement('span');
+   message.textContent='Не удалось сохранить рамку: '+cwFrameError.message;
+   warning.append(message);
+   if(cwFramePending?.projectId===activeProjectId&&
+      cwFramePending.command.workspaceId===area.id){
+    const retry=document.createElement('button');retry.type='button';
+    retry.textContent='Повторить сохранение';retry.disabled=cwAcceptanceBusy||remote.blocked;
+    retry.addEventListener('click',e=>{
+     e.stopPropagation();
+     const command=cwFramePending?.command;
+     if(command)void cwCommitFrameGeometry(command.workspaceId,command.mode,command.geometry);
+    });
+    warning.append(retry);
+   }
+   box.append(warning);
+  }
   const internals=data.edges.filter(e=>e.workspaceId===area.id);
   let drawnSockets=null;
   const svg=document.createElementNS(namespace,'svg');svg.setAttribute('class','cw-preview-arrows');
