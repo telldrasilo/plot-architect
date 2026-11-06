@@ -153,7 +153,7 @@ def main():
         # First review and cancel: no changes to plot or workspace.
         panel.get_by_role("button",name="Не использовать связь").click()
         panel=page.locator('[data-cw-boundary-details="proposal-n1-a"]')
-        assert panel.get_by_role("button",name="Подтвердить отказ").count()==1
+        panel.get_by_role("button",name="Подтвердить отказ").wait_for(timeout=6000)
         assert db["applies"]==0
         panel.get_by_role("button",name="Отмена").click()
         assert db["applies"]==0
