@@ -158,10 +158,12 @@ def main():
         panel.get_by_role("button",name="Отмена").click()
         assert db["applies"]==0
         assert page.locator('[data-cw-boundary-edge="proposal-n1-a"]').count()==1
-        page.locator('[data-cw-boundary-hit="proposal-n1-a"]').focus()
-        page.locator('[data-cw-boundary-hit="proposal-n1-a"]').press("Enter")
+        # Cancellation retains the selected edge and its original panel.
+        # Re-pressing the hit target would toggle selection OFF, not reopen it.
         panel=page.locator('[data-cw-boundary-details="proposal-n1-a"]')
+        panel.get_by_role("button",name="Не использовать связь").wait_for(timeout=6000)
         panel.get_by_role("button",name="Не использовать связь").click()
+        panel.get_by_role("button",name="Подтвердить отказ").wait_for(timeout=6000)
         panel.get_by_role("button",name="Подтвердить отказ").click()
         page.wait_for_function("()=>__graphite.getRemote().revision===2")
         assert db["applies"]==1 and db["generic"]==0
