@@ -383,12 +383,14 @@ function cwCancelDropReview(){
 }
 let cwSelectedWorkspaceId=null;
 let cwSelectedDraftEdge=null; // transient visual selection only
+let cwSelectedBoundaryEdge=null; // draft/canon editorial relation, never a plot arrow
 let cwDraftTextEdit=null; // unsaved form state only
 const cwSelectedDraftIds=new Set();
 function cwClearDraftSelection(){
  cwDraftTextEdit=null;
  cwDiscardReview=null;
  cwSelectedDraftEdge=null;
+ cwSelectedBoundaryEdge=null;
  cwSelectedWorkspaceId=null;cwSelectedDraftIds.clear();cwAcceptanceReview=null;
  cwDragDropReview=null;
 }
@@ -396,6 +398,7 @@ function cwToggleDraftSelection(nodeId,workspaceId){
  if(!cwWorkflowEnabled())return;
  cwDiscardReview=null;
  cwSelectedDraftEdge=null;
+ cwSelectedBoundaryEdge=null;
  if(!state.nodes.some(n=>n.id===nodeId&&n.workspaceId===workspaceId))return;
  if(cwSelectedWorkspaceId!==workspaceId){
   cwSelectedDraftIds.clear();cwSelectedWorkspaceId=workspaceId;
@@ -988,8 +991,21 @@ const cwDraftRelationOptions=[
  ['enables','Создаёт условия','А делает Б возможным'],
  ['hinders','Препятствует','А мешает Б']
 ];
+function cwSelectBoundaryEdge(workspaceId,edgeId){
+ if(!cwWorkflowEnabled()||cwAcceptanceBusy||cwDragDropReview)return;
+ const e=state.edges.find(e=>e.id===edgeId&&e.workspaceId===workspaceId);
+ if(!e||!['internal','boundary-proposal'].includes(e.draftRelation))return;
+ const from=state.nodes.find(n=>n.id===e.from),to=state.nodes.find(n=>n.id===e.to);
+ if(!from||!to||from.workspaceId===workspaceId&&to.workspaceId===workspaceId)return;
+ const old=cwSelectedBoundaryEdge;
+ cwSelectedBoundaryEdge=old?.workspaceId===workspaceId&&old.edgeId===edgeId
+  ?null:{workspaceId,edgeId};
+ cwSelectedDraftEdge=null;
+ renderCreativeWorkspacePreview();
+}
 function cwSelectDraftEdge(workspaceId,edgeId){
  if(!cwWorkflowEnabled()||cwAcceptanceBusy||cwDragDropReview)return;
+ cwSelectedBoundaryEdge=null;
  const edge=state.edges.find(e=>e.id===edgeId&&e.workspaceId===workspaceId&&e.draftRelation==='internal');
  if(!edge)return;
  cwSelectedDraftEdge=cwSelectedDraftEdge?.edgeId===edgeId?null:{workspaceId,edgeId};
@@ -1751,7 +1767,24 @@ function cwPersistedWorkspaceScene(){
  const ids=new Map(nodes.map(n=>[n.id,n]));
  const edges=state.edges.filter(e=>e.workspaceId&&e.draftRelation==='internal'
   &&ids.has(e.from)&&ids.has(e.to)&&ids.get(e.from).workspaceId===e.workspaceId&&ids.get(e.to).workspaceId===e.workspaceId);
- return {workspaces,nodes,edges};
+ // Cross-boundary editorial arrows survive partial acceptance. Their owning
+ // workspace is unchanged; endpoints can be canon or an unaccepted draft.
+ // Do not feed these edges to active plot rendering or draft socket editing.
+ const all=new Map([...state.nodes.map(n=>[n.id,n]),...nodes.map(n=>[n.id,n])]);
+ const retired=new Set((state.replacements||[]).flatMap(r=>r.sourceNodeIds));
+ const boundaryEdges=state.edges.filter(e=>{
+  if(!ownerIds.has(e.workspaceId)||!['internal','boundary-proposal'].includes(e.draftRelation))
+   return false;
+  const from=all.get(e.from),to=all.get(e.to);
+  if(!from||!to)return false;
+  if(from.workspaceId&&from.workspaceId!==e.workspaceId||
+     to.workspaceId&&to.workspaceId!==e.workspaceId)return false;
+  if(retired.has(from.id)||retired.has(to.id))return false;
+  const fromDraft=from.workspaceId===e.workspaceId,toDraft=to.workspaceId===e.workspaceId;
+  if(fromDraft&&toDraft)return false;
+  return fromDraft||toDraft||e.draftRelation==='boundary-proposal';
+ });
+ return {workspaces,nodes,edges,boundaryEdges};
 }
 // Position the reviewed drop beside the *rendered* card. Cards have
 // variable heights and the canvas may be zoomed, so world-space fixed offsets
@@ -1854,6 +1887,11 @@ function renderCreativeWorkspacePreview(){
    box.append(warning);
   }
   const internals=data.edges.filter(e=>e.workspaceId===area.id);
+  const boundaryRelations=(data.boundaryEdges||[]).filter(e=>e.workspaceId===area.id);
+  const allEndpoints=new Map([
+   ...state.nodes.filter(n=>n.workspaceId==null).map(n=>[n.id,n]),
+   ...data.nodes.map(n=>[n.id,n])
+  ]);
   let drawnSockets=null;
   const svg=document.createElementNS(namespace,'svg');svg.setAttribute('class','cw-preview-arrows');
   svg.setAttribute('width',String(area.width));svg.setAttribute('height',String(area.height));
@@ -1885,6 +1923,52 @@ function renderCreativeWorkspacePreview(){
     hit.addEventListener('keydown',e=>{
      if(e.key==='Enter'||e.key===' '){
       e.preventDefault();e.stopPropagation();cwSelectDraftEdge(area.id,edge.id)
+     }
+    });
+    svg.append(hit);
+   }
+  }
+  // Visible but never canonical: these links are editorial proposals or
+  // unresolved internal edges after one endpoint was accepted into the plot.
+  for(const edge of boundaryRelations){
+   const from=allEndpoints.get(edge.from),to=allEndpoints.get(edge.to);
+   if(!from||!to)continue;
+   const ax=from.x-area.x+(from.workspaceId?208:widthOf(from));
+   const ay=from.y-area.y+56;
+   const bx=to.x-area.x,by=to.y-area.y+56;
+   const d='M '+ax+' '+ay+' L '+bx+' '+by;
+   const selected=cwSelectedBoundaryEdge?.workspaceId===area.id&&
+    cwSelectedBoundaryEdge.edgeId===edge.id;
+   const line=document.createElementNS(namespace,'path');
+   line.setAttribute('d',d);
+   line.setAttribute('class','cw-boundary-link'+(selected?' cw-boundary-link-selected':''));
+   line.dataset.cwBoundaryEdge=edge.id;
+   svg.append(line);
+   const length=Math.hypot(bx-ax,by-ay);
+   if(length>12){
+    const ux=(bx-ax)/length,uy=(by-ay)/length;
+    const hx=bx-13*ux,hy=by-13*uy;
+    const p1=[hx,hy],p2=[hx-8*ux+5*uy,hy-8*uy-5*ux];
+    const p3=[hx-8*ux-5*uy,hy-8*uy+5*ux];
+    const tip=document.createElementNS(namespace,'polygon');
+    tip.setAttribute('points',[p1,p2,p3].map(p=>p.join(',')).join(' '));
+    tip.setAttribute('class','cw-boundary-arrowhead');
+    tip.dataset.cwBoundaryDirection=edge.id;
+    svg.append(tip);
+   }
+   if(edgeEditable){
+    const hit=document.createElementNS(namespace,'path');
+    hit.setAttribute('d',d);hit.classList.add('cw-draft-edge-hit','cw-boundary-hit');
+    hit.setAttribute('role','button');hit.setAttribute('tabindex','0');
+    hit.dataset.cwBoundaryHit=edge.id;
+    hit.setAttribute('aria-label','Нерешённая редакторская связь: '+
+      from.title+' — '+to.title+'. Показать подробности');
+    hit.addEventListener('click',event=>{
+     event.stopPropagation();cwSelectBoundaryEdge(area.id,edge.id);
+    });
+    hit.addEventListener('keydown',event=>{
+     if(event.key==='Enter'||event.key===' '){
+      event.preventDefault();event.stopPropagation();cwSelectBoundaryEdge(area.id,edge.id);
      }
     });
     svg.append(hit);
@@ -2139,7 +2223,52 @@ function renderCreativeWorkspacePreview(){
    });
    panel.append(approve,cancel);box.append(panel);
   }
+  let boundaryPanel=null,boundaryAnchor=null;
+  if(persisted&&cwWorkflowEnabled()&&cwSelectedBoundaryEdge?.workspaceId===area.id){
+   const edge=boundaryRelations.find(e=>e.id===cwSelectedBoundaryEdge.edgeId);
+   const from=edge&&allEndpoints.get(edge.from),to=edge&&allEndpoints.get(edge.to);
+   if(edge&&from&&to){
+    const p=document.createElement('section');p.className='cw-boundary-details';
+    p.dataset.cwBoundaryDetails=edge.id;
+    p.setAttribute('role','group');
+    p.setAttribute('aria-label','Нерешённая редакторская связь');
+    p.addEventListener('pointerdown',event=>event.stopPropagation());
+    p.addEventListener('click',event=>event.stopPropagation());
+    const title=document.createElement('strong');title.textContent='Не в сюжете · нерешённая связь';
+    const relation=document.createElement('p');
+    relation.textContent=from.title+' → '+to.title;
+    const meaning=document.createElement('p');
+    meaning.textContent='Тип: '+(edgeLabels[edge.type]||edge.type)+
+      ' · редакторская связь. Сохранится до явного решения автора.';
+    const actions=document.createElement('div');actions.className='cw-boundary-actions';
+    const draft=[from,to].find(n=>n.workspaceId===area.id);
+    if(draft){
+     const accept=document.createElement('button');accept.type='button';
+     accept.textContent='В сюжет: '+draft.title;accept.disabled=cwAcceptanceBusy;
+     accept.addEventListener('click',event=>{
+      event.stopPropagation();cwSelectedBoundaryEdge=null;
+      void cwPrepareAccept([draft.id],area.id);
+     });
+     const remove=document.createElement('button');remove.type='button';
+     remove.textContent='Удалить черновик';remove.disabled=cwAcceptanceBusy;
+     remove.addEventListener('click',event=>{
+      event.stopPropagation();cwSelectedBoundaryEdge=null;
+      void cwPrepareDiscard([draft.id],area.id);
+     });
+     actions.append(accept,remove);
+     boundaryAnchor=draft.id;
+    }
+    const close=document.createElement('button');close.type='button';
+    close.textContent='Закрыть';close.addEventListener('click',event=>{
+     event.stopPropagation();cwSelectedBoundaryEdge=null;renderCreativeWorkspacePreview();
+    });
+    actions.append(close);p.append(title,relation,meaning,actions);
+    box.append(p);boundaryPanel=p;
+   }
+  }
   host.append(box);
+  if(boundaryPanel&&boundaryAnchor)
+   cwPositionDropReview(boundaryPanel,box,[boundaryAnchor]);
   // Measure cards only after attaching to DOM: descriptions can make each
   // draft taller than the old fixed 105px/56px assumptions.
   const socketBounds=Object.fromEntries(nodes.map(n=>{
