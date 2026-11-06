@@ -2067,8 +2067,14 @@ async function cwPrepareNoteStage(noteId){
   if(activeProjectId!==projectId||remote.revision!==revision||remote.dirty||remote.blocked)
    throw Error('Проект изменился во время проверки');
   const plan=response.preview;
+  const sourceLinks=(state.gapLinks||[]).filter(l=>
+    l?.from?.kind==='gap_note'&&l.from.id===noteId||
+    l?.to?.kind==='gap_note'&&l.to.id===noteId);
   if(plan?.noteId!==noteId||plan.workspaceId!==command.workspaceId
-    ||!Array.isArray(plan.branchSummaries)
+    ||plan.deleteSourceNoteOnCommit!==true||
+    !Array.isArray(plan.removeSourceLinkIds)||
+    JSON.stringify(plan.removeSourceLinkIds)!==JSON.stringify(sourceLinks.map(l=>l.id))||
+    !Array.isArray(plan.branchSummaries)
     ||plan.branchSummaries.length!==command.branches.length
     ||!Array.isArray(plan.proposedNodes)||!Array.isArray(plan.proposedEdges)
     ||plan.autoRewiredEdgeIds?.length)
@@ -2099,12 +2105,15 @@ async function cwConfirmNoteStage(){
   const next=validateImported(latest.graph);
   if(!next.workspaces?.some(a=>a.id===r.command.workspaceId&&a.taskId===r.noteId))
    throw Error('Рабочая область не найдена в сохранённой версии');
+  if(next.gapNotes?.some(n=>n.id===r.noteId)||
+     (next.gapLinks||[]).some(l=>r.plan.removeSourceLinkIds.includes(l.id)))
+   throw Error('Исходная заметка или её ссылки не удалены атомарно');
   state=next;remote.revision=latest.revision;remote.dirty=false;
   selected=null;selectedNodeIds.clear();linkFrom=null;history=[];
   cwPreparedNoteAlternatives.delete(r.noteId);cwStageReview=null;
   recomputeFieldTags();save(false);render();fit();
   $('saved').textContent='✓ '+(cwLocalWorkflowEnabled?'Сохранено локально':'Сохранено в Site')+' · '+remote.revision;
-  note('Варианты сохранены в рабочей области — не в сюжете');
+  note('Черновики сохранены вне сюжета; исходная заметка удалена');
  }catch(err){
   // Do not rotate operationId following an ambiguous reply or lost GET.
   if(['REVISION_CONFLICT','PREVIEW_STALE','OPERATION_ID_REUSED'].includes(err.code)){
