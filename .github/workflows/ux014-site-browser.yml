@@ -34,6 +34,8 @@ jobs:
         run: python qa/browser/tests_cw/test_cw_workspace_preview_browser.py
       - name: Verify persisted workspace reviewed acceptance in synthetic browser
         run: python qa/browser/tests_cw/test_cw_persisted_workspace_accept_browser.py
+      - name: Verify cross-boundary editorial arrows after partial acceptance
+        run: python qa/browser/tests_cw/test_cw_boundary_editorial_browser.py
       - name: Review and stage prepared alternatives from standalone note
         run: python qa/browser/tests_cw/test_cw_note_stage_browser.py
       - name: Exercise grouped draft acceptance in real synthetic editor
