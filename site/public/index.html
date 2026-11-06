@@ -2323,9 +2323,14 @@ async function cwPrepareAccept(nodeIds,workspaceId,placements){
   if(activeProjectId!==id||remote.revision!==revision||remote.dirty||remote.blocked)
    throw Error('Проект изменился во время проверки. Повторите действие');
   const plan=reviewed.preview;
+  const remaining=state.nodes.filter(n=>n.workspaceId===workspaceId&&!selection.includes(n.id));
+  const shouldRemove=remaining.length===0;
   if(!plan||JSON.stringify(plan.acceptNodeIds)!==JSON.stringify(selection)
     ||plan.workspaceId!==workspaceId||!Array.isArray(plan.promoteEdgeIds)
     ||!Array.isArray(plan.reviewEdgeIds)||plan.autoRewiredEdgeIds?.length
+    ||plan.removeWorkspace!==shouldRemove
+    ||(shouldRemove&&plan.reviewEdgeIds.length)
+    ||!Array.isArray(plan.removeGapLinkIds)
     ||(placements!==undefined&&(!Array.isArray(plan.positionChanges)
       ||plan.positionChanges.length!==selection.length
       ||plan.positionChanges.some((p,i)=>p.nodeId!==selection[i]
@@ -2339,7 +2344,9 @@ async function cwPrepareAccept(nodeIds,workspaceId,placements){
   if(!dropRef||cwDragDropReview===dropRef){
    cwAcceptanceReview=null;
    if(dropRef)cwDragDropReview=null;
-   note('Не удалось проверить принятие: '+err.message);
+   note(err.code==='WORKSPACE_UNRESOLVED_RELATIONS'
+    ?'Сначала решите нерешённые редакторские связи этой области, затем повторите принятие'
+    :'Не удалось проверить принятие: '+err.message);
   }
  }
  finally{cwAcceptanceBusy=false;renderCreativeWorkspacePreview()}
@@ -2367,6 +2374,12 @@ async function cwConfirmAccept(){
    const target=review.placements?.find(p=>p.nodeId===id);
    return !node||node.workspaceId!=null||(target&&(node.x!==target.x||node.y!==target.y));
   }))throw Error('Принятие и координаты не подтверждены повторным чтением');
+  if(review.plan.removeWorkspace&&latest.graph?.workspaces?.some(w=>w.id===review.workspaceId))
+   throw Error('Пустая рабочая область сохранилась после последнего принятия');
+  if(review.plan.removeNoteId&&latest.graph?.gapNotes?.some(n=>n.id===review.plan.removeNoteId))
+   throw Error('Устаревшая заметка не была удалена вместе с рамкой');
+  if(review.plan.removeGapLinkIds?.some(id=>latest.graph?.gapLinks?.some(l=>l.id===id)))
+   throw Error('Редакторские ссылки заметки не были очищены');
   state=validateImported(latest.graph);
   remote.revision=latest.revision;
   remote.dirty=false;
@@ -2376,7 +2389,9 @@ async function cwConfirmAccept(){
   recomputeFieldTags();
   save(false);render();
   $('saved').textContent='✓ '+(cwLocalWorkflowEnabled?'Сохранено локально':'Сохранено в Site')+' · '+remote.revision;
-  note('Выбранные события приняты в сюжет. Остальные черновики сохранены');
+  note(review.plan.removeWorkspace
+   ?'Черновики приняты в сюжет. Пустая рабочая область удалена'
+   :'Выбранные события приняты в сюжет. Остальные черновики сохранены');
  }catch(err){
   // Keep the same operationId for retry after an ambiguous network failure.
   // Never silently mint a second write after a possibly committed request.
@@ -2834,7 +2849,8 @@ function renderCreativeWorkspacePreview(){
    const desc=document.createElement('p');
    desc.textContent='В сюжет: '+p.nodeIds.length+' событие(ий) · внутренних связей: '+p.plan.promoteEdgeIds.length
     +' · связей для отдельного решения: '+p.plan.reviewEdgeIds.length
-    +' · внешние связи не подключаются автоматически';
+    +' · внешние связи не подключаются автоматически'
+    +(p.plan.removeWorkspace?' · пустая рабочая область исчезнет':'');
    if(p.placements){
     review.classList.add('cw-drop-review');
     review.style.right='auto';review.style.transform='none';
