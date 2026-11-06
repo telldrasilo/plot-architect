@@ -92,6 +92,10 @@ def preview_plan(graph, command):
         "noteId": NOTE, "workspaceId": command["workspaceId"],
         "sourceNote": copy.deepcopy(note),
         "contextualLinks": copy.deepcopy(graph["gapLinks"]),
+        "deleteSourceNoteOnCommit": True,
+        "removeSourceLinkIds": [l["id"] for l in graph["gapLinks"] if
+                               l["from"]["kind"]=="gap_note" and l["from"]["id"]==NOTE or
+                               l["to"]["kind"]=="gap_note" and l["to"]["id"]==NOTE],
         "workspace": {"id": "w1", "taskId": NOTE, **command["workspace"]},
         "branchSummaries": summaries, "proposedNodes": nodes,
         "proposedEdges": edges, "replacesCanonicalNodeIds": [], "autoRewiredEdgeIds": []
@@ -173,6 +177,9 @@ def main():
             db["graph"]["workspaces"] = [copy.deepcopy(plan["workspace"])]
             db["graph"]["nodes"].extend(copy.deepcopy(plan["proposedNodes"]))
             db["graph"]["edges"].extend(copy.deepcopy(plan["proposedEdges"]))
+            db["graph"]["gapNotes"] = [n for n in db["graph"]["gapNotes"] if n["id"] != NOTE]
+            removed=set(plan["removeSourceLinkIds"])
+            db["graph"]["gapLinks"] = [l for l in db["graph"]["gapLinks"] if l["id"] not in removed]
             db["revision"] += 1
             db["graph"]["revision"] = db["revision"]
             db["applies"] += 1
@@ -252,13 +259,13 @@ def main():
         assert db["generic_puts"] == 0
         assert db["graph"]["nodes"][:3] == original["nodes"]
         assert db["graph"]["edges"][:2] == original["edges"]
-        assert db["graph"]["gapNotes"] == original["gapNotes"]
-        assert db["graph"]["gapLinks"] == original["gapLinks"]
+        assert db["graph"]["gapNotes"] == []
+        assert db["graph"]["gapLinks"] == []
         assert db["graph"]["workspaces"][0]["taskId"] == NOTE
         assert len([n for n in db["graph"]["nodes"] if "workspaceId" in n]) == 7
         assert page.locator(".cw-preview-link").count() == 3
-        # A staged note is replaced visually, while the source task and
-        # editorial context remain in the saved graph for provenance.
+        # A processed note and its links disappear from the active graph.
+        # The drafted story material remains in the workspace indefinitely.
         assert page.locator('[data-gap-note="gn1"]').count() == 0
         assert page.locator('[data-gap-link="gl1"]').count() == 0
         assert page.evaluate("() => __graphite.getSelected()") is None
