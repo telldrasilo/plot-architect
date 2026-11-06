@@ -352,3 +352,61 @@ test('discard_drafts stale preview, foreign node and generic PUT fail without wr
  assert.equal(unchanged.edges.some(e=>e.id==='draft-ab'),true);
  assert.deepEqual(counts(sql,id),{revision:2,history:3,receipts:2});
 });
+
+test('saved workspace move and resize use atomic REST CAS, receipts and canonical isolation',async()=>{
+ const {db,sql}=storage(),env={DB:db,CW_WORKFLOW_ENABLED:'true'},id=await create(env);
+ assert.equal((await apply(env,id,0,'stage-geometry',stage())).status,200);
+ const before=(await graph(env,id)).graph;
+ const area=before.workspaces.find(w=>w.id==='w1');
+ assert.deepEqual({x:area.x,y:area.y,width:area.width,height:area.height},
+  {x:90,y:450,width:950,height:480});
+ const move={kind:'set_workspace_geometry',workspaceId:'w1',mode:'move',
+  geometry:{x:190,y:480,width:950,height:480}};
+ const p=await preview(env,id,1,move);
+ assert.equal(p.status,200,JSON.stringify(p.data));
+ assert.deepEqual(p.data.preview.positionChanges.map(x=>x.nodeId),
+  ['draft-a','draft-b','draft-c']);
+ assert.deepEqual(p.data.preview.affectedDraftEdgeIds,['draft-ab']);
+ assert.deepEqual(counts(sql,id),{revision:1,history:2,receipts:1});
+ const body={expectedRevision:1,operationId:'move-workspace',
+  command:{...move,expectedPreview:p.data.preview}};
+ const first=await request(env,'POST',path(id)+'apply',body);
+ const again=await request(env,'POST',path(id)+'apply',body);
+ assert.equal(first.status,200,JSON.stringify(first.data));
+ assert.equal(again.status,200);assert.equal(again.data.replayed,true);
+ assert.deepEqual(counts(sql,id),{revision:2,history:3,receipts:2});
+ const moved=(await graph(env,id)).graph;
+ assert.deepEqual(moved.workspaces[0],{...area,...move.geometry});
+ for(const draft of before.nodes.filter(n=>n.workspaceId==='w1')){
+  const saved=moved.nodes.find(n=>n.id===draft.id);
+  assert.equal(saved.x,draft.x+100);assert.equal(saved.y,draft.y+30);
+ }
+ assert.deepEqual(moved.edges,before.edges);
+ assert.deepEqual(moved.nodes.filter(n=>!n.workspaceId),
+  before.nodes.filter(n=>!n.workspaceId));
+ const mcp=await request(env,'POST','/mcp',{jsonrpc:'2.0',id:18,method:'tools/call',
+  params:{name:'get_project',arguments:{project_id:id,detail:'full'}}});
+ assert.deepEqual(mcp.data.result.structuredContent.graph.nodes.map(n=>n.id),
+  ['n1','n2','n3']);
+ const resize={kind:'set_workspace_geometry',workspaceId:'w1',mode:'resize',
+  geometry:{x:190,y:480,width:550,height:300}};
+ const updated=await apply(env,id,2,'resize-workspace',resize);
+ assert.equal(updated.status,200,JSON.stringify(updated.data));
+ const resized=(await graph(env,id)).graph;
+ assert.deepEqual(resized.nodes,moved.nodes);
+ assert.deepEqual(resized.edges,moved.edges);
+ assert.deepEqual(resized.workspaces[0],{...area,...resize.geometry});
+ assert.deepEqual(counts(sql,id),{revision:3,history:4,receipts:3});
+ const tampered=structuredClone(body);tampered.command.geometry.x=201;
+ const reused=await request(env,'POST',path(id)+'apply',tampered);
+ assert.equal(reused.status,409);assert.equal(reused.data.error,'OPERATION_ID_REUSED');
+ const forged=structuredClone(resized);
+ forged.workspaces[0].width=9999;
+ const put=await request(env,'PUT','/api/projects/'+id,
+  {name:'Synthetic',expectedRevision:3,graph:forged});
+ assert.equal(put.status,422);
+ const stale=await request(env,'POST',path(id)+'apply',{
+  expectedRevision:1,operationId:'stale-frame',command:{...move,expectedPreview:p.data.preview}});
+ assert.equal(stale.status,409);assert.equal(stale.data.error,'REVISION_CONFLICT');
+ assert.deepEqual(counts(sql,id),{revision:3,history:4,receipts:3});
+});
