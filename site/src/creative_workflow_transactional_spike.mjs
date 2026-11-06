@@ -10,6 +10,7 @@
 import {validateServerGraph} from './creative_workflow_server_boundary.mjs';
 import {previewStageNoteAlternatives,applyStageNoteAlternatives} from './creative_workflow_note_staging.mjs';
 import {previewMoveDraftNodes,applyMoveDraftNodes} from './creative_workflow_draft_move.mjs';
+import {previewWorkspaceGeometry,applyWorkspaceGeometry} from './creative_workflow_workspace_geometry.mjs';
 import {previewEditDraftText,applyEditDraftText} from './creative_workflow_draft_text.mjs';
 import {previewDiscardDraftNodes,applyDiscardDraftNodes} from './creative_workflow_draft_discard.mjs';
 import {
@@ -40,6 +41,7 @@ const validRevision=x=>Number.isSafeInteger(x)&&x>=0;
 const fields={
   stage_note:['noteId','workspaceId','workspace','branches','expectedPreview'],
   move_drafts:['workspaceId','moves','expectedPreview'],
+  set_workspace_geometry:['workspaceId','mode','geometry','expectedPreview'],
   edit_draft_text:['workspaceId','nodeId','title','description','expectedPreview'],
   discard_drafts:['workspaceId','nodeIds','expectedPreview'],
   add_draft_edge:['workspaceId','edge','expectedPreview'],
@@ -88,6 +90,7 @@ async function runDomain(db,projectId,graph,expectedRevision,command){
   switch(command.kind){
     case 'stage_note':return applyStageNoteAlternatives(graph,args);
     case 'move_drafts':return applyMoveDraftNodes(graph,args);
+    case 'set_workspace_geometry':return applyWorkspaceGeometry(graph,args);
     case 'edit_draft_text':return applyEditDraftText(graph,args);
     case 'discard_drafts':return applyDiscardDraftNodes(graph,args);
     case 'add_draft_edge':return applyAddDraftEdge(graph,args);
@@ -219,6 +222,7 @@ export async function previewWorkflowCommand(db,{projectId,expectedRevision,comm
   switch(command.kind){
     case 'stage_note': preview=previewStageNoteAlternatives(graph,command);break;
     case 'move_drafts': preview=previewMoveDraftNodes(graph,command);break;
+    case 'set_workspace_geometry': preview=previewWorkspaceGeometry(graph,command);break;
     case 'edit_draft_text': preview=previewEditDraftText(graph,command);break;
     case 'discard_drafts': preview=previewDiscardDraftNodes(graph,command);break;
     case 'add_draft_edge': preview=previewAddDraftEdge(graph,command);break;
