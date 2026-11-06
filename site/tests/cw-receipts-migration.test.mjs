@@ -102,7 +102,8 @@ test('migration-backed preview→stage→partial author acceptance uses CAS, his
  assert.deepEqual(count(sql,id),{revision:1,history:2,receipts:1});
  const project=await call(db,'GET','/api/projects/'+id);
  assert.equal(project.data.graph.nodes.filter(n=>n.workspaceId).length,2);
- assert.deepEqual(project.data.graph.gapNotes,story().gapNotes);
+ assert.deepEqual(project.data.graph.gapNotes,[]);
+ assert.deepEqual(project.data.graph.gapLinks,[]);
  const canon=await call(db,'POST','/mcp',{jsonrpc:'2.0',id:1,method:'tools/call',
   params:{name:'get_project',arguments:{project_id:id,detail:'full'}}});
  assert.deepEqual(canon.data.result.structuredContent.graph.nodes.map(n=>n.id),['n1']);
@@ -117,7 +118,7 @@ test('migration-backed preview→stage→partial author acceptance uses CAS, his
  assert.deepEqual(count(sql,id),{revision:2,history:3,receipts:2});
  const final=await call(db,'GET','/api/projects/'+id);
  assert.deepEqual(final.data.graph.nodes.filter(n=>n.workspaceId).map(n=>n.id),['draft2']);
- assert.deepEqual(final.data.graph.gapNotes,story().gapNotes);
+ assert.deepEqual(final.data.graph.gapNotes,[]);
  assert.equal(sql.prepare('SELECT COUNT(*) n FROM cw_operation_receipts').get().n,2);
  assert.deepEqual(sql.prepare('PRAGMA foreign_key_check').all(),[]);
  sql.close();
