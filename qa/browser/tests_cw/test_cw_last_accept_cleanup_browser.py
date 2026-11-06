@@ -99,8 +99,11 @@ def main():
         page.wait_for_function("()=>window.__graphite && __graphite.getRemote().connected"
                                " && document.querySelectorAll('.cw-preview-card').length===3")
         page.evaluate("()=>__graphite.fit()")
+        # Normal card click is a drag gesture. Explicit keyboard selection
+        # accumulates three distinct drafts without moving their coordinates.
         for key in ["a","b","c"]:
-            page.locator(f'[data-cw-node="{key}"]').click()
+            page.locator(f'[data-cw-node="{key}"]').focus()
+            page.keyboard.press("Enter")
         assert page.locator('[data-cw-discard-selected="w1"]').count()==1
         page.get_by_role("button",name="В сюжет (3)").click()
         review=page.locator(".cw-accept-review")
