@@ -354,6 +354,7 @@ function cwServerReady(){
   &&!cwAcceptanceBusy&&state.view===null;
 }
 let cwAcceptanceReview=null;
+let cwDiscardReview=null;
 // One stable transition border per workspace per editor session. Existing
 // external drafts are included once, but dragging never expands this border.
 const cwDropRects=new Map();
@@ -393,12 +394,14 @@ let cwDraftTextEdit=null; // unsaved form state only
 const cwSelectedDraftIds=new Set();
 function cwClearDraftSelection(){
  cwDraftTextEdit=null;
+ cwDiscardReview=null;
  cwSelectedDraftEdge=null;
  cwSelectedWorkspaceId=null;cwSelectedDraftIds.clear();cwAcceptanceReview=null;
  cwDragDropReview=null;
 }
 function cwToggleDraftSelection(nodeId,workspaceId){
  if(!cwWorkflowEnabled())return;
+ cwDiscardReview=null;
  cwSelectedDraftEdge=null;
  if(!state.nodes.some(n=>n.id===nodeId&&n.workspaceId===workspaceId))return;
  if(cwSelectedWorkspaceId!==workspaceId){
@@ -1077,7 +1080,7 @@ function cwOpenDraftTextEditor(workspaceId,nodeId){
  if(!cwWorkflowEnabled()||cwAcceptanceBusy||cwDragDropReview)return;
  const node=state.nodes.find(n=>n.id===nodeId&&n.workspaceId===workspaceId);
  if(!node)return;
- cwSelectedDraftEdge=null;cwAcceptanceReview=null;
+ cwSelectedDraftEdge=null;cwAcceptanceReview=null;cwDiscardReview=null;
  cwDraftTextEdit={workspaceId,nodeId,projectId:activeProjectId,
   title:node.title,description:node.description||'',pending:null};
  renderCreativeWorkspacePreview();
@@ -1314,7 +1317,106 @@ async function cwConfirmNoteStage(){
  }finally{cwAcceptanceBusy=false;renderInspector()}
 }
 
+
+/** CW-055-B: reviewed deletion of chosen drafts and all affected relations. */
+async function cwPrepareDiscard(nodeIds,workspaceId){
+ if(cwDraftTextEdit)return note('Закройте редактирование черновика');
+ if(cwDragDropReview)return note('Завершите перенос в сюжет');
+ try{
+  await cwEnsureDraftsSynced();
+  if(remote.connected&&(remote.dirty||remote.busy))await flushRemote();
+ }catch(err){return note('Удаление пока недоступно: '+err.message)}
+ if(!cwCleanForOperation())return note('Проект ещё синхронизируется');
+ if(!Array.isArray(nodeIds)||!nodeIds.length||new Set(nodeIds).size!==nodeIds.length||
+    nodeIds.some(key=>!state.nodes.some(n=>n.id===key&&n.workspaceId===workspaceId)))
+  return note('Выберите черновики одной области');
+ const projectId=activeProjectId,revision=remote.revision,selectedIds=[...nodeIds];
+ cwDiscardReview=null;cwAcceptanceReview=null;cwAcceptanceBusy=true;
+ try{
+  const command={kind:'discard_drafts',workspaceId,nodeIds:selectedIds};
+  const result=await cwWorkflowRequest(projectId,'preview',{expectedRevision:revision,command});
+  const plan=result.preview;
+  const selection=new Set(selectedIds);
+  const affected=state.edges.filter(e=>selection.has(e.from)||selection.has(e.to));
+  const remaining=state.nodes.filter(n=>n.workspaceId===workspaceId&&!selection.has(n.id));
+  const area=(state.workspaces||[]).find(a=>a.id===workspaceId);
+  const noteId=remaining.length===0&&
+   (state.gapNotes||[]).some(n=>n.id===area?.taskId)?area.taskId:null;
+  const noteLinks=(state.gapLinks||[]).filter(l=>
+   (l?.from?.kind==='plot_node'&&selection.has(l.from.id))||
+   (l?.to?.kind==='plot_node'&&selection.has(l.to.id))||
+   (noteId&&((l?.from?.kind==='gap_note'&&l.from.id===noteId)||
+             (l?.to?.kind==='gap_note'&&l.to.id===noteId))));
+  const same=(a,b)=>Array.isArray(a)&&
+   JSON.stringify([...a].sort())===JSON.stringify([...b].sort());
+  if(activeProjectId!==projectId||remote.revision!==revision||remote.dirty||remote.blocked||
+     !plan||plan.workspaceId!==workspaceId||!same(plan.nodeIds,selectedIds)||
+     !Array.isArray(plan.affectedRelations)||
+     !same(plan.affectedRelations.map(x=>x.id),affected.map(x=>x.id))||
+     plan.affectedRelations.some(e=>!affected.some(ref=>ref.id===e.id&&
+      ref.from===e.from&&ref.to===e.to&&ref.type===e.type&&
+      ref.draftRelation===e.draftRelation))||
+     !Array.isArray(plan.removedGapLinks)||
+     !same(plan.removedGapLinks.map(l=>l.id),noteLinks.map(l=>l.id))||
+     !same(plan.remainingNodeIds,remaining.map(n=>n.id))||
+     plan.removeWorkspace!==(remaining.length===0)||
+     (plan.removeNoteId??null)!==(noteId??null)||
+     plan.autoRewiredEdgeIds?.length)
+   throw Error('Предпросмотр удаления не совпадает с проектом');
+  cwDiscardReview={projectId,revision,workspaceId,nodeIds:selectedIds,
+   plan,operationId:crypto.randomUUID()};
+ }catch(err){cwDiscardReview=null;note('Не удалось проверить удаление: '+err.message)}
+ finally{cwAcceptanceBusy=false;renderCreativeWorkspacePreview()}
+}
+async function cwConfirmDiscard(){
+ const review=cwDiscardReview;
+ if(!review||!cwCleanForOperation())return note('Проект изменился. Повторите проверку');
+ if(review.projectId!==activeProjectId||review.revision!==remote.revision)
+  return note('Ревизия проекта изменилась');
+ cwAcceptanceBusy=true;let verified=false;
+ const confirm=latest=>{
+  const plan=review.plan;
+  if(review.projectId!==activeProjectId||cwDiscardReview!==review||
+     remote.blocked||remote.dirty||
+     !Number.isSafeInteger(latest.revision)||latest.revision<=review.revision||
+     review.nodeIds.some(id=>latest.graph?.nodes?.some(n=>n.id===id))||
+     plan.affectedRelations.some(edge=>latest.graph?.edges?.some(e=>e.id===edge.id))||
+     plan.removedGapLinks.some(link=>latest.graph?.gapLinks?.some(l=>l.id===link.id))||
+     (plan.removeNoteId&&latest.graph?.gapNotes?.some(n=>n.id===plan.removeNoteId))||
+     (plan.removeWorkspace
+      ?latest.graph?.workspaces?.some(a=>a.id===review.workspaceId)
+      :!latest.graph?.workspaces?.some(a=>a.id===review.workspaceId)))
+   throw Error('Удаление не подтверждено чтением проекта');
+  state=validateImported(latest.graph);remote.revision=latest.revision;remote.dirty=false;
+  try{localStorage.removeItem(PENDING_PREFIX+review.projectId)}catch{}
+  verified=true;selected=null;selectedNodeIds.clear();linkFrom=null;history=[];
+  cwClearDraftSelection();recomputeFieldTags();save(false);render();
+  note('Выбранные черновики удалены. Сюжет не изменён');
+ };
+ try{
+  const receipt=await cwWorkflowRequest(review.projectId,'apply',{
+   expectedRevision:review.revision,operationId:review.operationId,
+   command:{kind:'discard_drafts',workspaceId:review.workspaceId,
+    nodeIds:[...review.nodeIds],expectedPreview:review.plan}});
+  if(!Number.isSafeInteger(receipt?.revision))throw Error('Нет подтверждения записи');
+  const latest=await apiRequest('/api/projects/'+encodeURIComponent(review.projectId));
+  if(latest.revision<receipt.revision)throw Error('Устаревшая серверная ревизия');
+  confirm(latest);
+ }catch(err){
+  // Ambiguous response: read back before retrying the SAME operation ID.
+  if(!verified&&review.projectId===activeProjectId){
+   try{confirm(await apiRequest('/api/projects/'+encodeURIComponent(review.projectId)))}catch{}
+  }
+  if(!verified){
+   if(err.code==='REVISION_CONFLICT'||err.code==='PREVIEW_STALE'){
+    cwDiscardReview=null;remote.blocked=true;
+   }
+   note('Удаление не подтверждено: '+err.message);
+  }
+ }finally{cwAcceptanceBusy=false;if(!verified)renderCreativeWorkspacePreview()}
+}
 async function cwPrepareAccept(nodeIds,workspaceId,placements){
+ cwDiscardReview=null;
  const dropRef=placements===undefined?null:cwDragDropReview;
  if(placements!==undefined&&!dropRef)return;
  if(placements===undefined)cwDragDropReview=null;
@@ -1587,7 +1689,28 @@ function renderCreativeWorkspacePreview(){
    const clear=document.createElement('button');clear.type='button';clear.textContent='Снять выбор';
    clear.disabled=cwAcceptanceBusy;
    clear.addEventListener('click',e=>{e.stopPropagation();cwClearDraftSelection();renderCreativeWorkspacePreview()});
-   actions.append(count,accept,clear);box.append(actions);
+   const discard=document.createElement('button');discard.type='button';
+   discard.textContent='Удалить ('+cwSelectedDraftIds.size+')';
+   discard.disabled=remote.blocked||cwAcceptanceBusy;
+   discard.dataset.cwDiscardSelected=area.id;
+   discard.addEventListener('click',e=>{
+    e.stopPropagation();void cwPrepareDiscard([...cwSelectedDraftIds],area.id)
+   });
+   const members=[...cwSelectedDraftIds].map(id=>nodes.find(n=>n.id===id)).filter(Boolean);
+   const branch=members.length&&members[0].draftBranchId;
+   const branchMembers=branch&&members.every(n=>n.draftBranchId===branch)
+    ?nodes.filter(n=>n.draftBranchId===branch):[];
+   if(branchMembers.length>members.length){
+    const all=document.createElement('button');all.type='button';
+    all.dataset.cwDiscardBranch=branch;
+    all.textContent='Удалить ветвь ('+branchMembers.length+')';
+    all.disabled=remote.blocked||cwAcceptanceBusy;
+    all.addEventListener('click',e=>{
+     e.stopPropagation();void cwPrepareDiscard(branchMembers.map(n=>n.id),area.id)
+    });
+    actions.append(count,accept,discard,all,clear);
+   }else actions.append(count,accept,discard,clear);
+   box.append(actions);
   }
   const names=[...new Set(nodes.map(n=>n.draftBranchId||'single'))];
   for(const n of nodes){
@@ -1739,6 +1862,55 @@ function renderCreativeWorkspacePreview(){
     else{cwAcceptanceReview=null;renderCreativeWorkspacePreview()}
    });
    review.append(desc,approve,back);box.append(review);
+  }
+
+  if(persisted&&cwWorkflowEnabled()&&cwDiscardReview?.workspaceId===area.id){
+   const review=cwDiscardReview,plan=review.plan;
+   const panel=document.createElement('section');panel.className='cw-accept-review cw-discard-review';
+   panel.dataset.cwDiscardReview=area.id;
+   panel.setAttribute('role','group');
+   panel.setAttribute('aria-label','Проверка удаления черновиков и связей');
+   panel.addEventListener('pointerdown',e=>e.stopPropagation());
+   panel.addEventListener('click',e=>e.stopPropagation());
+   const heading=document.createElement('strong');
+   heading.textContent='Удалить '+review.nodeIds.length+' черновиков?';
+   const desc=document.createElement('p');
+   desc.textContent='Будут удалены '+plan.affectedRelations.length+
+    ' редакторских связей и '+plan.removedGapLinks.length+
+    ' привязок. Сюжетные события и стрелки не изменятся.';
+   panel.append(heading,desc);
+   if(plan.affectedRelations.length){
+    const details=document.createElement('details');details.open=true;
+    const summary=document.createElement('summary');
+    summary.textContent='Затронутые отношения ('+plan.affectedRelations.length+')';
+    details.append(summary);
+    const list=document.createElement('ul');
+    for(const edge of plan.affectedRelations){
+     const item=document.createElement('li');
+     item.textContent=(edge.fromTitle||edge.from)+' → '+(edge.toTitle||edge.to)+
+      ' · '+(edgeLabels[edge.type]||edge.type)+' · '+(
+       edge.draftRelation==='boundary-proposal'?'нерешённая':'внутренняя');
+     list.append(item);
+    }
+    details.append(list);panel.append(details);
+   }
+   if(plan.removeWorkspace){
+    const cleanup=document.createElement('p');
+    cleanup.textContent='После удаления последнего черновика пустая рабочая область исчезнет'+
+     (plan.removeNoteId?' вместе с исходной заметкой.':'.');
+    panel.append(cleanup);
+   }
+   const approve=document.createElement('button');approve.type='button';
+   approve.dataset.cwDiscardConfirm=area.id;
+   approve.textContent='Удалить черновики';approve.disabled=cwAcceptanceBusy;
+   approve.addEventListener('click',e=>{e.stopPropagation();void cwConfirmDiscard()});
+   const cancel=document.createElement('button');cancel.type='button';
+   cancel.dataset.cwDiscardCancel=area.id;cancel.textContent='Отмена';
+   cancel.disabled=cwAcceptanceBusy;
+   cancel.addEventListener('click',e=>{
+    e.stopPropagation();cwDiscardReview=null;renderCreativeWorkspacePreview();
+   });
+   panel.append(approve,cancel);box.append(panel);
   }
   host.append(box);
   // Measure cards only after attaching to DOM: descriptions can make each
