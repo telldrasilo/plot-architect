@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
 import worker from '../src/worker.mjs';
+import {previewDraftAcceptance} from '../src/creative_workflow_contract.mjs';
 
 function storage(receipts=true){
  const sql=new DatabaseSync(':memory:');
@@ -530,6 +531,11 @@ test('unresolved boundary relation blocks final acceptance without a partial wri
  const forged=structuredClone(before);
  forged.edges.push({id:'pending',from:'n1',to:'draft-b',type:'enables',
   workspaceId:'w1',draftRelation:'boundary-proposal'});
+ // An unpromoted boundary proposal must block the last acceptance rather
+ // than orphaning the edge or silently turning it into a canonical arrow.
+ assert.throws(()=>previewDraftAcceptance(forged,{
+  workspaceId:'w1',nodeIds:['draft-b','draft-c']
+ }),e=>e.code==='WORKSPACE_UNRESOLVED_RELATIONS'&&e.message.includes('pending'));
  const put=await request(env,'PUT','/api/projects/'+id,{
   name:'Synthetic',expectedRevision:2,graph:forged});
  assert.equal(put.status,422,'generic PUT cannot add editor-owned boundary relations');
