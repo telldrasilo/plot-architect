@@ -94,7 +94,8 @@ test('review and stage remain canonical no-ops until an explicit apply',()=>{
  assert.deepEqual(g,original);
  const saved=applyStageNoteAlternatives(g,{...compiled.command,expectedPreview:preview,expectedRevision:g.revision});
  assert.deepEqual(canonicalProjection(saved.graph),canonicalProjection(g));
- assert.deepEqual(saved.graph.gapNotes,[]);
+ assert.deepEqual(saved.graph.gapNotes,g.gapNotes.filter(n=>n.id!=='gn1'));
+ assert.equal(saved.graph.gapNotes[0].id,'gn2','unrelated pending task survives');
  assert.deepEqual(saved.graph.gapLinks,[]);
  assert.equal(saved.changes.removedNoteId,'gn1');
  assert.deepEqual(saved.graph.nodes.slice(0,g.nodes.length),g.nodes);
