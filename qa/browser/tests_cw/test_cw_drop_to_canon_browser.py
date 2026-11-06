@@ -46,8 +46,20 @@ def main():
                 promoted.append(e["id"])
             else:
                 reviewed.append(e["id"])
+        remaining=[n for n in db["graph"]["nodes"]
+                   if n.get("workspaceId")==area and n["id"] not in selected_set]
+        remove_workspace=not remaining
+        task_id=next(w["taskId"] for w in db["graph"]["workspaces"] if w["id"]==area)
+        remove_note=task_id if remove_workspace and any(
+            n["id"]==task_id for n in db["graph"].get("gapNotes",[])) else None
+        remove_links=[l["id"] for l in db["graph"].get("gapLinks",[])
+                      if remove_note and any(
+                        l.get(side,{}).get("kind")=="gap_note"
+                        and l[side].get("id")==remove_note for side in ("from","to"))]
         result={"workspaceId":area,"acceptNodeIds":selected,"promoteEdgeIds":promoted,
-                "reviewEdgeIds":reviewed,"autoRewiredEdgeIds":[]}
+                "reviewEdgeIds":reviewed,"removeWorkspace":remove_workspace,
+                "removeNoteId":remove_note,"removeGapLinkIds":remove_links,
+                "autoRewiredEdgeIds":[]}
         if "placements" in command:
             by_pos={p["nodeId"]:p for p in command["placements"]}
             assert set(by_pos)==selected_set
