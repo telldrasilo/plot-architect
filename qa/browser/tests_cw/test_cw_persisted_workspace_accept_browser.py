@@ -71,9 +71,23 @@ def main():
                 ready.append(edge["id"])
             else:
                 pending.append(edge["id"])
+        remaining = [n for n in db["graph"]["nodes"]
+                     if n.get("workspaceId") == workspace_id
+                     and n["id"] not in selected_set]
+        remove_workspace = not remaining
+        task_id = next(a["taskId"] for a in db["graph"]["workspaces"]
+                       if a["id"] == workspace_id)
+        remove_note = task_id if remove_workspace and any(
+            n["id"] == task_id for n in db["graph"].get("gapNotes", [])) else None
+        remove_links = [l["id"] for l in db["graph"].get("gapLinks", [])
+                        if remove_note and any(
+                            l.get(side, {}).get("kind") == "gap_note"
+                            and l[side].get("id") == remove_note
+                            for side in ("from", "to"))]
         return {"workspaceId": workspace_id, "acceptNodeIds": selected,
                 "promoteEdgeIds": ready, "reviewEdgeIds": pending,
-                "autoRewiredEdgeIds": []}
+                "removeWorkspace": remove_workspace, "removeNoteId": remove_note,
+                "removeGapLinkIds": remove_links, "autoRewiredEdgeIds": []}
 
     def route(request):
         req = request.request
