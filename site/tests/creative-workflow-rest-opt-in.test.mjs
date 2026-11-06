@@ -414,3 +414,61 @@ test('saved workspace move and resize use atomic REST CAS, receipts and canonica
  assert.equal(stale.status,409);assert.equal(stale.data.error,'REVISION_CONFLICT');
  assert.deepEqual(counts(sql,id),{revision:3,history:4,receipts:3});
 });
+
+test('drop_boundary_relation guards review and transactionally removes only editor-owned link',async()=>{
+ const {db,sql}=storage(),env={DB:db,CW_WORKFLOW_ENABLED:'true'},id=await create(env);
+ assert.equal((await apply(env,id,0,'stage-for-boundary',stage())).status,200);
+ assert.equal((await apply(env,id,1,'accept-a',{
+  kind:'accept_draft',workspaceId:'w1',nodeIds:['draft-a']
+ })).status,200);
+ const before=(await graph(env,id)).graph;
+ const link=before.edges.find(e=>e.id==='draft-ab');
+ assert.equal(link.workspaceId,'w1');
+ assert.equal(link.draftRelation,'internal');
+ assert.equal(before.nodes.find(n=>n.id==='draft-a').workspaceId,undefined);
+ assert.equal(before.nodes.find(n=>n.id==='draft-b').workspaceId,'w1');
+ const command={kind:'drop_boundary_relation',workspaceId:'w1',edgeId:'draft-ab'};
+ const plan=await preview(env,id,2,command);
+ assert.equal(plan.status,200,JSON.stringify(plan.data));
+ assert.equal(plan.data.preview.relation.from,'draft-a');
+ assert.equal(plan.data.preview.relation.to,'draft-b');
+ assert.equal(plan.data.preview.relation.type,'precedes');
+ const noReview=await request(env,'POST',path(id)+'apply',{
+  expectedRevision:2,operationId:'bad-no-review',command});
+ assert.equal(noReview.status,422);
+ assert.deepEqual(counts(sql,id),{revision:2,history:3,receipts:2});
+ const body={expectedRevision:2,operationId:'boundary-once',
+  command:{...command,expectedPreview:plan.data.preview}};
+ const first=await request(env,'POST',path(id)+'apply',body);
+ const replayed=await request(env,'POST',path(id)+'apply',body);
+ assert.equal(first.status,200,JSON.stringify(first.data));
+ assert.equal(replayed.status,200);assert.equal(replayed.data.replayed,true);
+ assert.deepEqual(counts(sql,id),{revision:3,history:4,receipts:3});
+ const after=(await graph(env,id)).graph;
+ assert.equal(after.edges.some(e=>e.id==='draft-ab'),false);
+ assert.deepEqual(after.nodes,before.nodes);
+ assert.deepEqual(after.workspaces,before.workspaces);
+ assert.deepEqual(after.edges.filter(e=>e.id!=='draft-ab'),
+  before.edges.filter(e=>e.id!=='draft-ab'));
+ const mcp=await request(env,'POST','/mcp',{jsonrpc:'2.0,id:18,method:'tools/call',
+  params:{name:'get_project',arguments:{project_id:id,detail:'full'}}});
+ assert.equal(mcp.status,200);
+ assert.deepEqual(mcp.data.result.structuredContent.graph.nodes.map(n=>n.id),
+  ['n1','n2','n3','draft-a']);
+ const bad=await preview(env,id,3,{...command,edgeId:'e1'});
+ assert.equal(bad.status,422);assert.equal(bad.data.error,'BOUNDARY_EDGE_NOT_FOUND');
+ const reused=await request(env,'POST',path(id)+'apply',{
+  ...body,command:{...body.command,edgeId:'e1'}});
+ assert.equal(reused.status,409);assert.equal(reused.data.error,'OPERATION_ID_REUSED');
+ const stale=await request(env,'POST',path(id)+'apply',{
+  ...body,operationId:'fresh-but-stale'});
+ assert.equal(stale.status,409);assert.equal(stale.data.error,'REVISION_CONFLICT');
+ const forged=structuredClone(after);
+ forged.edges=forged.edges.filter(e=>e.id!=='e1');
+ const put=await request(env,'PUT','/api/projects/'+id,{
+  name:'Synthetic',expectedRevision:3,graph:forged});
+ // Canonical edge removal is a separate ordinary plot operation; protected
+ // boundary link mutation through generic PUT was asserted in pure test.
+ assert.notEqual(put.status,200);
+ assert.deepEqual(counts(sql,id),{revision:3,history:4,receipts:3});
+});
