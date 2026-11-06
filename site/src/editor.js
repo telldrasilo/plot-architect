@@ -1254,7 +1254,7 @@ async function cwCommitFrameGeometry(workspaceId,mode,geometry){
    if(['REVISION_CONFLICT','PREVIEW_STALE','OPERATION_ID_REUSED'].includes(err.code)){
     cwFramePending=null;remote.blocked=true;
    }
-   cwFrameError={workspaceId,message:err.message};
+   cwFrameError={workspaceId,projectId,message:err.message};
    note('Рамка не сохранена: '+err.message);
   }
  }finally{
@@ -1282,6 +1282,9 @@ function cwFrameKeyboard(e,area,mode){
 function cwBeginFramePointer(e,area,box,mode,handle){
  e.stopPropagation();
  if(e.button!==0)return;
+ if(cwFramePending?.projectId!==undefined&&cwFramePending.projectId!==activeProjectId){
+  cwFramePending=null;cwFrameError=null;
+ }
  if(cwFrameDragCancel||cwFramePending||!cwCleanForOperation()){
   note('Завершите сохранение перед изменением рабочей области');return;
  }
@@ -1830,7 +1833,8 @@ function renderCreativeWorkspacePreview(){
    resize.addEventListener('click',e=>e.stopPropagation());
    box.append(resize);
   }
-  if(persisted&&cwFrameError?.workspaceId===area.id){
+  if(persisted&&cwFrameError?.projectId===activeProjectId&&
+     cwFrameError.workspaceId===area.id){
    const warning=document.createElement('div');warning.className='cw-workspace-save-error';
    warning.setAttribute('role','alert');
    const message=document.createElement('span');
