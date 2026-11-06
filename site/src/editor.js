@@ -355,23 +355,16 @@ function cwServerReady(){
 }
 let cwAcceptanceReview=null;
 let cwDiscardReview=null;
-// One stable transition border per workspace per editor session. Existing
-// external drafts are included once, but dragging never expands this border.
-const cwDropRects=new Map();
+// The saved workspace rectangle is authoritative. Draft membership does not
+// depend on visual containment and no auto-expansion changes stored bounds.
 let cwDragDropReview=null;
+let cwFramePending=null; // stable CAS + operationId while awaiting confirmation
+let cwFrameError=null;   // local retry UI, never persisted to story
+let cwFrameDragCancel=null;
 let cwActiveDraftDragCancel=null;
 let cwActiveDraftLinkGesture=null;
 function cwDropRectFor(area){
- const key=activeProjectId+'::'+area.id;
- if(!cwDropRects.has(key)){
-  const existing=state.nodes.filter(n=>n.workspaceId===area.id),margin=34;
-  const left=Math.min(area.x,...existing.map(n=>n.x-margin));
-  const top=Math.min(area.y,...existing.map(n=>n.y-margin));
-  const right=Math.max(area.x+area.width,...existing.map(n=>n.x+208+margin));
-  const bottom=Math.max(area.y+area.height,...existing.map(n=>n.y+105+margin));
-  cwDropRects.set(key,{x:left,y:top,width:right-left,height:bottom-top});
- }
- return cwDropRects.get(key);
+ return {x:area.x,y:area.y,width:area.width,height:area.height};
 }
 function cwDropClassification(workspaceId,x,y){
  const source=state.workspaces.find(w=>w.id===workspaceId);
@@ -1549,8 +1542,8 @@ function cwPersistedWorkspaceScene(){
   // before the reviewed server acceptance has been confirmed.
   return {...n,...(position?{x:position.x,y:position.y}:{})};
  });
- // Frame expands around moved drafts without altering stored workspace bounds.
- const workspaces=owned.map(area=>({...area,...cwDropRectFor(area)}));
+ // Frame always uses saved geometry; drafts may visibly extend past its edges.
+ const workspaces=owned.map(area=>({...area}));
  // The draft never changes membership until the atomic acceptance succeeds.
  // Preview coordinates are only for rendering while the user decides.
  if(cwDragDropReview?.projectId===activeProjectId){
