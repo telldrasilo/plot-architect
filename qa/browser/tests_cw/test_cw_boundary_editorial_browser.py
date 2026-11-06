@@ -53,16 +53,47 @@ def main():
             payload=json.loads(req.post_data or "{}")
             assert payload["expectedRevision"]==db["revision"]
             command=payload["command"]
-            assert command["kind"]=="accept_draft" and command["workspaceId"]=="w1"
-            assert command["nodeIds"]==["b"],command
+            assert command["workspaceId"]=="w1"
             db["previews"]+=1
-            answer({"kind":"accept_draft","projectId":PROJECT,"expectedRevision":1,
-                    "preview":{"workspaceId":"w1","acceptNodeIds":["b"],
-                    "promoteEdgeIds":["ea"],"reviewEdgeIds":[],
-                    "autoRewiredEdgeIds":[]}})
+            if command["kind"]=="accept_draft":
+                assert command["nodeIds"]==["b"],command
+                answer({"kind":"accept_draft","projectId":PROJECT,"expectedRevision":1,
+                        "preview":{"workspaceId":"w1","acceptNodeIds":["b"],
+                        "promoteEdgeIds":["ea"],"reviewEdgeIds":[],
+                        "autoRewiredEdgeIds":[]}})
+            else:
+                assert command["kind"]=="drop_boundary_relation",command
+                edge=next(e for e in db["graph"]["edges"] if e["id"]==command["edgeId"])
+                assert edge["workspaceId"]=="w1"
+                nodes={n["id"]:n for n in db["graph"]["nodes"]}
+                plan={"workspaceId":"w1","edgeId":edge["id"],
+                    "relation":{"id":edge["id"],"from":edge["from"],"to":edge["to"],
+                    "type":edge["type"],"draftRelation":edge["draftRelation"],
+                    "fromTitle":nodes[edge["from"]]["title"],
+                    "toTitle":nodes[edge["to"]]["title"]},
+                    "autoRewiredEdgeIds":[]}
+                answer({"kind":"drop_boundary_relation","projectId":PROJECT,
+                        "expectedRevision":db["revision"],"preview":plan})
         elif path=="/api/projects/"+PROJECT+"/workflow/apply":
+            payload=json.loads(req.post_data or "{}")
+            command=payload["command"]
+            assert command["kind"]=="drop_boundary_relation",command
+            assert payload["expectedRevision"]==db["revision"]
+            edge=next(e for e in db["graph"]["edges"] if e["id"]==command["edgeId"])
+            nodes={n["id"]:n for n in db["graph"]["nodes"]}
+            assert command["expectedPreview"]["relation"]=={
+                "id":edge["id"],"from":edge["from"],"to":edge["to"],
+                "type":edge["type"],"draftRelation":edge["draftRelation"],
+                "fromTitle":nodes[edge["from"]]["title"],
+                "toTitle":nodes[edge["to"]]["title"]}
+            db["graph"]["edges"]=[e for e in db["graph"]["edges"]
+                                  if e["id"]!=edge["id"]]
+            db["revision"]+=1
+            db["graph"]["revision"]=db["revision"]
             db["applies"]+=1
-            answer({"error":"NO_UNCONFIRMED_APPLY"},422)
+            answer({"kind":"drop_boundary_relation","projectId":PROJECT,
+                    "revision":db["revision"],"operationId":payload["operationId"],
+                    "replayed":False})
         else:
             answer({"error":"NOT_FOUND"},404)
 
@@ -119,7 +150,27 @@ def main():
         panel.wait_for()
         assert "Препятствует" in panel.inner_text()
         assert panel.get_by_role("button",name="В сюжет").count()==0
-        panel.get_by_role("button",name="Закрыть").click()
+        # First review and cancel: no changes to plot or workspace.
+        panel.get_by_role("button",name="Не использовать связь").click()
+        panel=page.locator('[data-cw-boundary-details="proposal-n1-a"]')
+        panel.get_by_role("button",name="Подтвердить отказ").wait_for(timeout=6000)
+        assert db["applies"]==0
+        panel.get_by_role("button",name="Отмена").click()
+        assert db["applies"]==0
+        assert page.locator('[data-cw-boundary-edge="proposal-n1-a"]').count()==1
+        # Cancellation retains the selected edge and its original panel.
+        # Re-pressing the hit target would toggle selection OFF, not reopen it.
+        panel=page.locator('[data-cw-boundary-details="proposal-n1-a"]')
+        panel.get_by_role("button",name="Не использовать связь").wait_for(timeout=6000)
+        panel.get_by_role("button",name="Не использовать связь").click()
+        panel.get_by_role("button",name="Подтвердить отказ").wait_for(timeout=6000)
+        panel.get_by_role("button",name="Подтвердить отказ").click()
+        page.wait_for_function("()=>__graphite.getRemote().revision===2")
+        assert db["applies"]==1 and db["generic"]==0
+        assert page.locator('[data-cw-boundary-edge="proposal-n1-a"]').count()==0
+        assert next(e for e in db["graph"]["edges"] if e["id"]=="e3")==next(
+            e for e in graph["edges"] if e["id"]=="e3")
+        assert all(n==m for n,m in zip(db["graph"]["nodes"],graph["nodes"]))
         # A proposal from canon to C can be selected independently.
         page.locator('[data-cw-boundary-hit="proposal-n3-c"]').focus()
         page.locator('[data-cw-boundary-hit="proposal-n3-c"]').press("Enter")
@@ -128,11 +179,12 @@ def main():
         page.reload()
         page.wait_for_function(
             "()=>window.__graphite&&__graphite.getRemote().connected"
-            "&&document.querySelectorAll('[data-cw-boundary-edge]').length===3")
+            "&&document.querySelectorAll('[data-cw-boundary-edge]').length===2")
         assert page.locator('[data-edge="ea"]').count()==0
         assert page.locator('[data-cw-boundary-edge="ea"]').count()==1
-        assert db["graph"]==graph
-        assert db["applies"]==0 and db["generic"]==0
+        assert [e["id"] for e in db["graph"]["edges"]]==[
+            e["id"] for e in graph["edges"] if e["id"]!="proposal-n1-a"]
+        assert db["applies"]==1 and db["generic"]==0
         assert not errors,errors
         context.close();browser.close()
     print(json.dumps({"result":"PASS","scenarios":["partial-acceptance cross-boundary",
