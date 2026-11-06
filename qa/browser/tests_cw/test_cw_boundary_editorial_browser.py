@@ -101,7 +101,7 @@ def main():
         panel.wait_for()
         text=panel.inner_text()
         assert "Не в сюжете" in text and "Новая завязка" in text and "Развилка" in text
-        assert "Предшествует" in text
+        assert "Следом" in text
         assert page.locator('[data-cw-edge-toolbar="draft:ea"]').count()==0
         assert db["previews"]==0
         # Explicit action only begins the existing guarded acceptance review.
