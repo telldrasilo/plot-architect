@@ -1735,9 +1735,9 @@ async function cwPrepareAccept(nodeIds,workspaceId,placements){
   if(!plan||JSON.stringify(plan.acceptNodeIds)!==JSON.stringify(selection)
     ||plan.workspaceId!==workspaceId||!Array.isArray(plan.promoteEdgeIds)
     ||!Array.isArray(plan.reviewEdgeIds)||plan.autoRewiredEdgeIds?.length
-    ||plan.removeWorkspace!==shouldRemove
+    ||Boolean(plan.removeWorkspace)!==shouldRemove
     ||(shouldRemove&&plan.reviewEdgeIds.length)
-    ||!Array.isArray(plan.removeGapLinkIds)
+    ||(shouldRemove&&!Array.isArray(plan.removeGapLinkIds))
     ||(placements!==undefined&&(!Array.isArray(plan.positionChanges)
       ||plan.positionChanges.length!==selection.length
       ||plan.positionChanges.some((p,i)=>p.nodeId!==selection[i]
