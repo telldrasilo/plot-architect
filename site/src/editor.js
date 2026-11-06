@@ -1154,6 +1154,194 @@ async function cwSaveDraftText(){
   if(!verified)renderCreativeWorkspacePreview();
  }
 }
+
+const cwFrameRect=a=>({x:a.x,y:a.y,width:a.width,height:a.height});
+const cwSameFrame=(a,b)=>a&&b&&['x','y','width','height'].every(k=>a[k]===b[k]);
+/** One guarded workspace geometry transition; no optimistic graph mutation. */
+async function cwCommitFrameGeometry(workspaceId,mode,geometry){
+ if(!cwWorkflowEnabled()||cwAcceptanceBusy)return;
+ if(cwFramePending&&cwFramePending.projectId!==activeProjectId){
+  cwFramePending=null;cwFrameError=null;
+ }
+ if(cwFramePending&&(cwFramePending.command.workspaceId!==workspaceId||
+   cwFramePending.command.mode!==mode||
+   !cwSameFrame(cwFramePending.command.geometry,geometry)))
+  return note('Сначала повторите прежнее сохранение геометрии или обновите проект');
+ try{
+  await cwEnsureDraftsSynced();
+  if(remote.connected&&(remote.dirty||remote.busy))await flushRemote();
+ }catch(err){renderCreativeWorkspacePreview();return note('Сначала сохраните карточки: '+err.message)}
+ if(!cwCleanForOperation()){
+  renderCreativeWorkspacePreview();
+  return note('Проект ещё синхронизируется');
+ }
+ const area=state.workspaces?.find(a=>a.id===workspaceId);
+ if(!area){renderCreativeWorkspacePreview();return note('Рабочая область больше не найдена')}
+ if(!cwFramePending&&cwSameFrame(area,geometry)){
+  renderCreativeWorkspacePreview();return;
+ }
+ const projectId=activeProjectId,revision=cwFramePending?.revision??remote.revision;
+ let operation=cwFramePending,verified=false;
+ cwAcceptanceBusy=true;cwFrameError=null;
+ const confirm=latest=>{
+  if(activeProjectId!==projectId||cwFramePending!==operation||
+     remote.dirty||remote.blocked||!Number.isSafeInteger(latest.revision)||
+     latest.revision<=operation.revision)
+   throw Error('Изменение геометрии не подтверждено');
+  const savedArea=latest.graph?.workspaces?.find(a=>a.id===workspaceId);
+  if(!cwSameFrame(savedArea,operation.command.geometry))
+   throw Error('Сохранённая рамка отличается от подтверждённой');
+  for(const change of operation.plan.positionChanges){
+   const n=latest.graph?.nodes?.find(n=>n.id===change.nodeId);
+   if(n?.workspaceId!==workspaceId||
+      n.x!==change.after.x||n.y!==change.after.y)
+    throw Error('Перемещение черновика не подтверждено сервером');
+  }
+  state=validateImported(latest.graph);remote.revision=latest.revision;
+  remote.dirty=false;cwFramePending=null;cwFrameError=null;verified=true;
+  try{localStorage.removeItem(PENDING_PREFIX+projectId)}catch{}
+  recomputeFieldTags();save(false);render();
+  note(mode==='move'?'Рабочая область перемещена':'Размер рабочей области сохранён');
+ };
+ try{
+  if(!operation){
+   const command={kind:'set_workspace_geometry',workspaceId,mode,geometry};
+   const response=await cwWorkflowRequest(projectId,'preview',{
+    expectedRevision:revision,command});
+   const p=response.preview,old=cwFrameRect(area);
+   const delta={x:geometry.x-area.x,y:geometry.y-area.y};
+   const affected=state.nodes.filter(n=>n.workspaceId===workspaceId);
+   const expectedLinks=state.edges.filter(e=>e.workspaceId===workspaceId&&
+    mode==='move'&&affected.some(n=>n.id===e.from||n.id===e.to))
+    .map(e=>e.id).sort();
+   const actualLinks=p?.affectedDraftEdgeIds?.slice().sort();
+   if(activeProjectId!==projectId||remote.revision!==revision||
+      remote.blocked||remote.dirty||p?.workspaceId!==workspaceId||
+      p.mode!==mode||!cwSameFrame(p.before,old)||
+      !cwSameFrame(p.after,geometry)||p.delta?.x!==delta.x||
+      p.delta?.y!==delta.y||!Array.isArray(p.positionChanges)||
+      p.positionChanges.length!==(mode==='move'?affected.length:0)||
+      JSON.stringify(actualLinks)!==JSON.stringify(expectedLinks)||
+      p.autoRewiredEdgeIds?.length)
+    throw Error('Неожиданный предпросмотр геометрии');
+   if(mode==='move'){
+    for(const change of p.positionChanges){
+     const n=affected.find(n=>n.id===change.nodeId);
+     if(!n||change.before?.x!==n.x||change.before?.y!==n.y||
+        change.after?.x!==n.x+delta.x||
+        change.after?.y!==n.y+delta.y)
+      throw Error('Предпросмотр перемещения карточек неверен');
+    }
+   }
+   operation={projectId,revision,command,plan:p,operationId:crypto.randomUUID()};
+   cwFramePending=operation;
+  }
+  const receipt=await cwWorkflowRequest(projectId,'apply',{
+   expectedRevision:operation.revision,operationId:operation.operationId,
+   command:{...operation.command,expectedPreview:operation.plan}});
+  if(!Number.isSafeInteger(receipt?.revision))throw Error('Нет подтверждения записи');
+  const latest=await apiRequest('/api/projects/'+encodeURIComponent(projectId));
+  if(latest.revision<receipt.revision)throw Error('Устаревшая серверная ревизия');
+  confirm(latest);
+ }catch(err){
+  // A lost response is resolved by readback. Never mint a new operationId
+  // after a possibly successful apply; explicit conflicts fail closed.
+  if(operation&&!verified&&activeProjectId===projectId&&
+     !['REVISION_CONFLICT','PREVIEW_STALE','OPERATION_ID_REUSED'].includes(err.code)){
+   try{confirm(await apiRequest('/api/projects/'+encodeURIComponent(projectId)))}catch{}
+  }
+  if(!verified){
+   if(['REVISION_CONFLICT','PREVIEW_STALE','OPERATION_ID_REUSED'].includes(err.code)){
+    cwFramePending=null;remote.blocked=true;
+   }
+   cwFrameError={workspaceId,message:err.message};
+   note('Рамка не сохранена: '+err.message);
+  }
+ }finally{
+  cwAcceptanceBusy=false;
+  renderCreativeWorkspacePreview();
+ }
+}
+function cwFrameKeyboard(e,area,mode){
+ if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key))return;
+ e.preventDefault();e.stopPropagation();
+ if(cwFrameDragCancel||cwAcceptanceBusy)return;
+ const step=e.shiftKey?5:20;
+ const offset=e.key==='ArrowLeft'||e.key==='ArrowUp'?-step:step;
+ const rect=cwFrameRect(area);
+ if(mode==='move'){
+  if(e.key==='ArrowLeft'||e.key==='ArrowRight')rect.x+=offset;
+  else rect.y+=offset;
+ }else{
+  if(e.key==='ArrowLeft'||e.key==='ArrowRight')
+   rect.width=Math.max(250,rect.width+offset);
+  else rect.height=Math.max(140,rect.height+offset);
+ }
+ if(!cwSameFrame(rect,area))void cwCommitFrameGeometry(area.id,mode,rect);
+}
+function cwBeginFramePointer(e,area,box,mode,handle){
+ e.stopPropagation();
+ if(e.button!==0)return;
+ if(cwFrameDragCancel||cwFramePending||!cwCleanForOperation()){
+  note('Завершите сохранение перед изменением рабочей области');return;
+ }
+ e.preventDefault();
+ const grip=e.currentTarget,startX=e.clientX,startY=e.clientY;
+ const before=cwFrameRect(area);
+ const owned=state.nodes.filter(n=>n.workspaceId===area.id);
+ let latest=before,moved=false;
+ grip.setPointerCapture(e.pointerId);
+ const paint=()=>{
+  box.style.left=latest.x+'px';box.style.top=latest.y+'px';
+  box.style.width=latest.width+'px';box.style.height=latest.height+'px';
+  const svg=box.querySelector('.cw-preview-arrows');
+  if(svg){svg.setAttribute('width',String(latest.width));svg.setAttribute('height',String(latest.height))}
+ };
+ const movement=event=>{
+  event.stopPropagation();
+  const dx=Math.round((event.clientX-startX)/pan.scale);
+  const dy=Math.round((event.clientY-startY)/pan.scale);
+  if(!moved&&Math.abs(dx)+Math.abs(dy)<3)return;
+  moved=true;
+  if(mode==='move'){
+   const minX=Math.max(-1_000_000-before.x,...owned.map(n=>-1_000_000-n.x));
+   const maxX=Math.min(1_000_000-before.x,...owned.map(n=>1_000_000-n.x));
+   const minY=Math.max(-1_000_000-before.y,...owned.map(n=>-1_000_000-n.y));
+   const maxY=Math.min(1_000_000-before.y,...owned.map(n=>1_000_000-n.y));
+   const tx=Math.min(maxX,Math.max(minX,dx));
+   const ty=Math.min(maxY,Math.max(minY,dy));
+   latest={...before,x:before.x+tx,y:before.y+ty};
+  }else{
+   latest={...before,width:Math.min(1_000_000,Math.max(250,before.width+dx)),
+    height:Math.min(1_000_000,Math.max(140,before.height+dy))};
+  }
+  paint();
+ };
+ const cleanup=()=>{
+  cwFrameDragCancel=null;
+  grip.removeEventListener('pointermove',movement);
+  grip.removeEventListener('pointerup',end);
+  grip.removeEventListener('pointercancel',cancel);
+  window.removeEventListener('keydown',onKey,true);
+ };
+ const cancel=()=>{
+  cleanup();renderCreativeWorkspacePreview();
+ };
+ const onKey=key=>{
+  if(key.key==='Escape'){key.preventDefault();key.stopPropagation();cancel()}
+ };
+ const end=event=>{
+  event.stopPropagation();cleanup();
+  if(moved&&!cwSameFrame(before,latest))
+   void cwCommitFrameGeometry(area.id,mode,latest);
+  else renderCreativeWorkspacePreview();
+ };
+ cwFrameDragCancel=cancel;
+ grip.addEventListener('pointermove',movement);
+ grip.addEventListener('pointerup',end);
+ grip.addEventListener('pointercancel',cancel);
+ window.addEventListener('keydown',onKey,true);
+}
 function cwBeginDraftDrag(event,card,node,area,svg,links,byId,getSockets){
  event.stopPropagation();
  if(event.button!==0)return;
