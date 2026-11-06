@@ -1912,6 +1912,9 @@ function cwPositionDropReview(panel,box,nodeIds){
 }
 function renderCreativeWorkspacePreview(){
  const host=$('cw-workspace-preview');if(!host)return;
+ // Lift the selected editorial panel above canonical cards, not the entire
+ // workspace permanently. The layer itself never intercepts pointer events.
+ host.classList.toggle('cw-preview-dialog-active',!!cwSelectedBoundaryEdge||!!cwBoundaryDropReview);
  host.replaceChildren();
  const persisted=creativeWorkspacePreview===null;
  const data=creativeWorkspacePreview||cwPersistedWorkspaceScene();if(!data)return;
