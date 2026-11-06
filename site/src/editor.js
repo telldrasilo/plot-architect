@@ -384,6 +384,7 @@ function cwCancelDropReview(){
 let cwSelectedWorkspaceId=null;
 let cwSelectedDraftEdge=null; // transient visual selection only
 let cwSelectedBoundaryEdge=null; // draft/canon editorial relation, never a plot arrow
+let cwBoundaryDropReview=null; // exact reviewed refusal, never an automatic plot edit
 let cwDraftTextEdit=null; // unsaved form state only
 const cwSelectedDraftIds=new Set();
 function cwClearDraftSelection(){
@@ -391,6 +392,7 @@ function cwClearDraftSelection(){
  cwDiscardReview=null;
  cwSelectedDraftEdge=null;
  cwSelectedBoundaryEdge=null;
+ cwBoundaryDropReview=null;
  cwSelectedWorkspaceId=null;cwSelectedDraftIds.clear();cwAcceptanceReview=null;
  cwDragDropReview=null;
 }
@@ -399,6 +401,7 @@ function cwToggleDraftSelection(nodeId,workspaceId){
  cwDiscardReview=null;
  cwSelectedDraftEdge=null;
  cwSelectedBoundaryEdge=null;
+ cwBoundaryDropReview=null;
  if(!state.nodes.some(n=>n.id===nodeId&&n.workspaceId===workspaceId))return;
  if(cwSelectedWorkspaceId!==workspaceId){
   cwSelectedDraftIds.clear();cwSelectedWorkspaceId=workspaceId;
@@ -998,10 +1001,79 @@ function cwSelectBoundaryEdge(workspaceId,edgeId){
  const from=state.nodes.find(n=>n.id===e.from),to=state.nodes.find(n=>n.id===e.to);
  if(!from||!to||from.workspaceId===workspaceId&&to.workspaceId===workspaceId)return;
  const old=cwSelectedBoundaryEdge;
+ cwBoundaryDropReview=null;
  cwSelectedBoundaryEdge=old?.workspaceId===workspaceId&&old.edgeId===edgeId
   ?null:{workspaceId,edgeId};
  cwSelectedDraftEdge=null;
  renderCreativeWorkspacePreview();
+}
+
+async function cwPrepareDropBoundaryRelation(workspaceId,edgeId){
+ if(cwBoundaryDropReview||cwAcceptanceBusy)return;
+ try{
+  await cwEnsureDraftsSynced();
+  if(remote.connected&&(remote.dirty||remote.busy))await flushRemote();
+ }catch(err){return note('Сначала сохраните расположение: '+err.message)}
+ if(!cwCleanForOperation())return note('Проект ещё синхронизируется');
+ const e=state.edges.find(e=>e.id===edgeId&&e.workspaceId===workspaceId);
+ if(!e)return note('Редакторская связь уже изменилась');
+ const projectId=activeProjectId,revision=remote.revision;
+ cwAcceptanceBusy=true;
+ try{
+  const command={kind:'drop_boundary_relation',workspaceId,edgeId};
+  const received=await cwWorkflowRequest(projectId,'preview',{expectedRevision:revision,command});
+  const p=received.preview;
+  if(activeProjectId!==projectId||remote.revision!==revision||remote.blocked||
+     remote.dirty||p?.workspaceId!==workspaceId||p.edgeId!==edgeId||
+     p.relation?.id!==edgeId||p.relation.from!==e.from||p.relation.to!==e.to||
+     p.relation.type!==e.type||p.relation.draftRelation!==e.draftRelation||
+     p.autoRewiredEdgeIds?.length)
+   throw Error('Предпросмотр связи не совпадает с графом');
+  cwBoundaryDropReview={projectId,revision,workspaceId,edgeId,plan:p,
+   operationId:crypto.randomUUID()};
+ }catch(err){note('Не удалось проверить связь: '+err.message)}
+ finally{cwAcceptanceBusy=false;renderCreativeWorkspacePreview()}
+}
+async function cwConfirmDropBoundaryRelation(){
+ const review=cwBoundaryDropReview;
+ if(!review||!cwCleanForOperation())return note('Проект изменился. Повторите проверку');
+ if(review.projectId!==activeProjectId||review.revision!==remote.revision)
+  return note('Ревизия проекта изменилась');
+ cwAcceptanceBusy=true;let verified=false;
+ const confirm=latest=>{
+  if(activeProjectId!==review.projectId||cwBoundaryDropReview!==review||
+     remote.dirty||remote.blocked||!Number.isSafeInteger(latest.revision)||
+     latest.revision<=review.revision||
+     latest.graph?.edges?.some(e=>e.id===review.edgeId))
+   throw Error('Удаление редакторской связи не подтверждено');
+  state=validateImported(latest.graph);remote.revision=latest.revision;remote.dirty=false;
+  try{localStorage.removeItem(PENDING_PREFIX+review.projectId)}catch{}
+  verified=true;cwBoundaryDropReview=null;cwSelectedBoundaryEdge=null;
+  recomputeFieldTags();save(false);render();
+  note('Редакторская связь исключена. Сюжет не изменился');
+ };
+ try{
+  const result=await cwWorkflowRequest(review.projectId,'apply',{
+   expectedRevision:review.revision,operationId:review.operationId,
+   command:{kind:'drop_boundary_relation',workspaceId:review.workspaceId,
+    edgeId:review.edgeId,expectedPreview:review.plan}});
+  if(!Number.isSafeInteger(result?.revision))throw Error('Нет подтверждения записи');
+  const latest=await apiRequest('/api/projects/'+encodeURIComponent(review.projectId));
+  if(latest.revision<result.revision)throw Error('Сервер вернул устаревшую версию');
+  confirm(latest);
+ }catch(err){
+  // Read-back resolves lost HTTP replies; reuse the exact operationId for retry.
+  if(!verified&&review.projectId===activeProjectId&&
+     !['REVISION_CONFLICT','PREVIEW_STALE','OPERATION_ID_REUSED'].includes(err.code)){
+   try{confirm(await apiRequest('/api/projects/'+encodeURIComponent(review.projectId)))}catch{}
+  }
+  if(!verified){
+   if(['REVISION_CONFLICT','PREVIEW_STALE','OPERATION_ID_REUSED'].includes(err.code)){
+    cwBoundaryDropReview=null;remote.blocked=true;
+   }
+   note('Связь не удалена: '+err.message);
+  }
+ }finally{cwAcceptanceBusy=false;if(!verified)renderCreativeWorkspacePreview()}
 }
 function cwSelectDraftEdge(workspaceId,edgeId){
  if(!cwWorkflowEnabled()||cwAcceptanceBusy||cwDragDropReview)return;
@@ -2250,6 +2322,32 @@ function renderCreativeWorkspacePreview(){
     meaning.textContent='Тип: '+(edgeLabels[edge.type]||edge.type)+
       ' · редакторская связь. Сохранится до явного решения автора.';
     const actions=document.createElement('div');actions.className='cw-boundary-actions';
+    const pending=cwBoundaryDropReview?.projectId===activeProjectId&&
+     cwBoundaryDropReview.edgeId===edge.id?cwBoundaryDropReview:null;
+    if(pending){
+     const check=document.createElement('p');
+     check.textContent='Отказаться только от этой редакторской связи? События и остальные стрелки останутся без изменений.';
+     p.append(check);
+     const yes=document.createElement('button');yes.type='button';
+     yes.dataset.cwBoundaryDropConfirm=edge.id;yes.textContent='Подтвердить отказ';
+     yes.disabled=cwAcceptanceBusy;
+     yes.addEventListener('click',e=>{e.stopPropagation();void cwConfirmDropBoundaryRelation()});
+     const no=document.createElement('button');no.type='button';
+     no.textContent='Отмена';
+     no.addEventListener('click',e=>{
+      e.stopPropagation();cwBoundaryDropReview=null;renderCreativeWorkspacePreview();
+     });
+     actions.append(yes,no);
+     p.append(title,relation,meaning,actions);box.append(p);
+     boundaryPanel=p;
+    }else{
+    const drop=document.createElement('button');drop.type='button';
+    drop.dataset.cwBoundaryDrop=edge.id;
+    drop.textContent='Не использовать связь';drop.disabled=cwAcceptanceBusy;
+    drop.addEventListener('click',event=>{
+     event.stopPropagation();void cwPrepareDropBoundaryRelation(area.id,edge.id);
+    });
+    actions.append(drop);
     const draft=[from,to].find(n=>n.workspaceId===area.id);
     if(draft){
      const accept=document.createElement('button');accept.type='button';
@@ -2273,6 +2371,7 @@ function renderCreativeWorkspacePreview(){
     });
     actions.append(close);p.append(title,relation,meaning,actions);
     box.append(p);boundaryPanel=p;
+    }
    }
   }
   host.append(box);
