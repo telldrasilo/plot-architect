@@ -141,7 +141,7 @@ test('one complete synthetic note → ChatGPT-shaped answer → draft area → a
  assert.equal(fullMcp.status,200);
  assert.deepEqual(fullMcp.data.result.structuredContent.graph.nodes.map(n=>n.id),['n1','n2','n3']);
  assert.ok(!JSON.stringify(fullMcp.data).includes('Событие 1.1'));
- rejected(()=>prepareNoteProcessingTask(staged,{noteId:'gn1'}),'WORKSPACE_CONFLICT');
+ rejected(()=>prepareNoteProcessingTask(staged,{noteId:'gn1'}),'NOTE_NOT_FOUND');
  rejected(()=>prepareNoteStageWrite(staged,{
   noteId:'gn1',sourceRevision:0,generationId:'anotherGeneration1',proposal:alternatives()
  }),'REVISION_CONFLICT');
