@@ -13,6 +13,7 @@ import {previewMoveDraftNodes,applyMoveDraftNodes} from './creative_workflow_dra
 import {previewWorkspaceGeometry,applyWorkspaceGeometry} from './creative_workflow_workspace_geometry.mjs';
 import {previewEditDraftText,applyEditDraftText} from './creative_workflow_draft_text.mjs';
 import {previewDiscardDraftNodes,applyDiscardDraftNodes} from './creative_workflow_draft_discard.mjs';
+import {previewDropBoundaryRelation,applyDropBoundaryRelation} from './creative_workflow_boundary_drop.mjs';
 import {
   previewAddDraftEdge,applyAddDraftEdge,
   previewRewireDraftEdge,applyRewireDraftEdge,
@@ -44,6 +45,7 @@ const fields={
   set_workspace_geometry:['workspaceId','mode','geometry','expectedPreview'],
   edit_draft_text:['workspaceId','nodeId','title','description','expectedPreview'],
   discard_drafts:['workspaceId','nodeIds','expectedPreview'],
+  drop_boundary_relation:['workspaceId','edgeId','expectedPreview'],
   add_draft_edge:['workspaceId','edge','expectedPreview'],
   rewire_draft_edge:['workspaceId','edgeId','to','expectedPreview'],
   set_draft_edge_type:['workspaceId','edgeId','newType','expectedPreview'],
@@ -93,6 +95,7 @@ async function runDomain(db,projectId,graph,expectedRevision,command){
     case 'set_workspace_geometry':return applyWorkspaceGeometry(graph,args);
     case 'edit_draft_text':return applyEditDraftText(graph,args);
     case 'discard_drafts':return applyDiscardDraftNodes(graph,args);
+    case 'drop_boundary_relation':return applyDropBoundaryRelation(graph,args);
     case 'add_draft_edge':return applyAddDraftEdge(graph,args);
     case 'rewire_draft_edge':return applyRewireDraftEdge(graph,args);
     case 'set_draft_edge_type':return applySetDraftEdgeType(graph,args);
@@ -225,6 +228,7 @@ export async function previewWorkflowCommand(db,{projectId,expectedRevision,comm
     case 'set_workspace_geometry': preview=previewWorkspaceGeometry(graph,command);break;
     case 'edit_draft_text': preview=previewEditDraftText(graph,command);break;
     case 'discard_drafts': preview=previewDiscardDraftNodes(graph,command);break;
+    case 'drop_boundary_relation': preview=previewDropBoundaryRelation(graph,command);break;
     case 'add_draft_edge': preview=previewAddDraftEdge(graph,command);break;
     case 'rewire_draft_edge': preview=previewRewireDraftEdge(graph,command);break;
     case 'set_draft_edge_type': preview=previewSetDraftEdgeType(graph,command);break;
