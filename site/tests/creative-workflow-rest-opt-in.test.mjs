@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
 import worker from '../src/worker.mjs';
+import {previewDraftAcceptance} from '../src/creative_workflow_contract.mjs';
 
 function storage(receipts=true){
  const sql=new DatabaseSync(':memory:');
@@ -468,4 +469,77 @@ test('drop_boundary_relation guards review and transactionally removes only edit
  // Generic PUT must reject protected boundary edge deletion before reviewed apply.
  assert.notEqual(forged.edges.length,before.edges.length);
  assert.deepEqual(counts(sql,id),{revision:3,history:4,receipts:3});
+});
+
+test('last accepted draft atomically removes empty workspace with receipt replay',async()=>{
+ const {db,sql}=storage(),env={DB:db,CW_WORKFLOW_ENABLED:'true'},id=await create(env);
+ assert.equal((await apply(env,id,0,'stage-last',stage())).status,200);
+ const before=(await graph(env,id)).graph;
+ assert.deepEqual(before.gapNotes,[]);
+ assert.equal(before.workspaces.length,1);
+ const command={kind:'accept_draft',workspaceId:'w1',
+  nodeIds:['draft-a','draft-b','draft-c']};
+ const p=await preview(env,id,1,command);
+ assert.equal(p.status,200,JSON.stringify(p.data));
+ assert.equal(p.data.preview.removeWorkspace,true);
+ assert.equal(p.data.preview.removeNoteId,null);
+ assert.deepEqual(p.data.preview.removeGapLinkIds,[]);
+ assert.deepEqual(p.data.preview.promoteEdgeIds,['draft-ab']);
+ const body={expectedRevision:1,operationId:'last-one',
+  command:{...command,expectedPreview:p.data.preview}};
+ const first=await request(env,'POST',path(id)+'apply',body);
+ const second=await request(env,'POST',path(id)+'apply',body);
+ assert.equal(first.status,200,JSON.stringify(first.data));
+ assert.equal(second.status,200);assert.equal(second.data.replayed,true);
+ assert.deepEqual(counts(sql,id),{revision:2,history:3,receipts:2});
+ const after=(await graph(env,id)).graph;
+ assert.deepEqual(after.workspaces,[]);
+ assert.deepEqual(after.gapNotes,[]);
+ assert.deepEqual(after.gapLinks,[]);
+ assert.equal(after.nodes.filter(n=>n.workspaceId).length,0);
+ assert.equal(after.edges.some(e=>e.workspaceId),false);
+ assert.equal(after.edges.find(e=>e.id==='draft-ab').type,'precedes');
+ assert.equal(after.nodes.find(n=>n.id==='draft-a').workspaceId,undefined);
+ assert.deepEqual(after.nodes.filter(n=>['n1','n2','n3'].includes(n.id)),
+  before.nodes.filter(n=>['n1','n2','n3'].includes(n.id)));
+ const mcp=await request(env,'POST','/mcp',{jsonrpc:'2.0',id:19,method:'tools/call',
+  params:{name:'get_project',arguments:{project_id:id,detail:'full'}}});
+ assert.equal(mcp.status,200);
+ assert.deepEqual(mcp.data.result.structuredContent.graph.nodes.map(n=>n.id),
+  ['n1','n2','n3','draft-a','draft-b','draft-c']);
+ const replayTamper=await request(env,'POST',path(id)+'apply',{
+  ...body,command:{...command,nodeIds:['draft-a'],expectedPreview:p.data.preview}});
+ assert.equal(replayTamper.status,409);
+ assert.equal(replayTamper.data.error,'OPERATION_ID_REUSED');
+});
+
+test('unresolved boundary relation blocks final acceptance without a partial write',async()=>{
+ const {db,sql}=storage(),env={DB:db,CW_WORKFLOW_ENABLED:'true'},id=await create(env);
+ assert.equal((await apply(env,id,0,'stage-pending',stage())).status,200);
+ assert.equal((await apply(env,id,1,'accept-first',{
+  kind:'accept_draft',workspaceId:'w1',nodeIds:['draft-a']
+ })).status,200);
+ const before=(await graph(env,id)).graph;
+ const last={kind:'accept_draft',workspaceId:'w1',nodeIds:['draft-b','draft-c']};
+ const p=await preview(env,id,2,last);
+ assert.equal(p.status,200,JSON.stringify(p.data));
+ assert.equal(p.data.preview.promoteEdgeIds.includes('draft-ab'),true);
+ // A new editorial proposal to the last draft is blocked until the author
+ // explicitly decides its fate. This is verified at the pure contract layer;
+ // the transactional boundary-drop command remains the only authorized delete.
+ assert.equal(p.data.preview.removeWorkspace,true);
+ const forged=structuredClone(before);
+ forged.edges.push({id:'pending',from:'n1',to:'draft-b',type:'enables',
+  workspaceId:'w1',draftRelation:'boundary-proposal'});
+ // An unpromoted boundary proposal must block the last acceptance rather
+ // than orphaning the edge or silently turning it into a canonical arrow.
+ assert.throws(()=>previewDraftAcceptance(forged,{
+  workspaceId:'w1',nodeIds:['draft-b','draft-c']
+ }),e=>e.code==='WORKSPACE_UNRESOLVED_RELATIONS'&&e.message.includes('pending'));
+ const put=await request(env,'PUT','/api/projects/'+id,{
+  name:'Synthetic',expectedRevision:2,graph:forged});
+ assert.equal(put.status,422,'generic PUT cannot add editor-owned boundary relations');
+ assert.deepEqual(counts(sql,id),{revision:2,history:3,receipts:2});
+ const after=(await graph(env,id)).graph;
+ assert.deepEqual(after,before);
 });

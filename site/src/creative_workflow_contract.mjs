@@ -148,7 +148,28 @@ export function previewDraftAcceptance(graph,{workspaceId,nodeIds,placements}={}
     else reviewEdgeIds.push(e.id);
   }
   const positionChanges=reviewedDraftPlacements(graph,nodeIds,placements);
-  return {workspaceId,acceptNodeIds:[...selected],promoteEdgeIds,reviewEdgeIds,autoRewiredEdgeIds:[],
+  const remainingDrafts=graph.nodes.filter(n=>workspaceOf(n)===workspaceId&&!selected.has(n.id));
+  const removeWorkspace=remainingDrafts.length===0;
+  // An editor-owned edge cannot survive without a workspace. Before accepting
+  // the LAST draft, require the author to resolve each unpromoted relation
+  // explicitly, via the protected boundary-relation workflow. Never drop it.
+  const promoted=new Set(promoteEdgeIds);
+  const pendingOwnedEdges=removeWorkspace
+   ?graph.edges.filter(e=>workspaceOf(e)===workspaceId&&!promoted.has(e.id))
+   :[];
+  if(pendingOwnedEdges.length)
+   fail('WORKSPACE_UNRESOLVED_RELATIONS',pendingOwnedEdges.map(e=>e.id).join(','));
+  const area=(graph.workspaces??[]).find(a=>a.id===workspaceId);
+  const noteId=removeWorkspace&&typeof area?.taskId==='string'?area.taskId:null;
+  if(noteId&&(graph.workspaces??[]).some(w=>w.id!==workspaceId&&w.taskId===noteId))
+   fail('WORKSPACE_SOURCE_SHARED','another area references original task');
+  // New staged workspaces have no note, but legacy areas may retain one.
+  const removeNoteId=noteId&&(graph.gapNotes??[]).some(n=>n.id===noteId)?noteId:null;
+  const removeGapLinkIds=removeNoteId?(graph.gapLinks??[]).filter(l=>
+   l?.from?.kind==='gap_note'&&l.from.id===removeNoteId||
+   l?.to?.kind==='gap_note'&&l.to.id===removeNoteId).map(l=>l.id):[];
+  return {workspaceId,acceptNodeIds:[...selected],promoteEdgeIds,reviewEdgeIds,
+   removeWorkspace,removeNoteId,removeGapLinkIds,autoRewiredEdgeIds:[],
    ...(positionChanges===undefined?{}:{positionChanges})};
 }
 
@@ -209,6 +230,13 @@ export function applyDraftAcceptance(graph,{workspaceId,nodeIds,placements,expec
     delete e.workspaceId;
     delete e.draftRelation;
     delete e.draftBranchId;
+  }
+  if(plan.removeWorkspace)
+   next.workspaces=(next.workspaces??[]).filter(w=>w.id!==workspaceId);
+  if(plan.removeNoteId){
+   next.gapNotes=(next.gapNotes??[]).filter(n=>n.id!==plan.removeNoteId);
+   const affected=new Set(plan.removeGapLinkIds);
+   next.gapLinks=(next.gapLinks??[]).filter(l=>!affected.has(l.id));
   }
   validateCreativeWorkflowGraph(next);
   assertProtectedOriginalsUnchanged(graph,next);

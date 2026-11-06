@@ -14,13 +14,22 @@ test('accepting a/b preserves original graph and IDs, and promotes only internal
  assert.equal(g.edges.find(e=>e.id==='ep').draftRelation,'boundary-proposal');assert.equal(g.edges.find(e=>e.id==='eb').workspaceId,'w1');
  assert.equal(g.revision,7,'pure transformer never claims a durable revision increment');
 });
-test('the second acceptance of c restores original b-c as a plot edge, but not external proposal',()=>{
+test('final acceptance must resolve pending boundary proposals before removing frame',()=>{
  const first=applyDraftAcceptance(story(),{workspaceId:'w1',nodeIds:['a','b']}).graph;
- const second=applyDraftAcceptance(first,{workspaceId:'w1',nodeIds:['c']}).graph;
+ const before=clone(first);
+ assert.throws(()=>applyDraftAcceptance(first,{workspaceId:'w1',nodeIds:['c']}),
+  e=>e.code==='WORKSPACE_UNRESOLVED_RELATIONS'&&e.message.includes('ep'));
+ assert.deepEqual(first,before,'blocked action never mutates source');
+ // An independent guarded drop_boundary_relation command has discarded ep.
+ const resolved=clone(first);resolved.edges=resolved.edges.filter(e=>e.id!=='ep');
+ const preview=previewDraftAcceptance(resolved,{workspaceId:'w1',nodeIds:['c']});
+ assert.equal(preview.removeWorkspace,true);
+ assert.deepEqual(preview.removeGapLinkIds,[]);
+ const second=applyDraftAcceptance(resolved,{workspaceId:'w1',nodeIds:['c'],
+  expectedPreview:preview}).graph;
  assert.deepEqual(ids(canonicalProjection(second).edges),['e1','e2','ea','eb']);
- assert.equal(second.edges.find(e=>e.id==='ep').workspaceId,'w1');
- assert.equal(second.edges.find(e=>e.id==='ep').draftRelation,'boundary-proposal');
- assert.equal(second.workspaces.length,1,'workspace retains unresolved editorial relation');
+ assert.equal(second.workspaces.length,0,'no empty frame after final acceptance');
+ assert.equal(second.edges.some(e=>e.workspaceId==='w1'),false);
 });
 test('accepting a first leaves a-b internal; accepting b later promotes it',()=>{
  const first=applyDraftAcceptance(story(),{workspaceId:'w1',nodeIds:['a']}).graph;
@@ -29,11 +38,15 @@ test('accepting a first leaves a-b internal; accepting b later promotes it',()=>
  const second=applyDraftAcceptance(first,{workspaceId:'w1',nodeIds:['b']}).graph;
  assert.deepEqual(ids(canonicalProjection(second).edges),['e1','e2','ea']);
 });
-test('accept c first, then a and b; links promote independently of selection order',()=>{
+test('accept c first, then a and b; no implicit disposal of external proposal',()=>{
  const first=applyDraftAcceptance(story(),{workspaceId:'w1',nodeIds:['c']}).graph;
  assert.deepEqual(ids(canonicalProjection(first).edges),['e1','e2']);
- const second=applyDraftAcceptance(first,{workspaceId:'w1',nodeIds:['a','b']}).graph;
+ assert.throws(()=>applyDraftAcceptance(first,{workspaceId:'w1',nodeIds:['a','b']}),
+  e=>e.code==='WORKSPACE_UNRESOLVED_RELATIONS');
+ const resolved=clone(first);resolved.edges=resolved.edges.filter(e=>e.id!=='ep');
+ const second=applyDraftAcceptance(resolved,{workspaceId:'w1',nodeIds:['a','b']}).graph;
  assert.deepEqual(ids(canonicalProjection(second).edges),['e1','e2','ea','eb']);
+ assert.equal(second.workspaces.length,0);
 });
 test('invalid revision aborts with no side effects',()=>{
  const g=story(),before=clone(g);
@@ -51,10 +64,13 @@ test('cannot accept a node already in canon, unknown, duplicate or from another 
  for(const bad of [['n1'],['missing'],['a','a'],['a','z'],[]])assert.throws(()=>applyDraftAcceptance(g,{workspaceId:'w1',nodeIds:bad}),e=>e.code==='SELECTION_INVALID');
  assert.deepEqual(g.nodes.slice(0,before.nodes.length),before.nodes);
 });
-test('another area stays isolated and untouched after accepting w1',()=>{
- const g=story();g.workspaces.push({id:'w2',x:0,y:700,width:150,height:150});g.nodes.push({id:'z',title:'Другая версия',workspaceId:'w2',x:10,y:750});
+test('final acceptance removes only its workspace, not the other area',()=>{
+ const g=story();g.workspaces.push({id:'w2',x:0,y:700,width:150,height:150});g.nodes.push({id:'z',title:'Другой',workspaceId:'w2',x:10,y:800});
+ g.edges=g.edges.filter(e=>e.id!=='ep');
  const {graph:next}=applyDraftAcceptance(g,{workspaceId:'w1',nodeIds:['a','b','c']});
- assert.equal(next.nodes.find(n=>n.id==='z').workspaceId,'w2');assert.equal(canonicalProjection(next).nodes.some(n=>n.id==='z'),false);
+ assert.equal(next.nodes.find(n=>n.id==='z').workspaceId,'w2');
+ assert.equal(canonicalProjection(next).nodes.some(n=>n.id==='z'),false);
+ assert.deepEqual(next.workspaces,[g.workspaces[1]]);
 });
 test('partial acceptance never changes a suspended original or its old edges',()=>{
  const g=story();g.replacements=[{id:'r1',state:'open',sourceNodeIds:['n2'],suspendedEdgeIds:['e1','e2']}];
@@ -99,12 +115,40 @@ test('partial acceptance retains cross-boundary arrow ID, orientation, semantic 
  assert.deepEqual(input,baseline);
  assert.doesNotThrow(()=>validateCreativeWorkflowGraph(JSON.parse(JSON.stringify(after))));
 });
-test('boundary proposal with two canon endpoints stays editorial until explicit decision',()=>{
+test('canon-to-canon proposal remains editorial while a draft still exists',()=>{
  const input=story();
- const {graph:after}=applyDraftAcceptance(input,{workspaceId:'w1',nodeIds:['a','b','c']});
+ const {graph:after}=applyDraftAcceptance(input,{workspaceId:'w1',nodeIds:['a','b']});
  const proposed=after.edges.find(e=>e.id==='ep');
  assert.equal(proposed.from,'n1');assert.equal(proposed.to,'a');
  assert.equal(proposed.workspaceId,'w1');assert.equal(proposed.draftRelation,'boundary-proposal');
  assert.equal(canonicalProjection(after).edges.some(e=>e.id==='ep'),false);
  assert.doesNotThrow(()=>validateCreativeWorkflowGraph(after));
+});
+test('final acceptance atomically removes stale legacy note and its editorial links',()=>{
+ const input=story();input.edges=input.edges.filter(e=>e.id!=='ep');
+ input.gapNotes=[{id:'task1',title:'Old task',text:'Processed',x:8,y:40,status:'pending'}];
+ input.gapLinks=[{id:'old-link',from:{kind:'gap_note',id:'task1'},
+  to:{kind:'plot_node',id:'n1'}}];
+ const baseline=clone(input);
+ const p=previewDraftAcceptance(input,{workspaceId:'w1',nodeIds:['a','b','c']});
+ assert.equal(p.removeWorkspace,true);
+ assert.equal(p.removeNoteId,'task1');
+ assert.deepEqual(p.removeGapLinkIds,['old-link']);
+ const result=applyDraftAcceptance(input,{workspaceId:'w1',nodeIds:['a','b','c'],
+  expectedRevision:7,expectedPreview:p});
+ assert.deepEqual(result.graph.workspaces,[]);
+ assert.deepEqual(result.graph.gapNotes,[]);
+ assert.deepEqual(result.graph.gapLinks,[]);
+ assert.deepEqual(ids(canonicalProjection(result.graph).edges),['e1','e2','ea','eb']);
+ assert.deepEqual(input,baseline);
+ assert.doesNotThrow(()=>validateCreativeWorkflowGraph(result.graph));
+});
+test('shared task source prevents destructive final-area cleanup',()=>{
+ const input=story();input.edges=input.edges.filter(e=>e.id!=='ep');
+ input.workspaces.push({id:'w2',taskId:'task1',x:1600,y:140,width:300,height:200});
+ input.nodes.push({id:'foreign',title:'Other',x:1700,y:160,workspaceId:'w2'});
+ const before=clone(input);
+ assert.throws(()=>previewDraftAcceptance(input,{workspaceId:'w1',nodeIds:['a','b','c']}),
+  e=>e.code==='WORKSPACE_SOURCE_SHARED');
+ assert.deepEqual(input,before);
 });
