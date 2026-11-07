@@ -4018,9 +4018,16 @@ function cwRenderReplacementInspector(el,id){
   '. Прежние стрелки не действуют в сюжете. Каждая требует отдельного решения.</p>'+
   (edgeRows?'<ol class="cw-relations-list">'+edgeRows+'</ol>':
    '<p class="muted">У события нет приостановленных связей.</p>')+
-  (isOpen?'<button id="cw-replacement-postpone" type="button">Отложить</button>'+
-    '<p class="muted">Замена останется открытой после F5. Завершение и пересмотр появятся на этапе C.</p>':
-    '<p class="muted">Исходник сохранён в истории. Пересмотр появится на этапе C.</p>')+
+  (isOpen?'<div class="cw-relation-actions" role="group" aria-label="Действия с заменой">'+
+    '<button id="cw-replacement-postpone" type="button">Отложить</button>'+
+    '<button id="cw-complete-replacement" type="button" '+(resolved.size<suspended.length?'disabled ':'')+
+    '>Завершить</button>'+
+    '<button id="cw-cancel-replacement" type="button">Отменить начало…</button></div>'+
+    (resolved.size<suspended.length
+      ?'<p class="muted">Завершение недоступно: решите все '+(suspended.length-resolved.size)+
+       ' оставшиеся связи. Отложить можно в любой момент.</p>'
+      :'<p class="muted">Все прежние связи разобраны. Завершение скроет исходник с полотна, но сохранит его для пересмотра.</p>'):
+    '<p class="muted">Оригинал скрыт с полотна, но сохранён. История и пересмотр доступны отдельно.</p>')+
   '</div>';
  el.querySelector('#close-inspect').onclick=()=>{
   cwReplacementChoice=null;selected=null;render();
@@ -4030,6 +4037,8 @@ function cwRenderReplacementInspector(el,id){
   cwReplacementChoice=null;selected=null;render();
   note('Замена отложена. Оригинал и нерешённые связи сохранены');
  };
+ el.querySelector('#cw-complete-replacement').onclick=()=>void cwPrepareReplacementLifecycle(id,'complete');
+ el.querySelector('#cw-cancel-replacement').onclick=()=>void cwPrepareReplacementLifecycle(id,'cancel');
  el.querySelectorAll('[data-cw-rewire]').forEach(button=>button.onclick=()=>{
   cwReplacementChoice={replacementId:id,edgeId:button.dataset.cwRewire};
   renderInspector();positionInspector();
@@ -4175,6 +4184,153 @@ async function cwConfirmReplacementDecision(){
   if($('cw-reconnect-confirm'))$('cw-reconnect-confirm').disabled=false;
  }
 }
+
+let cwReplacementLifecycleReview=null; // server preview + stable operationId; never plot data
+const cwRestoreReasons={
+ DECISIONS_ALREADY_APPLIED:'По старым стрелкам уже сохранены решения',
+ ORIGINALS_CHANGED:'Исходные события или их связи изменились',
+ CANON_CHANGED_SINCE_REPLACEMENT:'После начала замены изменился действующий сюжет',
+ RESTORED_GRAPH_INVALID:'Восстановленный граф не проходит проверку'
+};
+function cwCloseReplacementLifecycleReview(){
+ if(cwAcceptanceBusy)return;
+ cwReplacementLifecycleReview=null;modalOpen=false;$('modal-host').innerHTML='';
+}
+function cwShowReplacementLifecycleReview(){
+ const r=cwReplacementLifecycleReview;if(!r)return;
+ const completion=r.command.kind==='complete',permitted=completion||r.plan.canCancel;
+ const title=completion?'Завершить замену?':(permitted?'Отменить начало замены?':'Отмена небезопасна');
+ const details=completion
+  ?'<p>Исходное событие исчезнет с основного полотна, но его текст, ID и прежние стрелки сохранятся для истории и пересмотра.</p>'+
+   '<p>Все '+r.oldEdges.length+' прежних отношений уже разобраны. Новых автоматических связей не возникнет.</p>'
+  :permitted
+   ?'<p>Оригинал и прежние стрелки вернутся в действующий сюжет. Редакторские черновики сохранятся.</p>'+
+    '<p>Операция допускается только после серверной проверки неизменности канона.</p>'
+   :'<p>Автоматическое восстановление заблокировано. Прежний и новый сюжет не изменены.</p>'+
+    '<ul class="cw-replacement-review-edges">'+(r.plan.blockers||[]).map(code=>
+     '<li>'+esc(cwRestoreReasons[code]||code)+'</li>').join('')+'</ul>'+
+    '<p class="muted">Нужен отдельный пересмотр с решениями автора; возврат снимка всего проекта запрещён.</p>';
+ modalOpen=true;
+ $('modal-host').innerHTML='<div class="backdrop"><form class="modal" id="cw-replacement-lifecycle-dialog">'+
+  '<h2>'+title+'</h2>'+
+  '<p><strong>'+esc(r.oldNodes.map(n=>n.title).join(', '))+'</strong></p>'+
+  '<p class="cw-replacement-original-preview">'+esc(r.oldNodes.map(n=>n.description||'Описание отсутствует').join('\n\n'))+'</p>'+
+  details+'<div class="buttons"><button id="cw-lifecycle-cancel" type="button">'+
+  (permitted?'Отмена':'Закрыть')+'</button>'+
+  (permitted?'<button id="cw-lifecycle-confirm" type="submit" class="primary">'+
+   (completion?'Завершить замену':'Восстановить оригинал')+'</button>':'')+
+  '</div></form></div>';
+ $('cw-lifecycle-cancel').onclick=cwCloseReplacementLifecycleReview;
+ $('cw-replacement-lifecycle-dialog').onsubmit=e=>{
+  e.preventDefault();if(permitted)void cwConfirmReplacementLifecycle();
+ };
+ (permitted?$('cw-lifecycle-confirm'):$('cw-lifecycle-cancel')).focus();
+}
+async function cwPrepareReplacementLifecycle(replacementId,kind){
+ const replacement=(state.replacements||[]).find(r=>r.id===replacementId);
+ if(!['complete','cancel'].includes(kind)||!replacement||replacement.state!=='open')
+  return note('Замена не открыта');
+ if(!cwCleanForOperation()||cwReplacementLifecycleReview||cwAcceptanceBusy)
+  return note('Дождитесь синхронизации Graphite Local');
+ const oldNodes=replacement.sourceNodeIds.map(nby),oldEdges=replacement.suspendedEdgeIds.map(eby);
+ if(oldNodes.some(x=>!x)||oldEdges.some(x=>!x))
+  return note('Не найден сохранённый оригинал или одна из его прежних связей');
+ const resolved=new Set((replacement.edgeResolutions||[]).map(d=>d.edgeId));
+ if(kind==='complete'&&replacement.suspendedEdgeIds.some(id=>!resolved.has(id)))
+  return note('Для завершения необходимо решить все прежние связи');
+ const projectId=activeProjectId,revision=remote.revision;
+ const command={kind,replacementId};
+ cwAcceptanceBusy=true;
+ try{
+  const response=await cwWorkflowRequest(projectId,'preview',{expectedRevision:revision,command});
+  if(activeProjectId!==projectId||remote.revision!==revision||remote.dirty||remote.blocked)
+   throw Error('Проект изменился во время проверки');
+  const plan=response.preview;
+  if(plan?.replacementId!==replacementId)throw Error('Проверка относится к другой замене');
+  if(kind==='complete'){
+   if(JSON.stringify(plan.sourceNodeIds)!==JSON.stringify(replacement.sourceNodeIds)||
+    JSON.stringify(plan.edgeResolutions||[])!==JSON.stringify(replacement.edgeResolutions||[])||
+    !Array.isArray(plan.unresolvedEdgeIds)||plan.unresolvedEdgeIds.length||
+    plan.originalNodes?.length!==oldNodes.length||
+    plan.suspendedEdges?.length!==oldEdges.length)
+    throw Error('Сервер не подтвердил полный разбор прежних отношений');
+   for(let i=0;i<oldNodes.length;i++)if(plan.originalNodes[i].id!==oldNodes[i].id||
+     plan.originalNodes[i].title!==oldNodes[i].title||
+     plan.originalNodes[i].description!==oldNodes[i].description||
+     plan.originalNodes[i].x!==oldNodes[i].x||plan.originalNodes[i].y!==oldNodes[i].y)
+    throw Error('Оригинал изменился');
+   for(let i=0;i<oldEdges.length;i++)if(JSON.stringify(plan.suspendedEdges[i])!==JSON.stringify(oldEdges[i]))
+    throw Error('Сохранённая связь изменилась');
+  }else if(typeof plan.canCancel!=='boolean'||!Array.isArray(plan.blockers)||
+   JSON.stringify(plan.restoreNodeIds)!==JSON.stringify(replacement.sourceNodeIds)||
+   JSON.stringify(plan.restoreEdgeIds)!==JSON.stringify(replacement.suspendedEdgeIds)||
+   plan.canCancel!==!plan.blockers.length)
+   throw Error('Серверная проверка восстановления неполная');
+  cwReplacementLifecycleReview={projectId,revision,command,plan,operationId:crypto.randomUUID(),
+   oldNodes:structuredClone(oldNodes),oldEdges:structuredClone(oldEdges)};
+  cwShowReplacementLifecycleReview();
+ }catch(error){
+  cwReplacementLifecycleReview=null;note('Проверка замены не выполнена: '+error.message);
+ }finally{cwAcceptanceBusy=false}
+}
+async function cwConfirmReplacementLifecycle(){
+ const r=cwReplacementLifecycleReview;
+ if(!r||cwAcceptanceBusy||!cwCleanForOperation()||activeProjectId!==r.projectId||
+  remote.revision!==r.revision||r.command.kind==='cancel'&&!r.plan.canCancel)
+  return note('Проверка устарела. Откройте операцию заново');
+ cwAcceptanceBusy=true;
+ const button=$('cw-lifecycle-confirm');if(button)button.disabled=true;
+ try{
+  const receipt=await cwWorkflowRequest(r.projectId,'apply',{
+   expectedRevision:r.revision,operationId:r.operationId,
+   command:{...r.command,expectedPreview:r.plan}
+  });
+  if(receipt.kind!==r.command.kind||!Number.isSafeInteger(receipt.revision))
+   throw Error('Сервер не подтвердил операцию');
+  const latest=await apiRequest('/api/projects/'+encodeURIComponent(r.projectId));
+  if(activeProjectId!==r.projectId||remote.dirty||remote.blocked||
+   !Number.isSafeInteger(latest.revision)||latest.revision<receipt.revision)
+   throw Error('Повторное чтение проекта не подтвердило операцию');
+  const record=latest.graph?.replacements?.find(x=>x.id===r.command.replacementId);
+  if(r.command.kind==='complete'){
+   if(record?.state!=='completed'||record.suspendedEdgeIds.length!==r.oldEdges.length||
+    record.sourceNodeIds.length!==r.oldNodes.length||
+    JSON.stringify(record.edgeResolutions||[])!==JSON.stringify(r.plan.edgeResolutions||[]))
+    throw Error('Завершённая замена не подтверждена');
+  }else if(record)throw Error('Отмена не восстановила исходный статус события');
+  for(const original of r.oldNodes){
+   const stored=latest.graph?.nodes?.find(n=>n.id===original.id);
+   if(!stored||stored.title!==original.title||stored.description!==original.description||
+    stored.x!==original.x||stored.y!==original.y)
+    throw Error('Исходное событие не совпадает с сохранённым');
+  }
+  for(const old of r.oldEdges){
+   const stored=latest.graph?.edges?.find(e=>e.id===old.id);
+   if(!stored||stored.from!==old.from||stored.to!==old.to||stored.type!==old.type)
+    throw Error('Исходная связь не совпадает с сохранённой');
+  }
+  state=validateImported(latest.graph);
+  remote.revision=latest.revision;remote.dirty=false;
+  history=[];selectedNodeIds.clear();linkFrom=null;cwReplacementChoice=null;
+  const completion=r.command.kind==='complete';
+  selected=completion?null:{type:'node',id:r.oldNodes[0].id};
+  cwReplacementLifecycleReview=null;modalOpen=false;$('modal-host').innerHTML='';
+  recomputeFieldTags();save(false);render();
+  $('saved').textContent='✓ Сохранено локально · '+remote.revision;
+  note(completion?'Замена завершена. Оригинал сохранён вне полотна':
+   'Начало замены отменено. Оригинал и прежние связи восстановлены');
+ }catch(err){
+  // Do not generate a new operationId after an ambiguous response.
+  if(['REVISION_CONFLICT','PREVIEW_STALE','OPERATION_ID_REUSED'].includes(err.code)){
+   cwReplacementLifecycleReview=null;modalOpen=false;$('modal-host').innerHTML='';
+   note('Состояние проекта изменилось. Обновите проект перед повтором');
+  }else note('Операция не подтверждена: '+err.message);
+ }finally{
+  cwAcceptanceBusy=false;
+  if($('cw-lifecycle-confirm'))$('cw-lifecycle-confirm').disabled=false;
+ }
+}
+
 let cwReplacementStartReview=null;
 const cwReplacementEdgeLabels={precedes:'Следом',causes:'Причина',enables:'Делает возможным',hinders:'Препятствует'};
 function cwCloseReplacementStartReview(){
@@ -5191,6 +5347,9 @@ document.addEventListener('keydown',e=>{
   }
   if(!$('tools-menu').hidden){$('tools-menu').hidden=true;$('tools-more').setAttribute('aria-expanded','false')}
   if(gapLinkFrom){gapLinkFrom=null;note('Редакторская связь отменена');return}if(linkFrom){linkFrom=null;render();return}
+  if(cwReplacementLifecycleReview&&!cwAcceptanceBusy){
+   e.preventDefault();cwCloseReplacementLifecycleReview();return;
+  }
   if(cwReplacementDecisionReview&&!cwAcceptanceBusy){
    e.preventDefault();cwCloseReplacementDecisionReview();return;
   }
