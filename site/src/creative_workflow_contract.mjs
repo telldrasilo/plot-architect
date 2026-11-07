@@ -33,13 +33,48 @@ export function validateCreativeWorkflowGraph(graph){
     if(w!==null&&!areaIds.has(w))fail('WORKSPACE_NOT_FOUND',n.id);
     if(n.draftBranchId!==undefined&&(!id(n.draftBranchId)||w===null))fail('DRAFT_BRANCH_INVALID',n.id);
   }
-  const originalNodes=new Set(),suspended=new Set(),replacementIds=new Set(),candidateOwners=new Set();
+  const originalNodes=new Set(),retiredSources=new Set(),suspended=new Set(),
+   seenOldEdges=new Set(),replacementIds=new Set(),candidateOwners=new Set(),archivedCandidates=new Set();
   for(const r of replacements){
-    if(!obj(r)||!id(r.id)||replacementIds.has(r.id)||!['open','completed'].includes(r.state)
+    if(!obj(r)||!id(r.id)||replacementIds.has(r.id)||!['open','completed','restored'].includes(r.state)
       ||!Array.isArray(r.sourceNodeIds)||!r.sourceNodeIds.length||!Array.isArray(r.suspendedEdgeIds)
       ||(r.sourceGraphRevision!==undefined&&(!Number.isSafeInteger(r.sourceGraphRevision)||r.sourceGraphRevision<0)))fail('REPLACEMENT_INVALID','identity, state, revision or arrays');
     replacementIds.add(r.id);
     if(new Set(r.sourceNodeIds).size!==r.sourceNodeIds.length||new Set(r.suspendedEdgeIds).size!==r.suspendedEdgeIds.length)fail('REPLACEMENT_INVALID',r.id+' duplicate source');
+    const reviews=r.postCanonReviews??[];
+    if(!Array.isArray(reviews)||reviews.length>50)fail('POST_CANON_REVIEW_INVALID',r.id);
+    for(const review of reviews){
+      if(!obj(review)||Object.keys(review).sort().join(',')!==
+          'acknowledgedTitleConflicts,candidateDecisions,edgeDecisions,originalAction'||
+         !['keep_replaced','restore'].includes(review.originalAction)||
+         !Array.isArray(review.candidateDecisions)||!Array.isArray(review.edgeDecisions)||
+         !Array.isArray(review.acknowledgedTitleConflicts)||
+         new Set(review.acknowledgedTitleConflicts).size!==review.acknowledgedTitleConflicts.length||
+         review.acknowledgedTitleConflicts.some(x=>!id(x)))
+       fail('POST_CANON_REVIEW_INVALID',r.id);
+      const cids=new Set(),eids=new Set();
+      for(const c of review.candidateDecisions){
+        if(!obj(c)||Object.keys(c).sort().join(',')!=='decision,nodeId'||
+          !id(c.nodeId)||!r.candidateNodeIds?.includes(c.nodeId)||cids.has(c.nodeId)||
+          !['keep','archive'].includes(c.decision))fail('POST_CANON_REVIEW_INVALID',r.id+' candidate');
+        cids.add(c.nodeId);
+      }
+      for(const e of review.edgeDecisions){
+        if(!obj(e)||Object.keys(e).sort().join(',')!=='decision,edgeId'||
+           !id(e.edgeId)||!r.suspendedEdgeIds.includes(e.edgeId)||eids.has(e.edgeId)||
+           !['keep_suspended','restore'].includes(e.decision))fail('POST_CANON_REVIEW_INVALID',r.id+' relation');
+        eids.add(e.edgeId);
+      }
+      if(eids.size!==r.suspendedEdgeIds.length||
+         (review.originalAction!=='restore'&&review.edgeDecisions.some(e=>e.decision==='restore')))
+        fail('POST_CANON_REVIEW_INVALID',r.id+' original relation coverage');
+    }
+    const latest=reviews.at(-1);
+    if((r.state==='restored')!==(latest?.originalAction==='restore'))
+      fail('POST_CANON_REVIEW_INVALID',r.id+' state/outcome mismatch');
+    if(r.state==='restored'&&reviews.some((x,i)=>i!==reviews.length-1&&x.originalAction==='restore'))
+      fail('POST_CANON_REVIEW_INVALID',r.id+' cannot redo restored original');
+    for(const c of latest?.candidateDecisions??[])if(c.decision==='archive')archivedCandidates.add(c.nodeId);
     if(r.candidateNodeIds!==undefined){
       if(!Array.isArray(r.candidateNodeIds)||r.candidateNodeIds.length>80||
          new Set(r.candidateNodeIds).size!==r.candidateNodeIds.length)
@@ -55,12 +90,15 @@ export function validateCreativeWorkflowGraph(graph){
       const n=nodes.get(sourceId);
       if(!n||workspaceOf(n)!==null||originalNodes.has(sourceId))fail('SOURCE_INVALID',sourceId);
       originalNodes.add(sourceId);
+      if(r.state!=='restored')retiredSources.add(sourceId);
     }
     for(const edgeId of r.suspendedEdgeIds){
       const e=edges.get(edgeId);
-      if(!e||workspaceOf(e)!==null||suspended.has(edgeId))fail('SUSPENSION_INVALID',edgeId);
+      if(!e||workspaceOf(e)!==null||seenOldEdges.has(edgeId))fail('SUSPENSION_INVALID',edgeId);
       if(!r.sourceNodeIds.includes(e.from)&&!r.sourceNodeIds.includes(e.to))fail('SUSPENSION_INVALID',edgeId+' not incident to replacement');
-      suspended.add(edgeId);
+      seenOldEdges.add(edgeId);
+      if(r.state!=='restored'||!latest?.edgeDecisions.some(x=>x.edgeId===edgeId&&x.decision==='restore'))
+        suspended.add(edgeId);
     }
   }
   for(const e of graph.edges){
@@ -70,7 +108,7 @@ export function validateCreativeWorkflowGraph(graph){
     if(w===null){
       if(own(e,'draftRelation'))fail('EDGE_INVALID',e.id+' unowned draft relation');
       if(from!==null||to!==null)fail('CANON_DRAFT_EDGE',e.id);
-      if((originalNodes.has(e.from)||originalNodes.has(e.to))&&!isSuspended(e,suspended))fail('SUSPENSION_INCOMPLETE',e.id);
+      if((retiredSources.has(e.from)||retiredSources.has(e.to))&&!isSuspended(e,suspended))fail('SUSPENSION_INCOMPLETE',e.id);
     }else{
       if(!areaIds.has(w)||!['internal','boundary-proposal'].includes(e.draftRelation))fail('DRAFT_EDGE_INVALID',e.id);
       if(from!==null&&from!==w||to!==null&&to!==w)fail('CROSS_WORKSPACE_EDGE',e.id);
@@ -112,8 +150,17 @@ export function validateCreativeWorkflowGraph(graph){
 /** Returns only an active plot projection. Never include notes, drafts or originals. */
 export function canonicalProjection(graph){
   validateCreativeWorkflowGraph(graph);
-  const retired=new Set((graph.replacements??[]).flatMap(r=>r.sourceNodeIds));
-  const suspended=new Set((graph.replacements??[]).flatMap(r=>r.suspendedEdgeIds));
+  const retired=new Set((graph.replacements??[]).flatMap(r=>
+    r.state==='restored'?[]:r.sourceNodeIds));
+  for(const r of graph.replacements??[]){
+    const recent=(r.postCanonReviews??[]).at(-1);
+    for(const c of recent?.candidateDecisions??[])if(c.decision==='archive')retired.add(c.nodeId);
+  }
+  const suspended=new Set((graph.replacements??[]).flatMap(r=>{
+    const reviewed=r.state==='restored'?(r.postCanonReviews??[]).at(-1):null;
+    const allowed=new Set(reviewed?.edgeDecisions.filter(d=>d.decision==='restore').map(d=>d.edgeId)??[]);
+    return r.suspendedEdgeIds.filter(id=>!allowed.has(id));
+  }));
   const nodes=graph.nodes.filter(n=>workspaceOf(n)===null&&!retired.has(n.id));
   const ids=new Set(nodes.map(n=>n.id));
   const edges=graph.edges.filter(e=>workspaceOf(e)===null&&!suspended.has(e.id)&&ids.has(e.from)&&ids.has(e.to));
@@ -206,7 +253,16 @@ export function assertProtectedOriginalsUnchanged(previous,next){
     if(!match)fail('REPLACEMENT_REMOVED',r.id+' requires explicit cancel operation');
     if(JSON.stringify(r.sourceNodeIds)!==JSON.stringify(match.sourceNodeIds)||JSON.stringify(r.suspendedEdgeIds)!==JSON.stringify(match.suspendedEdgeIds))fail('REPLACEMENT_CHANGED',r.id);
     if(r.sourceGraphRevision!==match.sourceGraphRevision)fail('REPLACEMENT_CHANGED',r.id+' baseline revision');
-    if(r.state==='completed'&&match.state!=='completed')fail('REPLACEMENT_STATE_CHANGED',r.id+' completed replacement cannot reopen implicitly');
+    if(r.state==='completed'&&!['completed','restored'].includes(match.state)||
+       r.state==='restored'&&match.state!=='restored')
+      fail('REPLACEMENT_STATE_CHANGED',r.id+' replacement state cannot reopen implicitly');
+    const previousReviews=r.postCanonReviews??[],laterReviews=match.postCanonReviews??[];
+    if(previousReviews.length>laterReviews.length||previousReviews.some((v,i)=>
+      JSON.stringify(v)!==JSON.stringify(laterReviews[i])))
+      fail('POST_CANON_REVIEW_CHANGED',r.id);
+    if(match.state==='restored'&&r.state!=='restored'&&
+       laterReviews.at(-1)?.originalAction!=='restore')
+      fail('POST_CANON_REVIEW_CHANGED',r.id+' restoration requires reviewed outcome');
     const pastCandidates=r.candidateNodeIds??[],nextCandidates=match.candidateNodeIds??[];
     if(pastCandidates.length>nextCandidates.length||
        pastCandidates.some((candidateId,i)=>candidateId!==nextCandidates[i]))
