@@ -137,9 +137,7 @@ def main():
         page.locator("#close-inspect").click()
 
         # Editorial field also has a click handler separate from pointerup.
-        page.evaluate("()=>__graphite.createEditorialField({x:800,y:640})")
-        page.locator("#entry").fill("Rewrite this part")
-        page.locator("#dialog button.primary").click()
+        page.evaluate("()=>__graphite.createEditorialField('Rewrite this part',[],{x:800,y:640})")
         assert_open(page, "creating editorial field deliberately opens inspector")
         page.locator("#close-inspect").click()
         drag(page, page.locator(".editorial-field .editorial-head"), 23, 13)
