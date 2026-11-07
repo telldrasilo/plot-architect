@@ -285,7 +285,8 @@ test('CW-010 C3b3 trusted post-canon review: atomic archive, restore, receipt an
  const ordinary=await request(env,'PUT','/api/projects/'+id,{
   name:'Synthetic',expectedRevision:4,graph:badEdit});
  assert.equal(ordinary.status,422,JSON.stringify(ordinary.data));
- assert.equal(ordinary.data.error,'PROTECTED_NODE_CHANGED');
+ assert.equal(ordinary.data.error,'INVALID_GRAPH');
+ assert.match(ordinary.data.message,/PROTECTED_NODE_CHANGED/);
  const restore={...base,originalAction:'restore',
   edgeDecisions:[{edgeId:'e1',decision:'restore'},{edgeId:'e2',decision:'keep_suspended'}]};
  const restoredPreview=await preview(env,id,4,restore);
