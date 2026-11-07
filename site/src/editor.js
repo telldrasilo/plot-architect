@@ -3322,19 +3322,231 @@ function cwRenderReplacementOriginals(host){
   host.append(el);
  }
 }
+
+let cwReplacementChoice=null; // purely local, one relation at a time; never story data
+let cwReplacementDecisionReview=null; // exact preview + stable receipt ID through retry
+
+function cwReplacementRelationLabel(edge){
+ return (nby(edge.from)?.title||edge.from)+' → '+(nby(edge.to)?.title||edge.to);
+}
 function cwRenderReplacementInspector(el,id){
  const r=(state.replacements||[]).find(item=>item.id===id);
  if(!r){el.hidden=true;return}
- const original=(r.sourceNodeIds||[]).map(id=>nby(id)).filter(Boolean);
+ const original=(r.sourceNodeIds||[]).map(nodeId=>nby(nodeId)).filter(Boolean);
+ const resolved=new Map((r.edgeResolutions||[]).map(d=>[d.edgeId,d]));
+ const suspended=(r.suspendedEdgeIds||[]).map(edgeId=>eby(edgeId)).filter(Boolean);
+ const isOpen=r.state==='open';
+ const choice=cwReplacementChoice?.replacementId===id?cwReplacementChoice:null;
+ const active=cwActiveNodes();
+ const activeIds=new Set(active.map(n=>n.id));
+ const retired=new Set(r.sourceNodeIds);
+ const options='<option value="">Выберите сюжетное событие…</option>'+
+  active.map(n=>'<option value="'+esc(n.id)+'">'+esc(n.title)+'</option>').join('');
+ const edgeRows=suspended.map(e=>{
+  const d=resolved.get(e.id),label=cwReplacementRelationLabel(e);
+  let suffix='',actions='';
+  if(d?.decision==='drop'){
+   suffix='<p class="cw-relation-outcome">Не использовать · решение сохранено</p>';
+  }else if(d?.decision==='rewire'){
+   const newer=eby(d.newEdgeId);
+   suffix='<p class="cw-relation-outcome">Переподключено · '+
+    esc(newer?cwReplacementRelationLabel(newer):'Требуется проверка')+
+    (newer?' · '+esc(cwReplacementEdgeLabels[newer.type]||newer.type):'')+'</p>';
+  }else if(isOpen){
+   const editing=choice?.edgeId===e.id;
+   actions='<div class="cw-relation-actions">'+
+    '<button type="button" data-cw-rewire="'+esc(e.id)+'" aria-expanded="'+editing+'">Переподключить…</button>'+
+    '<button type="button" data-cw-drop="'+esc(e.id)+'">Не использовать</button>'+
+    '<button type="button" data-cw-defer="'+esc(e.id)+'">Позже</button></div>';
+   if(editing){
+    const from=retired.has(e.from)
+     ?'<label>Новое начало<select data-cw-choice-from>'+options+'</select></label>'
+     :'<p class="cw-relation-fixed">Начало сохранено: '+esc(nby(e.from)?.title||e.from)+'</p>';
+    const to=retired.has(e.to)
+     ?'<label>Новый конец<select data-cw-choice-to>'+options+'</select></label>'
+     :'<p class="cw-relation-fixed">Конец сохранён: '+esc(nby(e.to)?.title||e.to)+'</p>';
+    actions+='<div class="cw-relation-rewire" data-cw-rewire-form="'+esc(e.id)+'">'+
+     from+to+'<label>Новый смысл связи<select data-cw-choice-type>'+
+     '<option value="">Выберите смысл самостоятельно…</option>'+
+     Object.entries(cwReplacementEdgeLabels).map(([type,title])=>
+      '<option value="'+esc(type)+'">'+esc(title)+'</option>').join('')+
+     '</select></label><p class="muted">Новые конец и тип проверяются отдельно. Близость карточек ничего не подтверждает.</p>'+
+     '<button type="button" data-cw-review-rewire="'+esc(e.id)+'">Проверить связь</button></div>';
+   }
+  }
+  return '<li class="cw-relation-row" data-cw-old-edge="'+esc(e.id)+'">'+
+   '<div class="cw-relation-old"><b>'+esc(label)+'</b>'+
+   '<span>'+esc(cwReplacementEdgeLabels[e.type]||e.type)+' · исходная связь</span></div>'+
+   suffix+actions+'</li>';
+ }).join('');
  el.hidden=false;
  el.innerHTML='<div class="inspect-head"><b>Замена события</b><button id="close-inspect" title="Закрыть">×</button></div>'+
-  '<p class="cw-replacement-status">На замене · исходный сюжет сохранён</p>'+
+  '<p class="cw-replacement-status">'+(isOpen?'На замене':'Заменено')+
+  ' · исходный сюжет сохранён</p>'+
   original.map(n=>'<div class="ux014-original"><strong>'+esc(n.title)+'</strong>'+
    '<p>'+esc(n.description||'Описание отсутствует')+'</p></div>').join('')+
-  '<p class="muted">Приостановлено связей: '+(r.suspendedEdgeIds||[]).length+
-  '. Они не участвуют в действующем сюжете и не переподключаются автоматически.</p>'+
-  '<p class="muted">Разбор прежних отношений и завершение будут доступны на следующем этапе #97.</p>';
- el.querySelector('#close-inspect').onclick=()=>{selected=null;render()};
+  '<div class="cw-relations-panel" data-cw-relations="'+esc(id)+'">'+
+  '<b>Приостановленные связи · '+resolved.size+' из '+suspended.length+' решены</b>'+
+  '<p class="muted">Приостановлено связей: '+suspended.length+
+  '. Прежние стрелки не действуют в сюжете. Каждая требует отдельного решения.</p>'+
+  (edgeRows?'<ol class="cw-relations-list">'+edgeRows+'</ol>':
+   '<p class="muted">У события нет приостановленных связей.</p>')+
+  (isOpen?'<button id="cw-replacement-postpone" type="button">Отложить</button>'+
+    '<p class="muted">Замена останется открытой после F5. Завершение и пересмотр появятся на этапе C.</p>':
+    '<p class="muted">Исходник сохранён в истории. Пересмотр появится на этапе C.</p>')+
+  '</div>';
+ el.querySelector('#close-inspect').onclick=()=>{
+  cwReplacementChoice=null;selected=null;render();
+ };
+ if(!isOpen)return;
+ el.querySelector('#cw-replacement-postpone').onclick=()=>{
+  cwReplacementChoice=null;selected=null;render();
+  note('Замена отложена. Оригинал и нерешённые связи сохранены');
+ };
+ el.querySelectorAll('[data-cw-rewire]').forEach(button=>button.onclick=()=>{
+  cwReplacementChoice={replacementId:id,edgeId:button.dataset.cwRewire};
+  renderInspector();positionInspector();
+  const form=el.querySelector('[data-cw-rewire-form]');
+  form?.querySelector('select')?.focus();
+ });
+ el.querySelectorAll('[data-cw-drop]').forEach(button=>button.onclick=()=>
+  void cwPrepareReplacementDecision(id,button.dataset.cwDrop,'drop'));
+ el.querySelectorAll('[data-cw-defer]').forEach(button=>button.onclick=()=>{
+  cwReplacementChoice=null;renderInspector();positionInspector();
+  note('Связь оставлена нерешённой; сюжет не изменился');
+ });
+ el.querySelectorAll('[data-cw-review-rewire]').forEach(button=>button.onclick=()=>{
+  const edgeId=button.dataset.cwReviewRewire;
+  const edge=eby(edgeId),form=el.querySelector('[data-cw-rewire-form]');
+  if(!edge||!form)return;
+  const from=retired.has(edge.from)?form.querySelector('[data-cw-choice-from]')?.value:edge.from;
+  const to=retired.has(edge.to)?form.querySelector('[data-cw-choice-to]')?.value:edge.to;
+  const type=form.querySelector('[data-cw-choice-type]')?.value;
+  if(!from||!to||!type||from===to||!activeIds.has(from)||!activeIds.has(to))
+   return note('Выберите действующие события и явно укажите смысл связи');
+  void cwPrepareReplacementDecision(id,edgeId,'rewire',{id:crypto.randomUUID(),from,to,type});
+ });
+}
+function cwCloseReplacementDecisionReview(){
+ if(cwAcceptanceBusy)return;
+ cwReplacementDecisionReview=null;modalOpen=false;$('modal-host').innerHTML='';
+}
+function cwShowReplacementDecisionReview(){
+ const review=cwReplacementDecisionReview;
+ if(!review)return;
+ const old=review.plan.originalEdges[0],next=review.plan.newEdges[0];
+ const from=next?nby(next.from)?.title||next.from:null;
+ const to=next?nby(next.to)?.title||next.to:null;
+ const description=next
+  ?'<p>Новая сюжетная стрелка: <strong>'+esc(from)+' → '+esc(to)+'</strong>'+
+    ' · <strong>'+esc(cwReplacementEdgeLabels[next.type]||next.type)+'</strong>.</p>'+
+    '<p class="muted">Исходная стрелка останется приостановленной; новая получит отдельный ID.</p>'
+  :'<p>Отказаться от использования старой связи в сюжете. Оригинал останется в истории замены.</p>';
+ modalOpen=true;
+ $('modal-host').innerHTML='<div class="backdrop"><form class="modal" id="cw-reconnect-review">'+
+  '<h2>'+(next?'Подтвердить переподключение?':'Не использовать связь?')+'</h2>'+
+  '<p>Исходная связь: <strong>'+esc(cwReplacementRelationLabel(old))+'</strong>'+
+  ' · '+esc(cwReplacementEdgeLabels[old.type]||old.type)+'</p>'+description+
+  '<p class="muted">Остальные связи останутся без изменений. Можно принять решение позже.</p>'+
+  '<div class="buttons"><button type="button" id="cw-reconnect-cancel">Отмена</button>'+
+  '<button type="submit" class="primary" id="cw-reconnect-confirm">'+
+  (next?'Подтвердить связь':'Не использовать')+'</button></div></form></div>';
+ $('cw-reconnect-cancel').onclick=cwCloseReplacementDecisionReview;
+ $('cw-reconnect-review').onsubmit=event=>{
+  event.preventDefault();void cwConfirmReplacementDecision();
+ };
+ $('cw-reconnect-confirm').focus();
+}
+async function cwPrepareReplacementDecision(replacementId,edgeId,decision,newEdge){
+ const replacement=(state.replacements||[]).find(x=>x.id===replacementId);
+ const old=eby(edgeId);
+ if(!cwCleanForOperation()||!replacement||replacement.state!=='open'||
+  !replacement.suspendedEdgeIds.includes(edgeId)||
+  (replacement.edgeResolutions||[]).some(x=>x.edgeId===edgeId)||!old)
+  return note('Связь изменилась или Graphite ещё синхронизируется');
+ if(cwReplacementDecisionReview)return;
+ const projectId=activeProjectId,revision=remote.revision;
+ const command={kind:'reconnect',replacementId,decisions:[
+  {edgeId,decision,...(newEdge?{newEdge}: {})}
+ ]};
+ cwAcceptanceBusy=true;
+ try{
+  const response=await cwWorkflowRequest(projectId,'preview',{expectedRevision:revision,command});
+  if(activeProjectId!==projectId||remote.revision!==revision||remote.dirty||remote.blocked)
+   throw Error('Ревизия проекта изменилась');
+  const plan=response.preview;
+  const expected=command.decisions[0],actual=plan?.decisions?.[0];
+  if(plan?.replacementId!==replacementId||plan.decisions.length!==1||
+   JSON.stringify(actual)!==JSON.stringify(expected)||
+   plan.originalEdges?.length!==1||plan.originalEdges[0].id!==edgeId||
+   plan.originalEdges[0].from!==old.from||plan.originalEdges[0].to!==old.to||
+   plan.originalEdges[0].type!==old.type||
+   plan.newEdges?.length!==(decision==='rewire'?1:0)||
+   plan.droppedEdgeIds?.length!==(decision==='drop'?1:0)||
+   plan.deferredEdgeIds?.length!==0||
+   !Array.isArray(plan.unresolvedEdgeIds)||
+   (decision==='rewire'&&JSON.stringify(plan.newEdges[0])!==JSON.stringify(newEdge)))
+    throw Error('Серверный предпросмотр не совпал с выбранным решением');
+  cwReplacementDecisionReview={projectId,revision,command,plan,
+   operationId:crypto.randomUUID()};
+  cwShowReplacementDecisionReview();
+ }catch(err){
+  cwReplacementDecisionReview=null;
+  note('Связь не подготовлена: '+err.message);
+ }finally{cwAcceptanceBusy=false}
+}
+async function cwConfirmReplacementDecision(){
+ const review=cwReplacementDecisionReview;
+ if(!review||!cwCleanForOperation()||activeProjectId!==review.projectId||
+  remote.revision!==review.revision)
+  return note('Проект изменился. Повторите проверку');
+ cwAcceptanceBusy=true;
+ const confirm=$('cw-reconnect-confirm');if(confirm)confirm.disabled=true;
+ try{
+  const applied=await cwWorkflowRequest(review.projectId,'apply',{
+   expectedRevision:review.revision,operationId:review.operationId,
+   command:{...review.command,expectedPreview:review.plan}
+  });
+  if(applied.kind!=='reconnect'||!Number.isSafeInteger(applied.revision))
+   throw Error('Сервер не подтвердил решение');
+  const latest=await apiRequest('/api/projects/'+encodeURIComponent(review.projectId));
+  if(activeProjectId!==review.projectId||remote.dirty||remote.blocked||
+   !Number.isSafeInteger(latest.revision)||latest.revision<applied.revision)
+   throw Error('Повторное чтение проекта не подтвердило решение');
+  const record=latest.graph?.replacements?.find(r=>r.id===review.command.replacementId);
+  const pending=review.command.decisions[0];
+  const status=record?.edgeResolutions?.find(x=>x.edgeId===pending.edgeId);
+  const original=review.plan.originalEdges[0];
+  const stored=latest.graph?.edges?.find(e=>e.id===original.id);
+  const next=pending.newEdge;
+  const added=next&&latest.graph?.edges?.find(e=>e.id===next.id);
+  if(record?.state!=='open'||status?.decision!==pending.decision||
+   (next?status?.newEdgeId!==next.id||JSON.stringify(added)!==JSON.stringify(next):
+    !!status?.newEdgeId)||
+   !stored||stored.from!==original.from||stored.to!==original.to||
+   stored.type!==original.type||
+   JSON.stringify(record.suspendedEdgeIds)!==
+    JSON.stringify((state.replacements||[]).find(r=>r.id===record.id)?.suspendedEdgeIds))
+   throw Error('Нарушена сохранность прежних отношений или новое решение не найдено');
+  state=validateImported(latest.graph);
+  remote.revision=latest.revision;remote.dirty=false;
+  cwReplacementDecisionReview=null;cwReplacementChoice=null;
+  modalOpen=false;$('modal-host').innerHTML='';
+  history=[];selectedNodeIds.clear();linkFrom=null;
+  selected={type:'replacement',id:record.id};
+  recomputeFieldTags();save(false);render();
+  $('saved').textContent='✓ Сохранено локально · '+remote.revision;
+  note(next?'Новое отношение подтверждено; оригинал сохранён':
+   'Отказ от старой связи сохранён');
+ }catch(err){
+  if(['REVISION_CONFLICT','PREVIEW_STALE','OPERATION_ID_REUSED'].includes(err.code)){
+   cwReplacementDecisionReview=null;modalOpen=false;$('modal-host').innerHTML='';
+   note('Ревизия устарела. Обновите проект перед новым решением');
+  }else note('Решение не подтверждено: '+err.message);
+ }finally{
+  cwAcceptanceBusy=false;
+  if($('cw-reconnect-confirm'))$('cw-reconnect-confirm').disabled=false;
+ }
 }
 let cwReplacementStartReview=null;
 const cwReplacementEdgeLabels={precedes:'Следом',causes:'Причина',enables:'Делает возможным',hinders:'Препятствует'};
@@ -4352,6 +4564,9 @@ document.addEventListener('keydown',e=>{
   }
   if(!$('tools-menu').hidden){$('tools-menu').hidden=true;$('tools-more').setAttribute('aria-expanded','false')}
   if(gapLinkFrom){gapLinkFrom=null;note('Редакторская связь отменена');return}if(linkFrom){linkFrom=null;render();return}
+  if(cwReplacementDecisionReview&&!cwAcceptanceBusy){
+   e.preventDefault();cwCloseReplacementDecisionReview();return;
+  }
   if(cwReplacementStartReview&&!cwAcceptanceBusy){
    e.preventDefault();cwCloseReplacementStartReview();return;
   }
