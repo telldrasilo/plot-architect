@@ -997,7 +997,7 @@ const cwDraftRelationOptions=[
  ['enables','Создаёт условия','А делает Б возможным'],
  ['hinders','Препятствует','А мешает Б']
 ];
-function cwSelectBoundaryEdge(workspaceId,edgeId){
+function cwSelectBoundaryEdge(workspaceId,edgeId,pointer=null){
  if(!cwWorkflowEnabled()||cwAcceptanceBusy||cwDragDropReview)return;
  const e=state.edges.find(e=>e.id===edgeId&&e.workspaceId===workspaceId);
  if(!e||!['internal','boundary-proposal'].includes(e.draftRelation))return;
@@ -1006,7 +1006,9 @@ function cwSelectBoundaryEdge(workspaceId,edgeId){
  const old=cwSelectedBoundaryEdge;
  cwBoundaryDropReview=null;
  cwSelectedBoundaryEdge=old?.workspaceId===workspaceId&&old.edgeId===edgeId
-  ?null:{workspaceId,edgeId};
+  ?null:{workspaceId,edgeId,anchorWorld:pointer&&
+   Number.isFinite(pointer.clientX)&&Number.isFinite(pointer.clientY)
+   ?pointerToWorld(pointer.clientX,pointer.clientY):null};
  cwSelectedDraftEdge=null;
  renderCreativeWorkspacePreview();
 }
@@ -1931,6 +1933,51 @@ function cwPositionDropReview(panel,box,nodeIds){
 }
 // Boundary relations remain editorial, but their endpoints use the same measured
 // world-space socket geometry as canonical and internal draft relations.
+// The boundary panel is contextual to the selected arrow, not its target node.
+// Use the click's world-space position, or the route midpoint for keyboard use.
+function cwPositionBoundaryPanel(panel,box,line,anchorWorld=null){
+ const boxRect=box.getBoundingClientRect(),panelRect=panel.getBoundingClientRect();
+ const scale=box.offsetWidth?boxRect.width/box.offsetWidth:0;
+ if(!Number.isFinite(scale)||scale<=0||!panelRect.width||!panelRect.height)return;
+ let point;
+ if(anchorWorld&&Number.isFinite(anchorWorld.x)&&Number.isFinite(anchorWorld.y)){
+  const canvas=canvasRect();
+  point={x:canvas.left+pan.x+anchorWorld.x*pan.scale,
+   y:canvas.top+pan.y+anchorWorld.y*pan.scale};
+ }else{
+  const length=line.getTotalLength(),p=line.getPointAtLength(length/2);
+  const m=line.getScreenCTM();
+  if(!m||!Number.isFinite(p.x)||!Number.isFinite(p.y))return;
+  point={x:p.x*m.a+p.y*m.c+m.e,y:p.x*m.b+p.y*m.d+m.f};
+ }
+ const w=panelRect.width,h=panelRect.height,margin=12,gap=18;
+ const width=document.documentElement.clientWidth,height=document.documentElement.clientHeight;
+ const clamp=(n,low,high)=>Math.max(low,Math.min(n,Math.max(low,high)));
+ const overlap=(x,y,r)=>Math.max(0,Math.min(x+w,r.right)-Math.max(x,r.left))*
+  Math.max(0,Math.min(y+h,r.bottom)-Math.max(y,r.top));
+ const cards=[...document.querySelectorAll('.node,.cw-preview-card')]
+  .filter(el=>el.getClientRects().length).map(el=>el.getBoundingClientRect());
+ const candidates=[
+  {x:point.x+gap,y:point.y+gap},
+  {x:point.x-w-gap,y:point.y+gap},
+  {x:point.x+gap,y:point.y-h-gap},
+  {x:point.x-w-gap,y:point.y-h-gap}
+ ];
+ let best=null;
+ for(const [order,c] of candidates.entries()){
+  const x=clamp(c.x,margin,width-w-margin),y=clamp(c.y,margin,height-h-margin);
+  const covered=cards.reduce((sum,rect)=>sum+overlap(x,y,rect),0);
+  const shift=Math.abs(x-c.x)+Math.abs(y-c.y);
+  const score=covered*80+shift*2+order*3;
+  if(!best||score<best.score)best={x,y,score};
+ }
+ panel.style.left=(best.x-boxRect.left)/scale+'px';
+ panel.style.top=(best.y-boxRect.top)/scale+'px';
+}
+function cwBoundaryCurvePath(x1,y1,x2,y2){
+ const dx=Math.max(65,Math.abs(x2-x1)*.42);
+ return 'M '+x1+' '+y1+' C '+(x1+dx)+' '+y1+' '+(x2-dx)+' '+y2+' '+x2+' '+y2;
+}
 function cwPaintBoundaryRoutes(svg,moves=new Map()){
  for(const line of svg.querySelectorAll('[data-cw-boundary-edge]')){
   const a=moves.get(line.dataset.cwBoundaryFrom)??{dx:0,dy:0};
@@ -1938,7 +1985,7 @@ function cwPaintBoundaryRoutes(svg,moves=new Map()){
   const x1=Number(line.dataset.cwSourceX)+a.dx,y1=Number(line.dataset.cwSourceY)+a.dy;
   const x2=Number(line.dataset.cwTargetX)+b.dx,y2=Number(line.dataset.cwTargetY)+b.dy;
   if(![x1,y1,x2,y2].every(Number.isFinite))continue;
-  const d='M '+x1+' '+y1+' L '+x2+' '+y2;
+  const d=cwBoundaryCurvePath(x1,y1,x2,y2);
   line.setAttribute('d',d);
   const edgeId=line.dataset.cwBoundaryEdge;
   const hit=[...svg.querySelectorAll('[data-cw-boundary-hit]')]
@@ -2130,7 +2177,7 @@ function renderCreativeWorkspacePreview(){
    const ax=from.x-area.x+(from.workspaceId?208:widthOf(from));
    const ay=from.y-area.y+56;
    const bx=to.x-area.x,by=to.y-area.y+56;
-   const d='M '+ax+' '+ay+' L '+bx+' '+by;
+   const d=cwBoundaryCurvePath(ax,ay,bx,by);
    const selected=cwSelectedBoundaryEdge?.workspaceId===area.id&&
     cwSelectedBoundaryEdge.edgeId===edge.id;
    const line=document.createElementNS(namespace,'path');
@@ -2150,7 +2197,7 @@ function renderCreativeWorkspacePreview(){
     hit.setAttribute('aria-label','Нерешённая редакторская связь: '+
       from.title+' — '+to.title+'. Показать подробности');
     hit.addEventListener('click',event=>{
-     event.stopPropagation();cwSelectBoundaryEdge(area.id,edge.id);
+     event.stopPropagation();cwSelectBoundaryEdge(area.id,edge.id,event);
     });
     hit.addEventListener('keydown',event=>{
      if(event.key==='Enter'||event.key===' '){
@@ -2410,7 +2457,6 @@ function renderCreativeWorkspacePreview(){
    });
    panel.append(approve,cancel);box.append(panel);
   }
-  let boundaryPanel=null,boundaryAnchor=null;
   if(persisted&&cwWorkflowEnabled()&&cwSelectedBoundaryEdge?.workspaceId===area.id){
    const edge=boundaryRelations.find(e=>e.id===cwSelectedBoundaryEdge.edgeId);
    const from=edge&&allEndpoints.get(edge.from),to=edge&&allEndpoints.get(edge.to);
@@ -2445,7 +2491,6 @@ function renderCreativeWorkspacePreview(){
      });
      actions.append(yes,no);
      p.append(title,relation,meaning,actions);box.append(p);
-     boundaryPanel=p;
     }else{
     const drop=document.createElement('button');drop.type='button';
     drop.dataset.cwBoundaryDrop=edge.id;
@@ -2469,20 +2514,17 @@ function renderCreativeWorkspacePreview(){
       void cwPrepareDiscard([draft.id],area.id);
      });
      actions.append(accept,remove);
-     boundaryAnchor=draft.id;
     }
     const close=document.createElement('button');close.type='button';
     close.textContent='Закрыть';close.addEventListener('click',event=>{
      event.stopPropagation();cwSelectedBoundaryEdge=null;renderCreativeWorkspacePreview();
     });
     actions.append(close);p.append(title,relation,meaning,actions);
-    box.append(p);boundaryPanel=p;
+    box.append(p);
     }
    }
   }
   host.append(box);
-  if(boundaryPanel&&boundaryAnchor)
-   cwPositionDropReview(boundaryPanel,box,[boundaryAnchor]);
   // Measure cards only after attaching to DOM: descriptions can make each
   // draft taller than the old fixed 105px/56px assumptions.
   const socketBounds=Object.fromEntries(nodes.map(n=>{
@@ -2579,6 +2621,16 @@ function renderCreativeWorkspacePreview(){
   if(dropReviewPanel)cwPositionDropReview(dropReviewPanel,box,dropReviewIds);
  }
  cwRefreshBoundaryRoutes(data,host);
+ if(cwSelectedBoundaryEdge){
+  const {workspaceId,edgeId,anchorWorld}=cwSelectedBoundaryEdge;
+  const box=[...host.querySelectorAll('[data-cw-workspace]')]
+   .find(el=>el.dataset.cwWorkspace===workspaceId);
+  const panel=[...(box?.querySelectorAll('[data-cw-boundary-details]')||[])]
+   .find(el=>el.dataset.cwBoundaryDetails===edgeId);
+  const line=[...(box?.querySelectorAll('[data-cw-boundary-edge]')||[])]
+   .find(el=>el.dataset.cwBoundaryEdge===edgeId);
+  if(panel&&line)cwPositionBoundaryPanel(panel,box,line,anchorWorld);
+ }
  cwRefreshSocketVisuals();
 }
 

@@ -117,6 +117,7 @@ def main():
             line=page.locator(f'[data-cw-boundary-edge="{key}"]')
             assert line.count()==1
             assert line.get_attribute("d").startswith("M ")
+            assert " C " in line.get_attribute("d"),"boundary must curve like canonical arrows"
             assert page.locator(f'[data-cw-boundary-hit="{key}"]').count()==1
             assert page.locator(f'[data-cw-boundary-direction="{key}"]').count()==1
         assert page.locator('[data-cw-boundary-edge="ea"]').evaluate(
@@ -130,7 +131,7 @@ def main():
           const line=document.querySelector('[data-cw-boundary-edge="ea"]');
           const coordinates=[...line.getAttribute('d').matchAll(/-?\\d+(?:\\.\\d+)?/g)]
             .map(match=>Number(match[0]));
-          return {actual:coordinates,
+          return {actual:[coordinates[0],coordinates[1],coordinates.at(-2),coordinates.at(-1)],
             expected:[150+a.offsetWidth-95,510+a.offsetHeight/2-450,
                       460-95,510+b.offsetHeight/2-450],
             ports:[...box.querySelectorAll('[data-cw-boundary-socket]')]
@@ -176,6 +177,33 @@ def main():
         page.mouse.click(point["x"],point["y"])
         panel=page.locator('[data-cw-boundary-details="ea"]')
         panel.wait_for()
+        # The contextual details follow the clicked portion of the arrow.
+        # They no longer anchor to the draft node, while remaining in view.
+        placement=page.evaluate("""p => {
+          const panel=document.querySelector('[data-cw-boundary-details="ea"]');
+          const r=panel.getBoundingClientRect(),w=document.documentElement.clientWidth,
+            h=document.documentElement.clientHeight,margin=12,gap=18;
+          const clamp=(n,lo,hi)=>Math.max(lo,Math.min(n,Math.max(lo,hi)));
+          const expected=[
+            [p.x+gap,p.y+gap],[p.x-r.width-gap,p.y+gap],
+            [p.x+gap,p.y-r.height-gap],[p.x-r.width-gap,p.y-r.height-gap]
+          ].map(([x,y])=>[clamp(x,margin,w-r.width-margin),
+                           clamp(y,margin,h-r.height-margin)]);
+          return {actual:[r.left,r.top],expected,
+                  inside:r.left>=margin-1&&r.top>=margin-1&&
+                    r.right<=w-margin+1&&r.bottom<=h-margin+1};
+        }""",point)
+        assert placement["inside"],placement
+        assert any(abs(placement["actual"][0]-x)<3 and
+                   abs(placement["actual"][1]-y)<3
+                   for x,y in placement["expected"]),placement
+        # Chromium SVG default outlines focused path's rectangular bounds;
+        # remove only that box, not the keyboard stroke highlight.
+        page.locator('[data-cw-boundary-hit="ea"]').focus()
+        focus=page.locator('[data-cw-boundary-hit="ea"]').evaluate(
+            "el=>({outline:getComputedStyle(el).outlineStyle,"
+            "stroke:getComputedStyle(el).stroke,active:document.activeElement===el})")
+        assert focus["active"] and focus["outline"]=="none",focus
         assert "Не в сюжете" in panel.inner_text()
         assert not page.locator('.pa-marquee').is_visible()
         assert db["previews"]==0 and db["applies"]==0 and db["generic"]==0
