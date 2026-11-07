@@ -3285,6 +3285,164 @@ function renderFieldInspector(el,f){el.hidden=false;
  $('f-zoom').onclick=()=>jumpToField(f.id);$('f-delete').onclick=()=>deleteField(f.id);$('close-inspect').onclick=()=>{selected=null;render()};
 }
 
+
+function cwOpenReplacementOriginals(){
+ const found=[];
+ for(const replacement of state.replacements||[]){
+  if(replacement.state!=='open')continue;
+  for(const id of replacement.sourceNodeIds||[]){
+   const node=nby(id);
+   if(node&&node.parent===state.view)found.push({replacement,node});
+  }
+ }
+ return found;
+}
+function cwRenderReplacementOriginals(host){
+ for(const {replacement:r,node:n} of cwOpenReplacementOriginals()){
+  const el=document.createElement('article');
+  el.className='node cw-original-on-replacement'+
+   (selected?.type==='replacement'&&selected.id===r.id?' cw-original-selected':'');
+  el.dataset.cwOriginal=n.id;el.dataset.cwReplacement=r.id;
+  el.style.left=n.x+'px';el.style.top=n.y+'px';
+  el.style.width=widthOf(n)+'px';
+  if(Number.isFinite(n.height))el.style.minHeight=heightOf(n)+'px';
+  el.tabIndex=0;el.setAttribute('role','button');
+  el.setAttribute('aria-label','На замене: '+n.title);
+  el.innerHTML='<div class="cw-original-kind">На замене</div>'+
+   '<div class="node-header"><div class="node-marker"></div><div class="node-title">'+esc(n.title)+'</div></div>'+
+   '<div class="node-note">'+esc(n.description||'Описание отсутствует')+'</div>'+
+   '<div class="node-foot"><span>Исходник сохранён · связи приостановлены</span></div>';
+  const inspect=()=>{suppressInspectorForNode=null;selectedNodeIds.clear();
+   selected={type:'replacement',id:r.id};render()};
+  el.addEventListener('click',event=>{event.stopPropagation();inspect()});
+  el.addEventListener('keydown',event=>{
+   if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();inspect()}
+  });
+  el.addEventListener('contextmenu',event=>{event.preventDefault();event.stopPropagation();inspect()});
+  host.append(el);
+ }
+}
+function cwRenderReplacementInspector(el,id){
+ const r=(state.replacements||[]).find(item=>item.id===id);
+ if(!r){el.hidden=true;return}
+ const original=(r.sourceNodeIds||[]).map(id=>nby(id)).filter(Boolean);
+ el.hidden=false;
+ el.innerHTML='<div class="inspect-head"><b>Замена события</b><button id="close-inspect" title="Закрыть">×</button></div>'+
+  '<p class="cw-replacement-status">На замене · исходный сюжет сохранён</p>'+
+  original.map(n=>'<div class="ux014-original"><strong>'+esc(n.title)+'</strong>'+
+   '<p>'+esc(n.description||'Описание отсутствует')+'</p></div>').join('')+
+  '<p class="muted">Приостановлено связей: '+(r.suspendedEdgeIds||[]).length+
+  '. Они не участвуют в действующем сюжете и не переподключаются автоматически.</p>'+
+  '<p class="muted">Разбор прежних отношений и завершение будут доступны на следующем этапе #97.</p>';
+ el.querySelector('#close-inspect').onclick=()=>{selected=null;render()};
+}
+let cwReplacementStartReview=null;
+const cwReplacementEdgeLabels={precedes:'Следом',causes:'Причина',enables:'Делает возможным',hinders:'Препятствует'};
+function cwCloseReplacementStartReview(){
+ if(cwAcceptanceBusy)return;
+ cwReplacementStartReview=null;modalOpen=false;$('modal-host').innerHTML='';
+}
+function cwShowReplacementStartReview(){
+ const r=cwReplacementStartReview;if(!r)return;
+ modalOpen=true;
+ const edges=(r.plan.suspendedEdges||[]).map(e=>
+  '<li>'+esc(nby(e.from)?.title||e.from)+' → '+esc(nby(e.to)?.title||e.to)+
+  ' · '+esc(cwReplacementEdgeLabels[e.type]||e.type)+'</li>').join('');
+ $('modal-host').innerHTML='<div class="backdrop"><form class="modal" id="cw-start-replacement-dialog">'+
+  '<h2>Начать замену события?</h2>'+
+  '<p><strong>'+esc(r.plan.originalNodes[0].title)+'</strong> останется на старом месте, но временно выйдет из действующего сюжета. Текст и координаты сохраняются.</p>'+
+  '<p class="cw-replacement-original-preview">'+esc(r.plan.originalNodes[0].description||'Описание отсутствует')+'</p>'+
+  '<p>Приостановленные связи ('+r.plan.suspendedEdges.length+'). Они не подключатся автоматически:</p>'+
+  (edges?'<ul class="cw-replacement-review-edges">'+edges+'</ul>':'')+
+  '<p class="muted">Позднее каждую прежнюю связь потребуется разобрать отдельно.</p>'+
+  '<div class="buttons"><button type="button" id="cw-start-replacement-cancel">Отмена</button>'+
+  '<button type="submit" class="primary" id="cw-start-replacement-confirm">Начать замену</button></div></form></div>';
+ $('cw-start-replacement-cancel').onclick=cwCloseReplacementStartReview;
+ $('cw-start-replacement-dialog').onsubmit=e=>{e.preventDefault();void cwConfirmStartReplacement()};
+ $('cw-start-replacement-confirm').focus();
+}
+async function cwPrepareStartReplacement(nodeId){
+ const n=nby(nodeId);
+ if(!n||!visible().some(node=>node.id===nodeId))
+  return note('Заменять можно только действующее сюжетное событие');
+ if(!cwCleanForOperation())return note('Дождитесь синхронизации Graphite Local');
+ if(cwReplacementStartReview||cwAcceptanceBusy)return;
+ const projectId=activeProjectId,revision=remote.revision;
+ const command={kind:'start_replacement',replacementId:crypto.randomUUID(),sourceNodeIds:[nodeId]};
+ cwAcceptanceBusy=true;
+ try{
+  const response=await cwWorkflowRequest(projectId,'preview',{expectedRevision:revision,command});
+  if(activeProjectId!==projectId||remote.revision!==revision||remote.dirty||remote.blocked)
+   throw Error('Проект изменился во время проверки');
+  const p=response.preview;
+  if(!p||JSON.stringify(p.sourceNodeIds)!==JSON.stringify([nodeId])||
+   p.originalNodes?.length!==1||p.originalNodes[0].id!==n.id||
+   p.originalNodes[0].title!==n.title||p.originalNodes[0].description!==n.description||
+   p.originalNodes[0].x!==n.x||p.originalNodes[0].y!==n.y||
+   !Array.isArray(p.suspendedEdges)||!Array.isArray(p.suspendedEdgeIds)||
+   p.suspendedEdges.length!==p.suspendedEdgeIds.length||
+   p.autoRewiredEdgeIds?.length)
+    throw Error('Неожиданное содержимое предпросмотра');
+  if(p.affectedDraftEdgeIds?.length)
+   throw Error('У события есть связи с черновиками; сначала разрешите их');
+  for(const edge of p.suspendedEdges){
+   const old=eby(edge.id);
+   if(!old||old.from!==edge.from||old.to!==edge.to||old.type!==edge.type)
+    throw Error('Исходная связь изменилась');
+  }
+  cwReplacementStartReview={projectId,revision,command,plan:p,operationId:crypto.randomUUID()};
+  cwShowReplacementStartReview();
+ }catch(error){
+  cwReplacementStartReview=null;note('Начало замены не подготовлено: '+error.message);
+ }finally{cwAcceptanceBusy=false}
+}
+async function cwConfirmStartReplacement(){
+ const r=cwReplacementStartReview;
+ if(!r||cwAcceptanceBusy||!cwCleanForOperation()||
+  activeProjectId!==r.projectId||remote.revision!==r.revision)
+  return note('Проект изменился. Повторите проверку');
+ cwAcceptanceBusy=true;
+ if($('cw-start-replacement-confirm'))$('cw-start-replacement-confirm').disabled=true;
+ try{
+  const saved=await cwWorkflowRequest(r.projectId,'apply',{
+   expectedRevision:r.revision,operationId:r.operationId,
+   command:{...r.command,expectedPreview:r.plan}
+  });
+  if(saved.kind!=='start_replacement'||!Number.isSafeInteger(saved.revision))
+   throw Error('Сервер не подтвердил операцию');
+  const latest=await apiRequest('/api/projects/'+encodeURIComponent(r.projectId));
+  if(activeProjectId!==r.projectId||remote.dirty||remote.blocked||
+   latest.revision<saved.revision)throw Error('Повторное чтение не подтвердило состояние');
+  const target=latest.graph?.replacements?.find(x=>x.id===r.command.replacementId);
+  const source=latest.graph?.nodes?.find(x=>x.id===r.command.sourceNodeIds[0]);
+  const original=r.plan.originalNodes[0];
+  if(target?.state!=='open'||JSON.stringify(target.sourceNodeIds)!==
+   JSON.stringify(r.command.sourceNodeIds)||
+   JSON.stringify(target.suspendedEdgeIds)!==JSON.stringify(r.plan.suspendedEdgeIds)||
+   !source||source.title!==original.title||source.description!==original.description||
+   source.x!==original.x||source.y!==original.y||
+   r.plan.suspendedEdges.some(old=>{
+    const edge=latest.graph?.edges?.find(e=>e.id===old.id);
+    return !edge||edge.from!==old.from||edge.to!==old.to||edge.type!==old.type;
+   }))throw Error('Исходник или его стрелки не совпадают с предпросмотром');
+  state=validateImported(latest.graph);remote.revision=latest.revision;remote.dirty=false;
+  history=[];selectedNodeIds.clear();linkFrom=null;
+  selected={type:'replacement',id:r.command.replacementId};
+  cwReplacementStartReview=null;modalOpen=false;$('modal-host').innerHTML='';
+  recomputeFieldTags();save(false);render();
+  $('saved').textContent='✓ Сохранено локально · '+remote.revision;
+  note('Замена начата. Оригинал сохранён, прежние связи приостановлены');
+ }catch(err){
+  // Ambiguous result: keep operationId so a retry cannot create another change.
+  if(['REVISION_CONFLICT','PREVIEW_STALE','OPERATION_ID_REUSED'].includes(err.code)){
+   cwReplacementStartReview=null;modalOpen=false;$('modal-host').innerHTML='';
+   note('Проверка устарела. Обновите проект и повторите попытку');
+  }else note('Замена не подтверждена: '+err.message);
+ }finally{
+  cwAcceptanceBusy=false;
+  if($('cw-start-replacement-confirm'))$('cw-start-replacement-confirm').disabled=false;
+ }
+}
 function renderNodes(){const host=$('nodes');host.innerHTML='';const keep=focusIds(),chosen=new Set(groupIds()),parentsWithChildren=new Set(state.nodes.filter(k=>k.parent).map(k=>k.parent));for(const n of visible()){const rewrite=rewriteBy(n.id);const el=document.createElement('article');el.className='node '+(n.size||'normal')+(rewrite?' rewrite-draft':'')+(chosen.has(n.id)?' selected':'')+(n.status==='proposed'?' node-proposed':'')+(keep&&!keep.has(n.id)?' focus-muted':'');el.dataset.node=n.id;el.style.left=n.x+'px';el.style.top=n.y+'px';if(Number.isFinite(n.width)||Number.isFinite(n.height))el.classList.add('node-custom-size');if(Number.isFinite(n.width))el.style.width=widthOf(n)+'px';if(Number.isFinite(n.height))el.style.minHeight=heightOf(n)+'px';el.style.setProperty('--color',colorOf(n));el.tabIndex=0;el.setAttribute('aria-label',(rewrite?'Заметка переработки: ':'Событие: ')+n.title);el.innerHTML=`${chosen.size===1&&chosen.has(n.id)?`<div class="node-actions">${!rewrite?'<button data-command="inside" title="Открыть детали">↗ Внутрь</button><button data-command="link" title="Соединить с другим событием">↗ Связать</button><button data-command="after" title="Продолжить сюжет" aria-label="Продолжить сюжет">＋</button>':''}<button data-command="edit" title="Редактировать">⋯</button></div>`:''}${rewrite?'<div class="ux014-node-kind">▤ Заметка · переработка</div>':''}<div class="node-header"><div class="node-marker"></div><div class="node-title">${esc(n.title)}</div></div><div class="node-note">${esc(rewrite?(rewrite.taskText||'Что изменить?'):(n.description||'Добавьте короткое описание события'))}</div><div class="node-foot">${rewrite?`<span class="ux014-rewrite-status">Исходник сохранён · задание на переработку</span>`:tagNames(n).map(tag=>`<span class="field-chip ${tag.manual?'manual-chip':''}" title="${tag.manual?'Закреплённый тег':'Назначен полем'}">${esc(tag.name)}</span>`).join('')}${!rewrite&&!tagNames(n).length?'<span>Без поля</span>':''}${!rewrite?editorialInView().filter(ef=>ef.memberIds.includes(n.id)).map(ef=>`<span class="editorial-chip" title="Редакторское задание, не смысловой тег">▨ ${esc(ef.title)}</span>`).join(''):''}${!rewrite&&parentsWithChildren.has(n.id)?'<span class="tag">Есть детали</span>':''}</div>${chosen.size===1&&chosen.has(n.id)?'<button class="node-resize-grip" title="Изменить ширину и высоту карточки" aria-label="Изменить размер ноды">⤡</button>':''}`;if(!rewrite){
   const socket=document.createElement('button');
   socket.type='button';socket.className='cw-free-source';
@@ -3332,6 +3490,7 @@ function renderNodes(){const host=$('nodes');host.innerHTML='';const keep=focusI
  el.addEventListener('pointercancel',()=>{const i=interaction;if(i?.type==='node'&&i.id===n.id){interaction=null;restoreMove(i);render()}});
  el.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();if(e.ctrlKey||e.metaKey)toggleNodeSelection(n.id);else setNodeSelection([n.id],n.id)}if(e.key==='Delete'){e.preventDefault();if(groupIds().length>1&&groupIds().includes(n.id))deleteSelectedGroup();else{selected={type:'node',id:n.id};selectedNodeIds.clear();deleteSelected()}}};
  }
+ cwRenderReplacementOriginals(host);
  renderEdges()}
 function renderSingleEventRewriteInspector(el,n,d){
  el.hidden=false;
@@ -3341,10 +3500,10 @@ function renderSingleEventRewriteInspector(el,n,d){
  <div class="field"><label for="ux014-task">Что изменить?</label><textarea id="ux014-task" class="ux014-task" maxlength="20000" placeholder="Опишите задачу для ChatGPT">${esc(d.taskText)}</textarea></div>
  <p class="ux014-quiet-note">Исходное содержание не изменяется. Подготовка и применение вариантов появятся после P5/P6.</p>
  <button class="ux014-generate" type="button" disabled title="Генерация вариантов пока не подключена">Подготовить решение</button>
- <div class="ux014-rewrite-actions"><button id="ux014-cancel" type="button">← Отменить переработку</button></div>`;
+ <div class="ux014-rewrite-actions"><button id="ux014-cancel" type="button">← Отменить переработку</button>${cwWorkflowEnabled()?'<button id="ux014-start-replacement" type="button">Начать замену…</button>':''}</div>`;
  $('pin-inspect').onclick=()=>{inspectorPinned=!inspectorPinned;renderInspector();positionInspector()};
  $('close-inspect').onclick=()=>{selected=null;render()};
- $('ux014-cancel').onclick=()=>cancelEventRewrite(n.id);
+ $('ux014-cancel').onclick=()=>cancelEventRewrite(n.id);if($('ux014-start-replacement'))$('ux014-start-replacement').onclick=()=>void cwPrepareStartReplacement(n.id);
  const editor=$('ux014-task');let editing=false;
  editor.onfocus=()=>{editing=false};
  editor.oninput=e=>{
@@ -3360,10 +3519,11 @@ function renderInspector(){const el=$('inspector');if(!selected||
   (selected.type==='node'&&suppressInspectorForNode===selected.id)){
   el.hidden=true;return}
  if(selected.type==='node'&&groupIds().length>1){el.hidden=false;el.innerHTML=`<div class="inspect-head"><b>Выделено ${groupIds().length} событий</b><button id="close-inspect">×</button></div><p class="muted">Перетаскивайте любую выбранную карточку, чтобы переместить группу. Ctrl/⌘+клик — добавить или исключить. Shift+рамка — расширить выбор.</p><p class="muted">При выходе из смыслового поля предлагается сохранить его тег.</p><div class="inspect-actions"><button id="group-editorial">▨ Поле переработки</button>${editorialInView().length?'<button id="group-add-existing">Добавить в задание…</button>':''}<button id="group-clear">Снять выделение</button><button id="group-delete">Удалить выбранные…</button></div>`;$('close-inspect').onclick=$('group-clear').onclick=()=>setNodeSelection([]);$('group-delete').onclick=deleteSelectedGroup;$('group-editorial').onclick=createEditorialFieldFromSelection;if($('group-add-existing'))$('group-add-existing').onclick=addSelectedToEditorialField;return}
+if(selected.type==='replacement')return cwRenderReplacementInspector(el,selected.id);
 if(selected.type==='gapNote'){const n=gnby(selected.id);if(!n){el.hidden=true;return}return renderGapInspector(el,n)}
  if(selected.type==='gapLink'){const l=state.gapLinks.find(x=>x.id===selected.id);if(!l){el.hidden=true;return}el.hidden=false;el.innerHTML=`<div class="inspect-head"><b>Связь заметки</b><button id="close-inspect">×</button></div><p class="muted">Редакторский контекст, не причинная связь истории.</p><button id="gap-link-delete">Удалить связь</button>`;$('close-inspect').onclick=()=>{selected=null;render()};$('gap-link-delete').onclick=()=>{commit(()=>{state.gapLinks=state.gapLinks.filter(x=>x.id!==l.id)},'Связь удалена');selected=null;render()};return}
  if(selected.type==='editorialField'){const ef=efby(selected.id);if(!ef){el.hidden=true;return}return renderEditorialInspector(el,ef)}
-if(selected.type==='bridge')return renderBridgeInspector(el);if(selected.type==='field'){const f=fby(selected.id);if(!f){el.hidden=true;return}return renderFieldInspector(el,f)}if(selected.type==='node'){const n=nby(selected.id);if(!n){el.hidden=true;return}const existingDraft=rewriteBy(n.id);if(existingDraft)return renderSingleEventRewriteInspector(el,n,existingDraft);el.hidden=false;el.innerHTML=`<div class="inspect-head"><b>Событие</b><span class="inspect-top-tools"><button id="pin-inspect" title="${inspectorPinned?'Вернуть окно к событию':'Закрепить окно справа'}">${inspectorPinned?'↗ Рядом':'▣ Справа'}</button><button id="close-inspect" title="Закрыть">×</button></span></div><div class="field"><label>Название</label><input id="field-title" value="${esc(n.title)}"></div><div class="field"><label>Описание</label><textarea id="field-desc">${esc(n.description||'')}</textarea></div><div class="field"><label>Сюжетные линии</label>${state.lanes.map(l=>`<label class="check-row"><input type="checkbox" data-line-check="${l.id}" ${n.lineIds.includes(l.id)?'checked':''}><span style="color:${l.color}">●</span>${esc(l.title)}</label>`).join('')}</div><div class="field"><label>Смысловые поля</label><div class="field-list">${tagNames(n).map(t=>`<span class="field-badge" data-actual-tag="${esc(t.id)}">${esc(t.name)} ${t.manual?'<span class="tiny">закреплено</span>':'<span class="tiny">по расположению</span>'}</span>`).join('')||'<span class="muted">Вне смысловых полей</span>'}</div>${(n.manualFieldIds||[]).filter(id=>!!fby(id)).map(id=>`<div class="field-tag-row"><span>Закреплено: ${esc(fby(id).title)}</span><button data-unpin-field="${esc(id)}" title="Снять ручное закрепление. Принадлежность по расположению сохранится">Открепить</button></div>`).join('')}</div><div class="field"><label>Цвет карточки</label><div class="node-palette"><button type="button" class="node-palette-auto ${!n.color?'active':''}" data-node-color="auto" title="Цвет по сюжетной линии">Авто</button>${COLORS.map(c=>`<button type="button" class="node-palette-swatch ${n.color===c?'active':''}" data-node-color="${c}" title="Выбрать цвет" style="--swatch:${c}"><span></span></button>`).join('')}</div></div><hr><div class="ux014-main-action"><button id="i-rewrite" type="button">✎ Переработать событие</button></div><div class="ux014-delete-line"><button id="i-delete" type="button">Удалить…</button></div>`; $('pin-inspect').onclick=()=>{inspectorPinned=!inspectorPinned;renderInspector();positionInspector()};el.querySelectorAll('[data-node-color]').forEach(b=>b.onclick=()=>{const value=b.dataset.nodeColor;commit(()=>{const node=nby(n.id);if(value==='auto')delete node.color;else node.color=value},'Цвет карточки изменён')});$('field-title').onchange=e=>{let v=e.target.value.trim();if(v)commit(()=>nby(n.id).title=v,'Название обновлено')};$('field-desc').onchange=e=>commit(()=>nby(n.id).description=e.target.value,'Описание обновлено');el.querySelectorAll('[data-line-check]').forEach(cb=>cb.onchange=e=>{let line=cb.dataset.lineCheck;let nn=nby(n.id);let s=new Set(nn.lineIds);if(cb.checked)s.add(line);else s.delete(line);if(!s.size){cb.checked=true;note('У события должна остаться хотя бы одна линия');return}commit(()=>nn.lineIds=[...s],'Принадлежность линии обновлена')});el.querySelectorAll('[data-unpin-field]').forEach(b=>b.onclick=()=>{const id=b.dataset.unpinField;commit(()=>{const t=nby(n.id);t.manualFieldIds=(t.manualFieldIds||[]).filter(x=>x!==id)},'Закрепление метки снято')});$('i-rewrite').onclick=()=>beginEventRewrite(n.id);$('i-delete').onclick=()=>deletePlotNode(n.id);$('close-inspect').onclick=()=>{selected=null;render()}}
+if(selected.type==='bridge')return renderBridgeInspector(el);if(selected.type==='field'){const f=fby(selected.id);if(!f){el.hidden=true;return}return renderFieldInspector(el,f)}if(selected.type==='node'){const n=nby(selected.id);if(!n){el.hidden=true;return}const existingDraft=rewriteBy(n.id);if(existingDraft)return renderSingleEventRewriteInspector(el,n,existingDraft);el.hidden=false;el.innerHTML=`<div class="inspect-head"><b>Событие</b><span class="inspect-top-tools"><button id="pin-inspect" title="${inspectorPinned?'Вернуть окно к событию':'Закрепить окно справа'}">${inspectorPinned?'↗ Рядом':'▣ Справа'}</button><button id="close-inspect" title="Закрыть">×</button></span></div><div class="field"><label>Название</label><input id="field-title" value="${esc(n.title)}"></div><div class="field"><label>Описание</label><textarea id="field-desc">${esc(n.description||'')}</textarea></div><div class="field"><label>Сюжетные линии</label>${state.lanes.map(l=>`<label class="check-row"><input type="checkbox" data-line-check="${l.id}" ${n.lineIds.includes(l.id)?'checked':''}><span style="color:${l.color}">●</span>${esc(l.title)}</label>`).join('')}</div><div class="field"><label>Смысловые поля</label><div class="field-list">${tagNames(n).map(t=>`<span class="field-badge" data-actual-tag="${esc(t.id)}">${esc(t.name)} ${t.manual?'<span class="tiny">закреплено</span>':'<span class="tiny">по расположению</span>'}</span>`).join('')||'<span class="muted">Вне смысловых полей</span>'}</div>${(n.manualFieldIds||[]).filter(id=>!!fby(id)).map(id=>`<div class="field-tag-row"><span>Закреплено: ${esc(fby(id).title)}</span><button data-unpin-field="${esc(id)}" title="Снять ручное закрепление. Принадлежность по расположению сохранится">Открепить</button></div>`).join('')}</div><div class="field"><label>Цвет карточки</label><div class="node-palette"><button type="button" class="node-palette-auto ${!n.color?'active':''}" data-node-color="auto" title="Цвет по сюжетной линии">Авто</button>${COLORS.map(c=>`<button type="button" class="node-palette-swatch ${n.color===c?'active':''}" data-node-color="${c}" title="Выбрать цвет" style="--swatch:${c}"><span></span></button>`).join('')}</div></div><hr><div class="ux014-main-action"><button id="i-rewrite" type="button">✎ Переработать событие</button>${cwWorkflowEnabled()?'<button id="i-start-replacement" type="button">Начать замену…</button>':''}</div><div class="ux014-delete-line"><button id="i-delete" type="button">Удалить…</button></div>`; $('pin-inspect').onclick=()=>{inspectorPinned=!inspectorPinned;renderInspector();positionInspector()};el.querySelectorAll('[data-node-color]').forEach(b=>b.onclick=()=>{const value=b.dataset.nodeColor;commit(()=>{const node=nby(n.id);if(value==='auto')delete node.color;else node.color=value},'Цвет карточки изменён')});$('field-title').onchange=e=>{let v=e.target.value.trim();if(v)commit(()=>nby(n.id).title=v,'Название обновлено')};$('field-desc').onchange=e=>commit(()=>nby(n.id).description=e.target.value,'Описание обновлено');el.querySelectorAll('[data-line-check]').forEach(cb=>cb.onchange=e=>{let line=cb.dataset.lineCheck;let nn=nby(n.id);let s=new Set(nn.lineIds);if(cb.checked)s.add(line);else s.delete(line);if(!s.size){cb.checked=true;note('У события должна остаться хотя бы одна линия');return}commit(()=>nn.lineIds=[...s],'Принадлежность линии обновлена')});el.querySelectorAll('[data-unpin-field]').forEach(b=>b.onclick=()=>{const id=b.dataset.unpinField;commit(()=>{const t=nby(n.id);t.manualFieldIds=(t.manualFieldIds||[]).filter(x=>x!==id)},'Закрепление метки снято')});$('i-rewrite').onclick=()=>beginEventRewrite(n.id);if($('i-start-replacement'))$('i-start-replacement').onclick=()=>void cwPrepareStartReplacement(n.id);$('i-delete').onclick=()=>deletePlotNode(n.id);$('close-inspect').onclick=()=>{selected=null;render()}}
  else{const edge=eby(selected.id);if(!edge){el.hidden=true;return}el.hidden=false;const edgeNames={precedes:'Следом (порядок)',causes:'Из-за этого (причина)',enables:'Делает возможным',hinders:'Препятствует'};el.innerHTML=`<div class="inspect-head"><b>Связь событий</b><button id="close-inspect">×</button></div><div class="muted"><b>${esc(nby(edge.from)?.title)}</b><div style="margin:10px 0;color:#c4a77a">→</div><b>${esc(nby(edge.to)?.title)}</b></div><div class="field"><label>Смысл связи</label><select id="edge-type">${Object.entries(edgeNames).map(([id,t])=>`<option value="${id}" ${edge.type===id?'selected':''}>${t}</option>`).join('')}</select></div><div class="muted">«Следом» означает последовательность, но не доказывает причину.</div><hr><div class="inspect-actions"><button id="reconnect">Переподключить</button><button id="i-delete">Удалить связь</button></div>`;$('edge-type').onchange=e=>commit(()=>eby(edge.id).type=e.target.value,'Тип связи изменён');$('reconnect').onclick=()=>{selected={type:'edge',id:edge.id};render();
  note('Возьмите конечное гнездо стрелки и перенесите к другой карточке')};$('i-delete').onclick=deleteSelected;$('close-inspect').onclick=()=>{selected=null;render()}}
 }
@@ -3788,6 +3948,7 @@ function contentBounds(){
  const nodes=visible(),fields=[...fieldInView(),...editorialInView()],items=[];
  for(const n of gapInView())items.push({x:n.x,y:n.y,w:252,h:Math.max(115,document.querySelector(`[data-gap-note="${n.id}"]`)?.offsetHeight||115)});
  for(const n of nodes)items.push({x:n.x,y:n.y,w:widthOf(n),h:heightOf(n)|| (n.size==='mini'?75:n.size==='expanded'?220:170)});
+ for(const {node:n} of cwOpenReplacementOriginals())items.push({x:n.x,y:n.y,w:widthOf(n),h:heightOf(n)||170});
  for(const f of fields)items.push({x:f.x,y:f.y-25,w:f.width,h:f.height+25});
  for(const a of (creativeWorkspacePreview||cwPersistedWorkspaceScene())?.workspaces||[])items.push({x:a.x,y:a.y,w:a.width,h:a.height});
  if(!items.length)return {x:0,y:0,w:1000,h:600};
@@ -3808,7 +3969,7 @@ function renderOverviewTitles(){
  const keep=focusIds();
  // From real node centers, NOT from a transformed compact DOM box.
  // Item bounds remain in the original world layout throughout semantic zoom.
- const candidates=visible().map(n=>{
+ const candidates=[...visible(),...cwOpenReplacementOriginals().map(x=>x.node)].map(n=>{
   const dim=itemDims(n);
   return {n,x:pan.x+(n.x+dim.w/2)*pan.scale,y:pan.y+(n.y+dim.h/2)*pan.scale};
  }).filter(p=>p.x>=-10&&p.x<=viewport.width+10&&p.y>=-10&&p.y<=viewport.height+10)
@@ -3820,11 +3981,12 @@ function renderOverviewTitles(){
   const item=document.createElement('div');
   item.className='pa-semantic-item'+(active?' selected':'')+(keep&&!keep.has(n.id)?' focus-muted':'');
   item.dataset.zoomNode=n.id;
+  if(cwRetiredNodeIds().has(n.id))item.classList.add('cw-original-overview');
   item.style.left=x+'px';item.style.top=y+'px';item.style.setProperty('--color',colorOf(n));
   item.tabIndex=0;item.setAttribute('role','button');item.setAttribute('aria-label',(rewriteBy(n.id)?'Заметка переработки: ':'Событие: ')+n.title);
   item.title=n.title+' · '+(mode==='map'?'нажмите для приближения':'нажмите для выбора, повторно — приблизить');
   item.innerHTML='<span class="pa-semantic-dot" aria-hidden="true"></span><span class="pa-semantic-label"></span>';
-  item.querySelector('.pa-semantic-label').textContent=n.title;
+  item.querySelector('.pa-semantic-label').textContent=(cwRetiredNodeIds().has(n.id)?'На замене · ':'')+n.title;
   host.append(item);
   // The dot is ALWAYS anchored and visible, even if this label has no free room.
   // Use real, rendered text size to avoid estimating line breaks from character count.
@@ -3843,6 +4005,21 @@ function renderOverviewTitles(){
   }
   if(rect){label.style.left=(rect.x-x)+'px';label.style.top=(rect.y-y)+'px';occupied.push(rect)}
   else{label.hidden=true;item.classList.add('label-collided')}
+  // Retired originals are read-only even in semantic zoom. In particular,
+  // never allow the ordinary node drag, link, rename or keyboard delete path.
+  if(cwRetiredNodeIds().has(n.id)){
+   const replacement=(state.replacements||[]).find(r=>
+    r.state==='open'&&r.sourceNodeIds.includes(n.id));
+   const inspect=e=>{
+    e.preventDefault();e.stopPropagation();
+    if(!replacement)return;
+    selected={type:'replacement',id:replacement.id};render();
+   };
+   item.setAttribute('aria-label','На замене: '+n.title);
+   item.onclick=inspect;
+   item.onkeydown=e=>{if(e.key==='Enter'||e.key===' ')inspect(e)};
+   continue;
+  }
   // UX-016: semantic zoom items are real drag handles, not just navigation buttons.
   // Preview updates node coordinates only transiently; one existing safe-transfer
   // transaction (including Undo and tag-preservation) commits on pointerup.
@@ -3988,6 +4165,7 @@ function plotContextActions(kind,id,at){
  if(kind==='node')return [
  {label:'Редактировать',icon:'✎',run:()=>selectAndShow('node',id)},
  {label:rewriteBy(id)?'Отменить переработку':'Переработать событие',icon:'▤',run:()=>rewriteBy(id)?cancelEventRewrite(id):beginEventRewrite(id)},
+ ...(cwWorkflowEnabled()?[{label:'Начать замену…',icon:'↻',run:()=>void cwPrepareStartReplacement(id)}]:[]),
  {label:'Продолжить',icon:'↗',run:()=>addAfter(id)},
  {label:'Связать с заметкой',icon:'▤',run:()=>beginGapLink('plot_node',id)},
   {label:'Связать событие',icon:'⇢',run:()=>{linkFrom=id;selected={type:'node',id};render();note('Выберите карточку назначения · Esc — отменить')}},
@@ -4121,7 +4299,9 @@ $('search').onclick=()=>{modalOpen=true;
  $('modal-host').innerHTML=`<div class="backdrop"><div class="modal" role="dialog" aria-label="Поиск"><h2>Найти на полотне</h2><p>События и поля. Выбор откроет нужный уровень и перенесёт камеру.</p><input id="search-entry" placeholder="Название события или поля"><div class="results" id="search-results"></div><div class="buttons"><button id="search-close">Закрыть</button></div></div></div>`;
  const close=()=>{$('modal-host').innerHTML='';modalOpen=false};$('search-close').onclick=close;
  $('search-entry').oninput=e=>{const query=e.target.value.trim().toLocaleLowerCase('ru');
- const nodes=query?state.nodes.filter(n=>(n.title+' '+(n.description||'')).toLocaleLowerCase('ru').includes(query)).slice(0,15):[];
+ // Replaced originals are not active story search results; history/review
+ // will expose them separately in the later replacement workflow.
+ const nodes=query?cwActiveNodes().filter(n=>(n.title+' '+(n.description||'')).toLocaleLowerCase('ru').includes(query)).slice(0,15):[];
  const fields=query?state.fields.filter(f=>f.title.toLocaleLowerCase('ru').includes(query)).slice(0,8):[];
  $('search-results').innerHTML=[...nodes.map(n=>`<button data-focus-node="${esc(n.id)}">◻ ${esc(n.title)} <small>Событие</small></button>`),...fields.map(f=>`<button data-focus-field="${esc(f.id)}">▧ ${esc(f.title)} <small>Поле</small></button>`)].join('')||(query?'<div class="search-empty">Ничего не найдено</div>':'');
  $('search-results').querySelectorAll('[data-focus-node]').forEach(el=>el.onclick=()=>{const id=el.dataset.focusNode;close();jumpToNode(id)});
@@ -4172,6 +4352,9 @@ document.addEventListener('keydown',e=>{
   }
   if(!$('tools-menu').hidden){$('tools-menu').hidden=true;$('tools-more').setAttribute('aria-expanded','false')}
   if(gapLinkFrom){gapLinkFrom=null;note('Редакторская связь отменена');return}if(linkFrom){linkFrom=null;render();return}
+  if(cwReplacementStartReview&&!cwAcceptanceBusy){
+   e.preventDefault();cwCloseReplacementStartReview();return;
+  }
   if(!modalOpen&&selected?.type==='node'){setNodeSelection([]);return}
   return;
  }
