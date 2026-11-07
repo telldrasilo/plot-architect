@@ -1608,6 +1608,19 @@ function cwSelectBoundaryEdge(workspaceId,edgeId,pointer=null){
  cwSelectedDraftEdge=null;
  renderCreativeWorkspacePreview();
 }
+// Contextual boundary details are transient: a click elsewhere dismisses the
+// panel without touching the relation, its workspace or any graph data.
+function cwDismissBoundaryEdge(){
+ if(!cwSelectedBoundaryEdge||cwBoundaryDropReview||cwAcceptanceBusy)return false;
+ cwSelectedBoundaryEdge=null;
+ renderCreativeWorkspacePreview();
+ return true;
+}
+document.addEventListener('click',event=>{
+ if(!cwSelectedBoundaryEdge||cwBoundaryDropReview||cwAcceptanceBusy||
+    event.target.closest?.('.cw-boundary-details,[data-cw-boundary-hit]'))return;
+ cwDismissBoundaryEdge();
+});
 
 async function cwPrepareDropBoundaryRelation(workspaceId,edgeId){
  if(cwBoundaryDropReview||cwAcceptanceBusy)return;
@@ -4720,6 +4733,14 @@ document.addEventListener('keydown',e=>{
   }
   if(interaction){e.preventDefault();cancelGesture();return}
   if(cwEdgeToolbar){e.preventDefault();cwCloseEdgeToolbar();return}
+  // Esc cancels an unconfirmed boundary refusal; the next Esc closes its
+  // unchanged contextual panel. Neither shortcut applies a graph operation.
+  if(cwBoundaryDropReview&&!cwAcceptanceBusy){
+   e.preventDefault();cwBoundaryDropReview=null;renderCreativeWorkspacePreview();return;
+  }
+  if(cwSelectedBoundaryEdge&&!cwAcceptanceBusy){
+   e.preventDefault();cwDismissBoundaryEdge();return;
+  }
   if(!$('tools-menu').hidden){$('tools-menu').hidden=true;$('tools-more').setAttribute('aria-expanded','false')}
   if(gapLinkFrom){gapLinkFrom=null;note('Редакторская связь отменена');return}if(linkFrom){linkFrom=null;render();return}
   if(!modalOpen&&selected?.type==='node'){setNodeSelection([]);return}
