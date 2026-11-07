@@ -372,7 +372,10 @@ body.pa-multi-modifier .inspector{pointer-events:none;opacity:.35}/* allows Ctrl
 /* CW-003: the meaning editor does not interfere with separate reconnect handles. */
 .cw-preview-link.cw-draft-edge-active{stroke-width:3;opacity:1}
 .cw-draft-edge-hit{fill:none;stroke:transparent;stroke-width:16;pointer-events:stroke;cursor:pointer}
-.cw-draft-edge-hit:focus-visible{stroke:rgba(214,198,158,.35);outline:none}
+/* Chromium otherwise draws the SVG path's rectangular bounding-box focus ring
+   on mouse click. Keep a stroke-based visible keyboard focus indication. */
+.cw-draft-edge-hit:focus{outline:none}
+.cw-draft-edge-hit:focus-visible{stroke:rgba(214,198,158,.35)}
 .cw-draft-type-panel{position:absolute;z-index:15;width:306px;max-width:calc(100% - 16px);background:#29272e;border:1px solid #806f90;border-radius:11px;padding:12px;box-shadow:0 10px 28px rgba(0,0,0,.35);color:#efefed;pointer-events:auto}
 .cw-draft-type-panel label{display:block;font-size:12px;font-weight:600}
 .cw-draft-type-panel select{display:block;width:100%;margin-top:7px;padding:7px 9px;background:#232129;border:1px solid #706478;border-radius:7px;color:#efefed}
