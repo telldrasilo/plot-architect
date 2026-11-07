@@ -91,15 +91,39 @@ def main():
   menu.locator('[data-ct-format="italic"]').click()
   page.wait_for_function("()=>__graphite.getState().canvasTexts[0].blocks.some(b=>b.runs.some(r=>r.italic))")
   assert not page.locator("#modal-host .modal").count()
+  # All four actions must perform their advertised formatting, not just render labels.
+  def select_block(index):
+   page.evaluate("""(index)=>{
+    const e=document.querySelector('[data-canvas-text-editor]');
+    const block=e.querySelectorAll('p,h3,blockquote')[index];
+    const r=document.createRange();r.selectNodeContents(block);
+    const s=getSelection();s.removeAllRanges();s.addRange(r);
+   }""",index)
+   menu.wait_for(state="visible")
+  select_block(0)
+  menu.locator('[data-ct-format="heading"]').click()
+  page.wait_for_function("()=>__graphite.getState().canvasTexts[0].blocks[0].type==='heading'")
+  select_block(1)
+  menu.locator('[data-ct-format="underline"]').click()
+  page.wait_for_function("()=>__graphite.getState().canvasTexts[0].blocks[1].runs.some(r=>r.underline)")
+  select_block(1)
+  menu.locator('[data-ct-format="quote"]').click()
+  page.wait_for_function("()=>__graphite.getState().canvasTexts[0].blocks[1].type==='quote'")
   # Selection collapsed -> menu gone.
   editor.click()
   page.wait_for_function("()=>document.querySelector('.canvas-text-format').hidden")
+  # Resize changes only this text block, never the field or story nodes.
+  page.locator("#close-inspect").click()
+  handle=page.locator(".canvas-text-resize").first
+  pos=handle.bounding_box()
+  page.mouse.move(pos["x"]+pos["width"]/2,pos["y"]+pos["height"]/2)
+  page.mouse.down()
+  page.mouse.move(pos["x"]+pos["width"]/2+90,pos["y"]+pos["height"]/2,steps=6)
+  page.mouse.up()
+  page.wait_for_function("()=>__graphite.getState().canvasTexts[0].width>420")
   # Move the annotation across the semantic field; it never inherits field tags.
   grab=page.locator(".canvas-text-grab").first
   before=page.evaluate("()=>structuredClone(__graphite.getState().canvasTexts[0])")
-  # The ordinary node inspector may overlap the annotation drag handle.
-  # The annotation itself remains visible; dismiss the inspector before moving it.
-  page.locator("#close-inspect").click()
   box=grab.bounding_box()
   print("UX126 GRAB",page.evaluate("""()=>{
    const g=document.querySelector('.canvas-text-grab'),r=g.getBoundingClientRect();
@@ -119,10 +143,21 @@ def main():
   ready()
   assert db["writes"]>0
   assert len(db["graph"]["canvasTexts"])==1
+  # A second text block may be placed inside the field without inheriting its tags.
+  page.locator("#add-canvas-text").click()
+  second=page.locator("[data-canvas-text-editor]").last
+  second.type("Свободное пояснение внутри поля")
+  second.press("Tab")
+  page.wait_for_timeout(1400)
+  ready()
+  assert len(db["graph"]["canvasTexts"])==2
   # Save and reopen — all editor-only data and formatting must survive.
   page.reload();ready()
   new=page.evaluate("()=>structuredClone(__graphite.getState().canvasTexts[0])")
   assert new["blocks"]==db["graph"]["canvasTexts"][0]["blocks"]
+  assert new["width"]>420
+  assert len(db["graph"]["canvasTexts"])==2
+  assert db["graph"]["canvasTexts"][1]["blocks"][0]["runs"][0]["text"]=="Свободное пояснение внутри поля"
   assert (new["x"],new["y"])==(moved["x"],moved["y"])
   assert page.locator('[data-node="n1"]').count()==1
   assert db["graph"]["edges"]==GRAPH["edges"]
