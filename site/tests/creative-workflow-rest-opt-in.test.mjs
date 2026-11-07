@@ -227,6 +227,89 @@ test('C3b explicit candidate linkage is guarded, attributed from trusted history
  assert.equal(stale.status,409);assert.equal(stale.data.error,'REVISION_CONFLICT');
  assert.deepEqual((await graph(env,id)).graph.replacements[0].candidateNodeIds,['new-scene']);
 });
+test('CW-010 C3b3 trusted post-canon review: atomic archive, restore, receipt and readback',async()=>{
+ const {db,sql}=storage(),env={DB:db,CW_WORKFLOW_ENABLED:'true'},id=await create(env);
+ const start=await apply(env,id,0,'review-start',{kind:'start_replacement',
+  replacementId:'r1',sourceNodeIds:['n2']});
+ assert.equal(start.status,200,JSON.stringify(start.data));
+ let project=await graph(env,id),edited=structuredClone(project.graph);
+ edited.nodes.push({id:'X',title:'Новый поворот',description:'',x:400,y:400,parent:null},
+   {id:'Y',title:'Исходный поворот',description:'',x:700,y:400,parent:null});
+ const saved=await request(env,'PUT','/api/projects/'+id,{
+  name:project.name,expectedRevision:1,graph:edited});
+ assert.equal(saved.status,200,JSON.stringify(saved.data));
+ const link=await apply(env,id,2,'review-link',{kind:'link_replacement_candidates',
+  replacementId:'r1',nodeIds:['X','Y']});
+ assert.equal(link.status,200,JSON.stringify(link.data));
+ const empty=await preview(env,id,3,{kind:'review_replacement',replacementId:'r1'});
+ assert.equal(empty.status,200,JSON.stringify(empty.data));
+ assert.equal(empty.data.preview.selectionComplete,false);
+ assert.deepEqual(empty.data.preview.candidateNodes.map(x=>x.id),['X','Y']);
+ assert.deepEqual(empty.data.preview.suspendedEdges.map(x=>x.id),['e1','e2']);
+ const before=counts(sql,id);
+ const forbidden=await request(env,'POST',path(id)+'apply',{
+  expectedRevision:3,operationId:'empty-review',
+  command:{kind:'review_replacement',replacementId:'r1',expectedPreview:empty.data.preview}});
+ assert.equal(forbidden.status,422,JSON.stringify(forbidden.data));
+ assert.equal(forbidden.data.error,'REVIEW_DECISIONS_INCOMPLETE');
+ assert.deepEqual(counts(sql,id),before);
+ const base={kind:'review_replacement',replacementId:'r1',
+  originalAction:'keep_replaced',
+  candidateDecisions:[{nodeId:'X',decision:'keep'},{nodeId:'Y',decision:'archive'}],
+  edgeDecisions:[{edgeId:'e1',decision:'keep_suspended'},
+    {edgeId:'e2',decision:'keep_suspended'}],
+  acknowledgedTitleConflicts:[]};
+ const reviewed=await preview(env,id,3,base);
+ assert.equal(reviewed.status,200,JSON.stringify(reviewed.data));
+ assert.deepEqual(reviewed.data.preview.blockers,[]);
+ assert.deepEqual(reviewed.data.preview.wouldArchiveCandidateNodeIds,['Y']);
+ const payload={expectedRevision:3,operationId:'review-archive',
+  command:{...base,expectedPreview:reviewed.data.preview}};
+ const first=await request(env,'POST',path(id)+'apply',payload);
+ assert.equal(first.status,200,JSON.stringify(first.data));
+ assert.deepEqual(first.data.changes.archivedCandidateNodeIds,['Y']);
+ const replay=await request(env,'POST',path(id)+'apply',payload);
+ assert.equal(replay.status,200);assert.equal(replay.data.replayed,true);
+ assert.deepEqual(counts(sql,id),{revision:4,history:before.history+1,receipts:before.receipts+1});
+ const kept=(await graph(env,id)).graph;
+ assert.equal(kept.nodes.find(n=>n.id==='Y').title,'Исходный поворот');
+ assert.deepEqual(kept.edges.map(x=>x.id),['e1','e2']);
+ assert.equal(kept.replacements[0].postCanonReviews.length,1);
+ const canonicalAfterArchive=await request(env,'POST','/mcp',{jsonrpc:'2.0',id:4,
+  method:'tools/call',params:{name:'get_project',arguments:{project_id:id,detail:'full'}}});
+ assert.equal(canonicalAfterArchive.status,200);
+ assert.deepEqual(canonicalAfterArchive.data.result.structuredContent.graph.nodes.map(n=>n.id),
+  ['n1','n3','X']);
+ const badEdit=structuredClone(kept);
+ badEdit.nodes.find(n=>n.id==='Y').title='Someone rewrote the archived candidate';
+ const ordinary=await request(env,'PUT','/api/projects/'+id,{
+  name:'Synthetic',expectedRevision:4,graph:badEdit});
+ assert.equal(ordinary.status,422,JSON.stringify(ordinary.data));
+ assert.equal(ordinary.data.error,'PROTECTED_NODE_CHANGED');
+ const restore={...base,originalAction:'restore',
+  edgeDecisions:[{edgeId:'e1',decision:'restore'},{edgeId:'e2',decision:'keep_suspended'}]};
+ const restoredPreview=await preview(env,id,4,restore);
+ assert.equal(restoredPreview.status,200,JSON.stringify(restoredPreview.data));
+ assert.deepEqual(restoredPreview.data.preview.blockers,[]);
+ const restored=await request(env,'POST',path(id)+'apply',{
+  expectedRevision:4,operationId:'review-restore',command:{...restore,
+   expectedPreview:restoredPreview.data.preview}});
+ assert.equal(restored.status,200,JSON.stringify(restored.data));
+ assert.deepEqual(restored.data.changes.restoredEdgeIds,['e1']);
+ const restoredGraph=(await graph(env,id)).graph;
+ assert.equal(restoredGraph.replacements[0].state,'restored');
+ assert.equal(restoredGraph.replacements[0].postCanonReviews.length,2);
+ assert.equal(restoredGraph.nodes.find(n=>n.id==='n2').description,'Старое решение');
+ assert.deepEqual(restoredGraph.edges.map(x=>x.id),['e1','e2']);
+ const canonicalRestored=await request(env,'POST','/mcp',{jsonrpc:'2.0',id:5,
+  method:'tools/call',params:{name:'get_project',arguments:{project_id:id,detail:'full'}}});
+ assert.deepEqual(canonicalRestored.data.result.structuredContent.graph.nodes.map(x=>x.id),
+  ['n1','n2','n3','X']);
+ assert.deepEqual(canonicalRestored.data.result.structuredContent.graph.edges.map(x=>x.id),['e1']);
+ assert.deepEqual(counts(sql,id),{revision:5,history:before.history+2,receipts:before.receipts+2});
+ const untrusted=await preview(env,id,5,{kind:'review_replacement',replacementId:'r1',baselineGraph:story()});
+ assert.equal(untrusted.status,422);assert.equal(untrusted.data.error,'COMMAND_INVALID');
+});
 test('cancel uses trusted historical revision from DB, not client-supplied baseline',async()=>{
  const {db,sql}=storage(),env={DB:db,CW_WORKFLOW_ENABLED:'true'},id=await create(env);
  const r=await apply(env,id,0,'start',{kind:'start_replacement',replacementId:'r1',sourceNodeIds:['n2']});
