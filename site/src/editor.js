@@ -3387,7 +3387,8 @@ function cwRenderReplacementInspector(el,id){
    '<p>'+esc(n.description||'Описание отсутствует')+'</p></div>').join('')+
   '<div class="cw-relations-panel" data-cw-relations="'+esc(id)+'">'+
   '<b>Приостановленные связи · '+resolved.size+' из '+suspended.length+' решены</b>'+
-  '<p class="muted">Прежние стрелки не действуют в сюжете. Каждая требует отдельного решения.</p>'+
+  '<p class="muted">Приостановлено связей: '+suspended.length+
+  '. Прежние стрелки не действуют в сюжете. Каждая требует отдельного решения.</p>'+
   (edgeRows?'<ol class="cw-relations-list">'+edgeRows+'</ol>':
    '<p class="muted">У события нет приостановленных связей.</p>')+
   (isOpen?'<button id="cw-replacement-postpone" type="button">Отложить</button>'+
