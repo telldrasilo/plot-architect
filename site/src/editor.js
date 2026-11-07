@@ -302,10 +302,13 @@ if(!Number.isSafeInteger(state.nextField)||state.nextField<=maxFieldNumber)state
 let selected=null,linkFrom=null,history=[],guide=true,focusMode=false,overviewOn=false,modalOpen=false,pan={x:105,y:45,scale:.82},interaction=null;
 // P3: multi-selection is editor UI state, not part of the plot or serialized revisions.
 const selectedNodeIds=new Set();let spacePan=false,dragCompletedFor=null;
-function setNodeSelection(ids,primary=null){
+// Drag changes the selection but must not request the contextual inspector.
+let suppressInspectorForNode=null;
+function setNodeSelection(ids,primary=null,{openInspector=true}={}){
  selectedNodeIds.clear();const available=new Set(visible().map(n=>n.id));
  for(const id of ids)if(available.has(id))selectedNodeIds.add(id);
  const id=(primary&&selectedNodeIds.has(primary)?primary:[...selectedNodeIds][0]);
+ suppressInspectorForNode=openInspector?null:id;
  selected=id?{type:'node',id}:null;render();
 }
 function toggleNodeSelection(id){const ids=new Set(selected?.type==='node'?selectedNodeIds:[]);if(!ids.size&&selected?.type==='node')ids.add(selected.id);if(ids.has(id))ids.delete(id);else ids.add(id);setNodeSelection(ids,ids.has(id)?id:null)}
@@ -2736,10 +2739,12 @@ function renderGapNotes(){const host=$('gap-notes');host.innerHTML='';
   el.dataset.gapNote=n.id;el.style.left=n.x+'px';el.style.top=n.y+'px';el.tabIndex=0;
   el.innerHTML=`<div class="gap-note-head">▤ ${esc(n.title||'Заметка')}</div><div class="gap-note-body ${!n.text?'gap-note-empty':''}">${esc(n.text||'Напишите, что нужно придумать здесь…')}</div><div class="gap-note-foot">${cwWorkflowEnabled()?(cwNoteHasWorkspace(n.id)?'Варианты в рабочей области':cwPreparedNoteAlternatives.has(n.id)?'Подготовлено '+cwPreparedNoteAlternatives.get(n.id).branches.length+' ветвей':'Редакторское задание') :'Редакторское задание'} · не сюжетное событие</div>`;
   host.append(el);
-  el.onclick=e=>{e.stopPropagation();if(completeGapLink('gap_note',n.id))return;selected={type:'gapNote',id:n.id};render()};
+  el.onclick=e=>{e.stopPropagation();if(dragCompletedFor===n.id){dragCompletedFor=null;return}if(completeGapLink('gap_note',n.id))return;selected={type:'gapNote',id:n.id};render()};
   el.addEventListener('pointerdown',e=>{if(e.button!==0||e.target.closest('input,textarea')||e.ctrlKey)return;interaction={type:'gap-note-move',id:n.id,px:e.clientX,py:e.clientY,x:n.x,y:n.y,moved:false};el.setPointerCapture(e.pointerId)});
   el.addEventListener('pointermove',e=>{const i=interaction;if(i?.type!=='gap-note-move'||i.id!==n.id)return;const dx=(e.clientX-i.px)/pan.scale,dy=(e.clientY-i.py)/pan.scale;if(Math.abs(dx)+Math.abs(dy)>5)i.moved=true;if(i.moved){el.style.left=Math.round(i.x+dx)+'px';el.style.top=Math.round(i.y+dy)+'px'}});
-  el.addEventListener('pointerup',e=>{const i=interaction;if(i?.type!=='gap-note-move'||i.id!==n.id)return;interaction=null;if(!i.moved)return;e.stopPropagation();const x=Math.round(i.x+(e.clientX-i.px)/pan.scale),y=Math.round(i.y+(e.clientY-i.py)/pan.scale);commit(()=>{const a=gnby(n.id);a.x=x;a.y=y},'Заметка перемещена');selected={type:'gapNote',id:n.id};render()});
+  el.addEventListener('pointerup',e=>{const i=interaction;if(i?.type!=='gap-note-move'||i.id!==n.id)return;interaction=null;if(!i.moved)return;e.stopPropagation();const x=Math.round(i.x+(e.clientX-i.px)/pan.scale),y=Math.round(i.y+(e.clientY-i.py)/pan.scale);dragCompletedFor=n.id;
+   setTimeout(()=>{if(dragCompletedFor===n.id)dragCompletedFor=null},0);
+   commit(()=>{const a=gnby(n.id);a.x=x;a.y=y},'Заметка перемещена')});
   el.addEventListener('pointercancel',()=>{if(interaction?.type==='gap-note-move'){interaction=null;render()}});
  }
 }
@@ -3028,13 +3033,15 @@ function renderEditorialFields(){const host=$('editorial-fields');host.innerHTML
   noteInput.addEventListener('input',autosize);noteInput.addEventListener('wheel',e=>e.stopPropagation(),{passive:true});
   noteInput.addEventListener('change',e=>updateEditorialInstruction(f.id,e.target.value));
   noteInput.addEventListener('blur',e=>updateEditorialInstruction(f.id,e.target.value));
-  head.onclick=e=>{e.stopPropagation();if(!interaction)select()};
+  head.onclick=e=>{e.stopPropagation();if(dragCompletedFor===f.id){dragCompletedFor=null;return}if(!interaction)select()};
   head.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();select()}};
   const begin=(ev,kind)=>{if(ev.button!==0)return;ev.preventDefault();ev.stopPropagation();interaction={type:kind,id:f.id,px:ev.clientX,py:ev.clientY,start:{x:f.x,y:f.y,width:f.width,height:f.height},moved:false};ev.currentTarget.setPointerCapture(ev.pointerId)};
   head.addEventListener('pointerdown',e=>begin(e,'editorial-move'));grip.addEventListener('pointerdown',e=>begin(e,'editorial-resize'));
   const preview=(ev,kind)=>{const i=interaction;if(!i||i.type!==kind||i.id!==f.id)return;const dx=(ev.clientX-i.px)/pan.scale,dy=(ev.clientY-i.py)/pan.scale;if(Math.abs(dx)+Math.abs(dy)>5)i.moved=true;if(!i.moved)return;if(kind==='editorial-move'){el.style.left=Math.round(i.start.x+dx)+'px';el.style.top=Math.round(i.start.y+dy)+'px'}else{el.style.width=Math.max(330,Math.round(i.start.width+dx))+'px';el.style.height=Math.max(210,Math.round(i.start.height+dy))+'px';requestAnimationFrame(autosize)}};
   head.addEventListener('pointermove',e=>preview(e,'editorial-move'));grip.addEventListener('pointermove',e=>preview(e,'editorial-resize'));
-  const finish=(ev,kind)=>{const i=interaction;if(!i||i.type!==kind||i.id!==f.id)return;interaction=null;ev.stopPropagation();if(!i.moved){select();return}const dx=(ev.clientX-i.px)/pan.scale,dy=(ev.clientY-i.py)/pan.scale;commit(()=>{const ef=efby(f.id);if(kind==='editorial-move'){ef.x=Math.round(i.start.x+dx);ef.y=Math.round(i.start.y+dy)}else{ef.width=Math.max(330,Math.round(i.start.width+dx));ef.height=Math.max(210,Math.round(i.start.height+dy))}},'Редакторское поле перемещено · события не менялись');selected={type:'editorialField',id:f.id};render()};
+  const finish=(ev,kind)=>{const i=interaction;if(!i||i.type!==kind||i.id!==f.id)return;interaction=null;ev.stopPropagation();if(!i.moved){select();return}
+   dragCompletedFor=f.id;setTimeout(()=>{if(dragCompletedFor===f.id)dragCompletedFor=null},0);
+   const dx=(ev.clientX-i.px)/pan.scale,dy=(ev.clientY-i.py)/pan.scale;commit(()=>{const ef=efby(f.id);if(kind==='editorial-move'){ef.x=Math.round(i.start.x+dx);ef.y=Math.round(i.start.y+dy)}else{ef.width=Math.max(330,Math.round(i.start.width+dx));ef.height=Math.max(210,Math.round(i.start.height+dy))}},'Редакторское поле перемещено · события не менялись')};
   head.addEventListener('pointerup',e=>finish(e,'editorial-move'));grip.addEventListener('pointerup',e=>finish(e,'editorial-resize'));
   const cancel=(ev,kind)=>{const i=interaction;if(i?.type===kind&&i.id===f.id){interaction=null;render()}};
   head.addEventListener('pointercancel',e=>cancel(e,'editorial-move'));grip.addEventListener('pointercancel',e=>cancel(e,'editorial-resize'));
@@ -3047,7 +3054,7 @@ function renderFields(){const host=$('fields');host.innerHTML='';if(!guide)retur
  host.append(el);
  const head=el.querySelector('.field-head');const grip=el.querySelector('.field-grip');
  
- const begin=(ev,kind)=>{if(ev.button!==0)return;ev.stopPropagation();selected={type:'field',id:f.id};const payload={type:kind,id:f.id,px:ev.clientX,py:ev.clientY,start:{x:f.x,y:f.y,width:f.width,height:f.height},moved:false};if(kind==='field-move'){payload.carryNodes=!ev.altKey;payload.members=payload.carryNodes?membersAtFieldStart(f):[]}interaction=payload;ev.currentTarget.setPointerCapture(ev.pointerId)};
+ const begin=(ev,kind)=>{if(ev.button!==0)return;ev.stopPropagation();const payload={type:kind,id:f.id,px:ev.clientX,py:ev.clientY,start:{x:f.x,y:f.y,width:f.width,height:f.height},moved:false};if(kind==='field-move'){payload.carryNodes=!ev.altKey;payload.members=payload.carryNodes?membersAtFieldStart(f):[]}interaction=payload;ev.currentTarget.setPointerCapture(ev.pointerId)};
  head.addEventListener('pointerdown',e=>begin(e,'field-move'));grip.addEventListener('pointerdown',e=>begin(e,'field-resize'));
  const preview=(ev,kind)=>{const i=interaction;if(!i||i.type!==kind||i.id!==f.id)return;const dx=(ev.clientX-i.px)/pan.scale,dy=(ev.clientY-i.py)/pan.scale;if(Math.abs(dx)+Math.abs(dy)>4)i.moved=true;if(!i.moved)return;if(kind==='field-move'){el.style.left=Math.round(i.start.x+dx)+'px';el.style.top=Math.round(i.start.y+dy)+'px';if(i.carryNodes){for(const member of i.members){const nodeEl=document.querySelector(`[data-node="${member.id}"]`);if(nodeEl){nodeEl.style.left=Math.round(member.x+dx)+'px';nodeEl.style.top=Math.round(member.y+dy)+'px'}const node=nby(member.id);if(node){node.x=member.x+dx;node.y=member.y+dy}}renderEdges()}}else{el.style.width=Math.max(fieldMinimum.width,Math.round(i.start.width+dx))+'px';el.style.height=Math.max(fieldMinimum.height,Math.round(i.start.height+dy))+'px'}};
  head.addEventListener('pointermove',e=>preview(e,'field-move'));grip.addEventListener('pointermove',e=>preview(e,'field-resize'));
@@ -3115,7 +3122,7 @@ function renderNodes(){const host=$('nodes');host.innerHTML='';const keep=focusI
  }
  host.append(el);
  el.onclick=e=>{if(e.target.closest('button'))return;e.stopPropagation();if(dragCompletedFor===n.id){dragCompletedFor=null;return}if(completeGapLink('plot_node',n.id))return;if(linkFrom){finishLink(n.id);return}if(e.ctrlKey||e.metaKey){toggleNodeSelection(n.id);return}setNodeSelection([n.id],n.id)};el.ondblclick=e=>{if(e.target.closest('button'))return;e.stopPropagation();notifyModal('Переименовать','Изменение не затронет связи.', 'Название',v=>commit(()=>{nby(n.id).title=v},'Название изменено'),n.title)};
- el.querySelectorAll('[data-command]').forEach(b=>b.onclick=e=>{e.stopPropagation();const id=n.id;const c=b.dataset.command;if(c==='after')addAfter(id);if(c==='link'){linkFrom=id;selected={type:'node',id};render();note('Нажмите на другую карточку — создадим последовательность')}if(c==='edit'){selected={type:'node',id};renderInspector()}if(c==='inside'){state.view=id;selected=null;pan={x:110,y:95,scale:1};render();note('Внутренний уровень — отдельное полотно')}});
+ el.querySelectorAll('[data-command]').forEach(b=>b.onclick=e=>{e.stopPropagation();const id=n.id;const c=b.dataset.command;if(c==='after')addAfter(id);if(c==='link'){linkFrom=id;selected={type:'node',id};render();note('Нажмите на другую карточку — создадим последовательность')}if(c==='edit'){suppressInspectorForNode=null;selected={type:'node',id};renderInspector()}if(c==='inside'){state.view=id;selected=null;pan={x:110,y:95,scale:1};render();note('Внутренний уровень — отдельное полотно')}});
  const grip=el.querySelector('.node-resize-grip');
  if(grip){
   grip.addEventListener('pointerdown',ev=>{if(ev.button!==0)return;ev.preventDefault();ev.stopPropagation();interaction={type:'node-resize',id:n.id,px:ev.clientX,py:ev.clientY,w:widthOf(n),h:heightOf(n)||el.offsetHeight,moved:false};grip.setPointerCapture(ev.pointerId)});
@@ -3144,7 +3151,7 @@ function renderNodes(){const host=$('nodes');host.innerHTML='';const keep=focusI
   if(!i.moved)return;
   const dx=(ev.clientX-i.startX)/pan.scale,dy=(ev.clientY-i.startY)/pan.scale;
   restoreMove(i);ev.stopPropagation();dragCompletedFor=n.id;setTimeout(()=>{if(dragCompletedFor===n.id)dragCompletedFor=null},0);
-  setNodeSelection(i.members.map(m=>m.id),n.id);
+  setNodeSelection(i.members.map(m=>m.id),n.id,{openInspector:false});
   askPreserveFieldTags(previewNodeMove(i.members,dx,dy));
  });
  el.addEventListener('pointercancel',()=>{const i=interaction;if(i?.type==='node'&&i.id===n.id){interaction=null;restoreMove(i);render()}});
@@ -3174,7 +3181,9 @@ function renderSingleEventRewriteInspector(el,n,d){
   memoRender=null;renderEdges();
  };
 }
-function renderInspector(){const el=$('inspector');if(!selected){el.hidden=true;return}
+function renderInspector(){const el=$('inspector');if(!selected||
+  (selected.type==='node'&&suppressInspectorForNode===selected.id)){
+  el.hidden=true;return}
  if(selected.type==='node'&&groupIds().length>1){el.hidden=false;el.innerHTML=`<div class="inspect-head"><b>Выделено ${groupIds().length} событий</b><button id="close-inspect">×</button></div><p class="muted">Перетаскивайте любую выбранную карточку, чтобы переместить группу. Ctrl/⌘+клик — добавить или исключить. Shift+рамка — расширить выбор.</p><p class="muted">При выходе из смыслового поля предлагается сохранить его тег.</p><div class="inspect-actions"><button id="group-editorial">▨ Поле переработки</button>${editorialInView().length?'<button id="group-add-existing">Добавить в задание…</button>':''}<button id="group-clear">Снять выделение</button><button id="group-delete">Удалить выбранные…</button></div>`;$('close-inspect').onclick=$('group-clear').onclick=()=>setNodeSelection([]);$('group-delete').onclick=deleteSelectedGroup;$('group-editorial').onclick=createEditorialFieldFromSelection;if($('group-add-existing'))$('group-add-existing').onclick=addSelectedToEditorialField;return}
 if(selected.type==='gapNote'){const n=gnby(selected.id);if(!n){el.hidden=true;return}return renderGapInspector(el,n)}
  if(selected.type==='gapLink'){const l=state.gapLinks.find(x=>x.id===selected.id);if(!l){el.hidden=true;return}el.hidden=false;el.innerHTML=`<div class="inspect-head"><b>Связь заметки</b><button id="close-inspect">×</button></div><p class="muted">Редакторский контекст, не причинная связь истории.</p><button id="gap-link-delete">Удалить связь</button>`;$('close-inspect').onclick=()=>{selected=null;render()};$('gap-link-delete').onclick=()=>{commit(()=>{state.gapLinks=state.gapLinks.filter(x=>x.id!==l.id)},'Связь удалена');selected=null;render()};return}
@@ -3698,7 +3707,7 @@ function renderOverviewTitles(){
    dragCompletedFor=n.id;
    setTimeout(()=>{if(dragCompletedFor===n.id)dragCompletedFor=null},0);
    // The common P3 transfer path handles selected groups, semantic tags and Undo.
-   setNodeSelection(i.members.map(m=>m.id),n.id);
+   setNodeSelection(i.members.map(m=>m.id),n.id,{openInspector:false});
    askPreserveFieldTags(previewNodeMove(i.members,dx,dy));
   });
   item.addEventListener('pointercancel',()=>{
@@ -3736,7 +3745,7 @@ function centerAt(wx,wy,scale=null){
 }
 function jumpToNode(id){
  const n=nby(id);if(!n)return;
- state.view=n.parent;selected={type:'node',id};
+ state.view=n.parent;suppressInspectorForNode=null;selected={type:'node',id};
  render();const d=itemDims(n);centerAt(n.x+d.w/2,n.y+d.h/2,Math.max(.85,pan.scale));
  note('Найдено: '+n.title);
 }
@@ -4284,6 +4293,6 @@ if(location.protocol==='http:'||location.protocol==='https:')setTimeout(()=>conn
  note(message);
  $('saved').textContent='! '+message;
 }),150);
-window.__graphite={setCWWorkflowTestMode,getCWWorkflowTestMode:()=>cwWorkflowTestMode,getCWPendingDraftMoves:()=>[...cwDraftMoveEdits].map(([nodeId,p])=>({nodeId,...p})),getCWSelectedDraftIds:()=>[...cwSelectedDraftIds],setCWPreparedNoteAlternativesForTest,setCreativeWorkspacePreview,getCreativeWorkspacePreview:()=>structuredClone(creativeWorkspacePreview),showPlotContextMenu,newGapNote,setGapNoteText,getGapNotes:()=>structuredClone(state.gapNotes),getGapLinks:()=>structuredClone(state.gapLinks),getEventRewrites:()=>structuredClone(state.eventRewrites||[]),beginEventRewrite,cancelEventRewrite,deletePlotNode,beginGapLink,completeGapLink,createEditorialField:newEditorialField,createEditorialFieldFromSelection,deleteEditorialField,addEditorialMembers,removeEditorialMembers,updateEditorialInstruction,getEditorialFields:()=>structuredClone(state.editorialFields),getEditorialNotes:()=>structuredClone(state.editorialNotes),getSelection:()=>groupIds(),selectNodes:ids=>setNodeSelection(ids),moveSelectedBy,previewNodeMove:(ids,dx,dy)=>previewNodeMove(ids.map(id=>{const n=nby(id);return n?{id,x:n.x,y:n.y}:null}).filter(Boolean),dx,dy),getContextMenuState:()=>({open:!plotContextMenu.hidden,items:[...plotContextMenu.querySelectorAll("[role=menuitem]")].map(b=>b.textContent.trim())}),showProjectManager,createProject,openProject,exportProject,validateImported,blankGraph,getProjectIndex:()=>structuredClone(registry),getStarterOrigin:()=>({...STARTER_ORIGIN,localProjectId:STARTER_LOCAL_ID}),getRemote:()=>({...remote,token:remote.token?'***':null,timer:null}),createField,deleteField,setFieldGeometry:(id,patch)=>commit(()=>{Object.assign(fby(id),patch);normalizeField(fby(id))}),moveField,selectField:id=>{selected={type:'field',id};render()},getFieldMembership:id=>fieldMembership(nby(id)),getState:()=>structuredClone(state),getPan:()=>({...pan}),getIssues:directionIssues,arrange,fit,addNode,undo,selectNode:id=>{selected={type:'node',id};render()},setPosition:(id,x,y)=>commit(()=>{let n=nby(id);n.x=x;n.y=y}),setNodeAppearance:(id,patch)=>commit(()=>{const n=nby(id);if(!n)throw Error("Unknown node");if(patch.width!==undefined)n.width=Math.max(180,Math.min(780,patch.width));if(patch.height!==undefined)n.height=Math.max(95,Math.min(640,patch.height));if(patch.color!==undefined){if(patch.color===null)delete n.color;else if(COLORS.includes(patch.color))n.color=patch.color;else throw Error("Invalid color")}}),setInspectorPinned:v=>{inspectorPinned=!!v;renderInspector();positionInspector()},getSelected:()=>selected,getNavigation:()=>({focusMode,overviewOn,forceAllEdges,routeMode,lodOverview,semanticMode:semanticZoomLevel()}),getSemanticZoom:()=>semanticZoomLevel(),setZoomForTest:(scale)=>setZoom(scale),getEdgePlan:()=>{const p=connectionPlan();return {overview:p.overview,bridges:p.bridges.map(g=>({key:g.key,edgeIds:g.edges.map(e=>e.id)})),displayed:p.visibleEdges.map(e=>e.id),suppressed:[...p.localSuppressed.entries()]};},setAllEdges,setRouteMode,getPerf:()=>({...perfStats}),jumpToNode,jumpToField,toggleFocus:focusToggle,toggleOverview:()=>{overviewOn=!overviewOn;render()},loadFixture:fixture=>{state=structuredClone(fixture);selected=null;history=[];recomputeFieldTags();save();render()},reset:()=>{state=seed();recomputeFieldTags();history=[];selected=null;save();render();fit()}};
+window.__graphite={setCWWorkflowTestMode,getCWWorkflowTestMode:()=>cwWorkflowTestMode,getCWPendingDraftMoves:()=>[...cwDraftMoveEdits].map(([nodeId,p])=>({nodeId,...p})),getCWSelectedDraftIds:()=>[...cwSelectedDraftIds],setCWPreparedNoteAlternativesForTest,setCreativeWorkspacePreview,getCreativeWorkspacePreview:()=>structuredClone(creativeWorkspacePreview),showPlotContextMenu,newGapNote,setGapNoteText,getGapNotes:()=>structuredClone(state.gapNotes),getGapLinks:()=>structuredClone(state.gapLinks),getEventRewrites:()=>structuredClone(state.eventRewrites||[]),beginEventRewrite,cancelEventRewrite,deletePlotNode,beginGapLink,completeGapLink,createEditorialField:newEditorialField,createEditorialFieldFromSelection,deleteEditorialField,addEditorialMembers,removeEditorialMembers,updateEditorialInstruction,getEditorialFields:()=>structuredClone(state.editorialFields),getEditorialNotes:()=>structuredClone(state.editorialNotes),getSelection:()=>groupIds(),selectNodes:ids=>setNodeSelection(ids),moveSelectedBy,previewNodeMove:(ids,dx,dy)=>previewNodeMove(ids.map(id=>{const n=nby(id);return n?{id,x:n.x,y:n.y}:null}).filter(Boolean),dx,dy),getContextMenuState:()=>({open:!plotContextMenu.hidden,items:[...plotContextMenu.querySelectorAll("[role=menuitem]")].map(b=>b.textContent.trim())}),showProjectManager,createProject,openProject,exportProject,validateImported,blankGraph,getProjectIndex:()=>structuredClone(registry),getStarterOrigin:()=>({...STARTER_ORIGIN,localProjectId:STARTER_LOCAL_ID}),getRemote:()=>({...remote,token:remote.token?'***':null,timer:null}),createField,deleteField,setFieldGeometry:(id,patch)=>commit(()=>{Object.assign(fby(id),patch);normalizeField(fby(id))}),moveField,selectField:id=>{selected={type:'field',id};render()},getFieldMembership:id=>fieldMembership(nby(id)),getState:()=>structuredClone(state),getPan:()=>({...pan}),getIssues:directionIssues,arrange,fit,addNode,undo,selectNode:id=>{suppressInspectorForNode=null;selected={type:'node',id};render()},setPosition:(id,x,y)=>commit(()=>{let n=nby(id);n.x=x;n.y=y}),setNodeAppearance:(id,patch)=>commit(()=>{const n=nby(id);if(!n)throw Error("Unknown node");if(patch.width!==undefined)n.width=Math.max(180,Math.min(780,patch.width));if(patch.height!==undefined)n.height=Math.max(95,Math.min(640,patch.height));if(patch.color!==undefined){if(patch.color===null)delete n.color;else if(COLORS.includes(patch.color))n.color=patch.color;else throw Error("Invalid color")}}),setInspectorPinned:v=>{inspectorPinned=!!v;renderInspector();positionInspector()},getSelected:()=>selected,getNavigation:()=>({focusMode,overviewOn,forceAllEdges,routeMode,lodOverview,semanticMode:semanticZoomLevel()}),getSemanticZoom:()=>semanticZoomLevel(),setZoomForTest:(scale)=>setZoom(scale),getEdgePlan:()=>{const p=connectionPlan();return {overview:p.overview,bridges:p.bridges.map(g=>({key:g.key,edgeIds:g.edges.map(e=>e.id)})),displayed:p.visibleEdges.map(e=>e.id),suppressed:[...p.localSuppressed.entries()]};},setAllEdges,setRouteMode,getPerf:()=>({...perfStats}),jumpToNode,jumpToField,toggleFocus:focusToggle,toggleOverview:()=>{overviewOn=!overviewOn;render()},loadFixture:fixture=>{state=structuredClone(fixture);selected=null;history=[];recomputeFieldTags();save();render()},reset:()=>{state=seed();recomputeFieldTags();history=[];selected=null;save();render();fit()}};
 recomputeFieldTags();save();render();
 })();

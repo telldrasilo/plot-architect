@@ -46,6 +46,8 @@ jobs:
         run: python qa/browser/tests_cw/test_cw_draft_text_browser.py
       - name: Verify reviewed draft branch deletion, cancellation and empty-area cleanup
         run: python qa/browser/tests_cw/test_cw_discard_drafts_browser.py
+      - name: Verify click opens settings and drag never does on synthetic canvas
+        run: python qa/browser/tests_cw/test_cw_click_vs_drag_inspector_browser.py
       - name: Verify saved workspace frame group drag, resize and keyboard controls
         run: python qa/browser/tests_cw/test_cw_workspace_geometry_browser.py
       - name: Verify final accepted drafts clean empty workspace and old note
