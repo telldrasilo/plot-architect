@@ -1,3 +1,4 @@
+import {validateCanvasTexts} from './canvas_text_contract.mjs';
 export const FORMAT='plot-architect/project-1';
 export const MAX_GRAPH_BYTES=2_000_000;
 const isObj=v=>!!v&&typeof v==='object'&&!Array.isArray(v);
@@ -55,6 +56,7 @@ export function validateGraph(raw){
     if(!str(f.id,80)||!str(f.title,300)||!str(f.comment,10000)||![f.x,f.y,f.width,f.height].every(num)||f.width<100||f.height<80||!['auto','manual','mixed'].includes(f.assignmentMode))error('Некорректное поле');
     if(f.parent!==null&&!ids.has(f.parent))error('Неверный родитель поля');
   }
+  validateCanvasTexts(g);
   for(const l of g.lanes)if(!str(l.id,80)||!str(l.title,300))error('Некорректная сюжетная линия');
   const parents=new Map(g.nodes.map(n=>[n.id,n.parent]));for(const n of g.nodes){let p=n.parent,seen=new Set([n.id]);while(p!==null){if(seen.has(p))error('Цикл вложенности');seen.add(p);p=parents.get(p)??null}}
   return g;
