@@ -9,9 +9,10 @@ export function validateCanvasTexts(graph){
   if(!Array.isArray(items)||items.length>CANVAS_TEXT_LIMIT)throw Error('CANVAS_TEXT_INVALID: expected a bounded array');
   const ids=new Set(),nodeIds=new Set((graph.nodes??[]).map(n=>n.id));
   for(const item of items){
-    if(!object(item)||!fields(item,['id','x','y','width','parent','blocks'])||
+    if(!object(item)||!fields(item,['id','x','y','width','height','parent','blocks'])||
        !validId(item.id)||ids.has(item.id)||![item.x,item.y,item.width].every(validNum)||
-       item.width<200||item.width>1200||item.parent!==null&&
+       item.width<200||item.width>1200||
+       (item.height!==undefined&&(!validNum(item.height)||item.height<76||item.height>100000))||item.parent!==null&&
        (typeof item.parent!=='string'||!nodeIds.has(item.parent))||
        !Array.isArray(item.blocks)||item.blocks.length<1||item.blocks.length>300)
       throw Error('CANVAS_TEXT_INVALID: item identity, geometry, scope or blocks');

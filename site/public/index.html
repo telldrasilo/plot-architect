@@ -274,18 +274,38 @@ body.pa-multi-modifier .inspector{pointer-events:none;opacity:.35}/* allows Ctrl
 /* UX-126: quiet independent canvas annotation; never a plot node */
 .canvas-text-layer{position:absolute;inset:0;pointer-events:none;z-index:9}
 .canvas-text{position:absolute;pointer-events:auto;padding:13px 14px;border:1px solid #ffffff24;border-radius:12px;background:#302f3238;color:#e9e7e5;min-height:76px;box-shadow:0 6px 24px #00000014}
-.canvas-text:hover,.canvas-text:focus-within{border-color:#e8ddc16e;background:#33323755}
+.canvas-text:hover,.canvas-text:focus-within{background:#33323755}
 .canvas-text-editor{min-height:44px;max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;outline:none;font-size:13px;line-height:1.6;cursor:text}
 .canvas-text-editor p,.canvas-text-editor h3,.canvas-text-editor blockquote{margin:0 0 8px}
 .canvas-text-editor p:last-child,.canvas-text-editor h3:last-child,.canvas-text-editor blockquote:last-child{margin-bottom:0}
 .canvas-text-editor h3{font-size:15px;line-height:1.42;font-weight:700}
 .canvas-text-editor blockquote{padding:3px 0 3px 12px;border-left:2px solid #bdab86;color:#d4ccbd}
 .canvas-text-editor:focus{caret-color:#f3dfb4}
-.canvas-text-grab,.canvas-text-resize{position:absolute;padding:0;border:0;background:transparent;opacity:0;touch-action:none}
-.canvas-text:hover .canvas-text-grab,.canvas-text:focus-within .canvas-text-grab,.canvas-text:hover .canvas-text-resize,.canvas-text:focus-within .canvas-text-resize{opacity:.8}
-.canvas-text-grab{left:8px;top:2px;width:42px;height:8px;cursor:grab;border-radius:8px;background:#aaa39c;pointer-events:auto}
-.canvas-text-resize{right:2px;bottom:2px;width:16px;height:16px;cursor:ew-resize}
-.canvas-text-resize::after{content:'⌟';display:block;color:#c1bab0;font-size:15px;line-height:16px}
+/* Invisible hit zones: hover highlights only the edge under the pointer. */
+.canvas-text-edge{position:absolute;z-index:2;display:block;padding:0;border:0;border-radius:0;
+ background:transparent;touch-action:none;user-select:none}
+.canvas-text-edge:hover,.canvas-text-edge:focus-visible{background:transparent;border:0;outline:none}
+.canvas-text-edge::after{content:'';position:absolute;display:block;background:#d6c69e;
+ opacity:0;transition:opacity 100ms ease;pointer-events:none}
+.canvas-text-edge:hover::after,.canvas-text-edge:focus-visible::after,
+.canvas-text-edge.dragging::after{opacity:.5}
+.canvas-text-edge-move{top:0;left:12px;right:12px;height:10px;cursor:grab}
+.canvas-text-edge-move.dragging{cursor:grabbing}
+.canvas-text-edge-move::after{top:0;left:0;right:0;height:2px;border-radius:3px}
+.canvas-text-edge-left,.canvas-text-edge-right{top:12px;bottom:12px;width:10px;cursor:ew-resize}
+.canvas-text-edge-left{left:-3px}.canvas-text-edge-right{right:-3px}
+.canvas-text-edge-left::after{left:2px;top:0;bottom:0;width:2px;border-radius:3px}
+.canvas-text-edge-right::after{right:2px;top:0;bottom:0;width:2px;border-radius:3px}
+.canvas-text-edge-bottom{bottom:-3px;left:12px;right:12px;height:10px;cursor:ns-resize}
+.canvas-text-edge-bottom::after{bottom:2px;left:0;right:0;height:2px;border-radius:3px}
+.canvas-text-edge-bottom-left,.canvas-text-edge-bottom-right{bottom:-3px;width:14px;height:14px;z-index:3}
+.canvas-text-edge-bottom-left{left:-3px;cursor:nesw-resize}
+.canvas-text-edge-bottom-right{right:-3px;cursor:nwse-resize}
+.canvas-text-edge-bottom-left::after,.canvas-text-edge-bottom-right::after{
+ bottom:2px;width:10px;height:10px;background:transparent;border-bottom:2px solid #d6c69e}
+.canvas-text-edge-bottom-left::after{left:2px;border-left:2px solid #d6c69e;border-radius:0 0 0 3px}
+.canvas-text-edge-bottom-right::after{right:2px;border-right:2px solid #d6c69e;border-radius:0 0 3px 0}
+@media (prefers-reduced-motion:reduce){.canvas-text-edge::after{transition:none}}
 .canvas-text-format{position:fixed;z-index:1000;display:flex;gap:2px;padding:4px;border:1px solid #5c5855;border-radius:10px;background:#27272bef;box-shadow:0 10px 28px #0008;white-space:nowrap}
 .canvas-text-format[hidden]{display:none}
 .canvas-text-format button{border:0;border-radius:6px;background:transparent;padding:6px 9px;font-size:11px}
@@ -3972,6 +3992,40 @@ function cwRenderReplacementOriginals(host){
 
 
 /* UX-126: independent canvas text. Editing happens IN PLACE; never a plot node. */
+/** UX-126: deterministic canvas-text geometry (all dimensions in world units).
+ * The top edge moves the box; left/right/bottom edges and lower corners resize.
+ * The minimum height is supplied by actual text layout so written content stays visible.
+ */
+const CANVAS_TEXT_MIN_WIDTH=200;
+const CANVAS_TEXT_MAX_WIDTH=1200;
+const CANVAS_TEXT_MIN_HEIGHT=76;
+const CANVAS_TEXT_MAX_HEIGHT=100000;
+const CANVAS_TEXT_EDGE_MODES=Object.freeze([
+  'move','left','right','bottom','bottom-left','bottom-right'
+]);
+const canvasTextClamp=(x,min,max)=>Math.max(min,Math.min(max,x));
+const canvasTextFinite=x=>typeof x==='number'&&Number.isFinite(x);
+function canvasTextEdgeGeometry(start,mode,deltaX,deltaY,contentMinHeight=76){
+ if(!start||!CANVAS_TEXT_EDGE_MODES.includes(mode)||
+    ![start.x,start.y,start.width,start.height,deltaX,deltaY,contentMinHeight].every(canvasTextFinite)||
+    start.width<CANVAS_TEXT_MIN_WIDTH||start.width>CANVAS_TEXT_MAX_WIDTH||
+    start.height<CANVAS_TEXT_MIN_HEIGHT||contentMinHeight<CANVAS_TEXT_MIN_HEIGHT)
+  throw Error('CANVAS_TEXT_GEOMETRY_INVALID');
+ if(mode==='move')return {
+   x:Math.round(start.x+deltaX),y:Math.round(start.y+deltaY),
+   width:start.width,height:start.height
+ };
+ const left=mode==='left'||mode==='bottom-left';
+ const right=mode==='right'||mode==='bottom-right';
+ const bottom=mode==='bottom'||mode==='bottom-left'||mode==='bottom-right';
+ const width=canvasTextClamp(Math.round(start.width+(left?-deltaX:right?deltaX:0)),
+   CANVAS_TEXT_MIN_WIDTH,CANVAS_TEXT_MAX_WIDTH);
+ const x=left?start.x+start.width-width:start.x;
+ const height=canvasTextClamp(Math.round(Math.max(start.height+(bottom?deltaY:0),contentMinHeight)),
+   CANVAS_TEXT_MIN_HEIGHT,CANVAS_TEXT_MAX_HEIGHT);
+ return {x:Math.round(x),y:start.y,width,height};
+}
+
 const ctLayer=$('canvas-text-layer');
 const ctToolbar=document.createElement('div');
 ctToolbar.className='canvas-text-format';ctToolbar.hidden=true;
@@ -4046,6 +4100,10 @@ function ctShowToolbar(){
  const y=rect.top-h-10>=margin?rect.top-h-10:rect.bottom+10;
  ctToolbar.style.left=Math.round(x)+'px';ctToolbar.style.top=Math.round(y)+'px';
 }
+function ctTextMinimumHeight(outer){
+ const editor=outer?.querySelector('[data-canvas-text-editor]');
+ return Math.max(CANVAS_TEXT_MIN_HEIGHT,Math.ceil((editor?.scrollHeight||44)+28));
+}
 function ctSaveEditor(editor){
  const item=ctItem(editor?.dataset.canvasTextEditor);
  if(!item)return;
@@ -4055,7 +4113,19 @@ function ctSaveEditor(editor){
   $('saved').textContent='! Текст не сохранён: превышен размер';return;
  }
  if(JSON.stringify(item.blocks)===JSON.stringify(blocks))return;
- item.blocks=blocks;state.revision++;save();
+ const outer=editor.closest('[data-canvas-text]');
+ // Never collapse a text block merely because lines were removed.
+ const minHeight=ctTextMinimumHeight(outer);
+ const nextHeight=Math.max(item.height??outer.offsetHeight,minHeight);
+ if(nextHeight>CANVAS_TEXT_MAX_HEIGHT){
+  $('saved').textContent='! Текст не сохранён: превышена высота';return;
+ }
+ item.blocks=blocks;
+ if(item.height===undefined||nextHeight>item.height){
+  item.height=Math.ceil(nextHeight);
+  outer.style.height=item.height+'px';
+ }
+ state.revision++;save();
 }
 function ctFocusEditor(id){
  const editor=ctLayer.querySelector('[data-canvas-text-editor="'+id+'"]');
@@ -4081,40 +4151,64 @@ function ctDelete(id){
  commit(()=>{state.canvasTexts=state.canvasTexts.filter(x=>x.id!==id)},'Текстовый блок удалён · Ctrl+Z отменяет');
 }
 function ctDragHandle(handle,el,id,mode){
+ const startGeometry=()=>{
+  const item=ctItem(id);
+  return item?{x:item.x,y:item.y,width:item.width,
+    height:Math.max(item.height??el.offsetHeight,ctTextMinimumHeight(el))}:null;
+ };
+ const preview=(start,dx,dy)=>{
+  // Measure after prospective width, because wrapping can increase text height.
+  const preliminary=canvasTextEdgeGeometry(start,mode,dx,dy);
+  el.style.width=preliminary.width+'px';
+  const candidate=canvasTextEdgeGeometry(start,mode,dx,dy,ctTextMinimumHeight(el));
+  Object.assign(el.style,{left:candidate.x+'px',top:candidate.y+'px',
+    width:candidate.width+'px',height:candidate.height+'px'});
+  return candidate;
+ };
  handle.addEventListener('pointerdown',event=>{
   if(event.button!==0)return;
   event.preventDefault();event.stopPropagation();
   ctHideToolbar();
-  const item=ctItem(id);if(!item)return;
-  const x0=event.clientX,y0=event.clientY,start={x:item.x,y:item.y,width:item.width};
-  let changed=false,last={...start};
+  const start=startGeometry();if(!start)return;
+  const pointerId=event.pointerId,x0=event.clientX,y0=event.clientY;
+  let last=start;
+  const cleanup=()=>{
+   handle.removeEventListener('pointermove',move);
+   handle.removeEventListener('pointerup',done);
+   handle.removeEventListener('pointercancel',cancel);
+   try{if(handle.hasPointerCapture(pointerId))handle.releasePointerCapture(pointerId)}catch{}
+   handle.classList.remove('dragging');
+  };
   const move=e=>{
-   const dx=(e.clientX-x0)/pan.scale,dy=(e.clientY-y0)/pan.scale;
-   const candidate=mode==='move'
-    ?{...start,x:Math.round(start.x+dx),y:Math.round(start.y+dy)}
-    :{...start,width:Math.round(Math.max(200,Math.min(1200,start.width+dx)))};
-   if(Math.abs(dx)+Math.abs(dy)>3)changed=true;
-   last=candidate;
-   if(mode==='move'){el.style.left=candidate.x+'px';el.style.top=candidate.y+'px'}
-   else el.style.width=candidate.width+'px';
+   if(e.pointerId!==pointerId)return;
+   last=preview(start,(e.clientX-x0)/pan.scale,(e.clientY-y0)/pan.scale);
   };
   const done=e=>{
-   handle.releasePointerCapture?.(event.pointerId);
-   handle.removeEventListener('pointermove',move);
-   handle.removeEventListener('pointerup',done);
-   handle.removeEventListener('pointercancel',cancel);
-   if(changed&&ctItem(id))commit(()=>Object.assign(ctItem(id),last));
+   if(e.pointerId!==pointerId)return;
+   cleanup();
+   if(ctItem(id)&&Object.keys(start).some(key=>start[key]!==last[key]))
+    commit(()=>Object.assign(ctItem(id),last));
   };
-  const cancel=()=>{
-   handle.removeEventListener('pointermove',move);
-   handle.removeEventListener('pointerup',done);
-   handle.removeEventListener('pointercancel',cancel);
-   renderCanvasTexts();
+  const cancel=e=>{
+   if(e&&e.pointerId!==pointerId)return;
+   cleanup();renderCanvasTexts();
   };
-  handle.setPointerCapture(event.pointerId);
+  handle.classList.add('dragging');
+  handle.setPointerCapture(pointerId);
   handle.addEventListener('pointermove',move);
   handle.addEventListener('pointerup',done);
   handle.addEventListener('pointercancel',cancel);
+ });
+ // Invisible border controls are reachable and usable from the keyboard too.
+ handle.addEventListener('keydown',event=>{
+  const vector={ArrowLeft:[-10,0],ArrowRight:[10,0],
+    ArrowUp:[0,-10],ArrowDown:[0,10]}[event.key];
+  if(!vector||event.altKey||event.ctrlKey||event.metaKey)return;
+  const start=startGeometry();if(!start)return;
+  event.preventDefault();event.stopPropagation();
+  const candidate=preview(start,...vector);
+  if(Object.keys(start).some(key=>start[key]!==candidate[key]))
+   commit(()=>Object.assign(ctItem(id),candidate));
  });
 }
 function renderCanvasTexts(){
@@ -4126,19 +4220,29 @@ function renderCanvasTexts(){
   const outer=document.createElement('section');
   outer.className='canvas-text';outer.dataset.canvasText=item.id;
   outer.style.left=item.x+'px';outer.style.top=item.y+'px';outer.style.width=item.width+'px';
-  const grab=document.createElement('button');
-  grab.type='button';grab.className='canvas-text-grab';grab.title='Переместить текст';
-  grab.setAttribute('aria-label','Переместить текстовый блок');
+  if(item.height!==undefined)outer.style.height=item.height+'px';
   const editor=document.createElement('div');
   editor.className='canvas-text-editor';editor.dataset.canvasTextEditor=item.id;
   editor.contentEditable='true';editor.spellcheck=true;
   editor.setAttribute('role','textbox');editor.setAttribute('aria-multiline','true');
   editor.setAttribute('aria-label','Текст на холсте');
   editor.innerHTML=ctHtml(item.blocks);
-  const grip=document.createElement('button');
-  grip.type='button';grip.className='canvas-text-resize';
-  grip.title='Изменить ширину';grip.setAttribute('aria-label','Изменить ширину текстового блока');
-  outer.append(grab,editor,grip);ctLayer.append(outer);
+  outer.append(editor);
+  for(const [mode,label] of [
+   ['move','Переместить текст за верхнюю границу'],
+   ['left','Изменить ширину за левую границу'],
+   ['right','Изменить ширину за правую границу'],
+   ['bottom','Изменить высоту за нижнюю границу'],
+   ['bottom-left','Изменить ширину и высоту за нижний левый угол'],
+   ['bottom-right','Изменить ширину и высоту за нижний правый угол']
+  ]){
+   const edge=document.createElement('button');
+   edge.type='button';edge.className='canvas-text-edge canvas-text-edge-'+mode;
+   edge.dataset.ctEdge=mode;edge.setAttribute('aria-label',label);edge.title=label;
+   outer.append(edge);ctDragHandle(edge,outer,item.id,mode);
+  }
+  ctLayer.append(outer);
+  outer.style.minHeight=ctTextMinimumHeight(outer)+'px';
   outer.addEventListener('pointerdown',e=>e.stopPropagation());
   outer.addEventListener('contextmenu',e=>{
    e.preventDefault();e.stopPropagation();showPlotContextMenu(e.clientX,e.clientY,outer);
@@ -4160,8 +4264,6 @@ function renderCanvasTexts(){
   });
   editor.addEventListener('pointerup',()=>requestAnimationFrame(ctShowToolbar));
   editor.addEventListener('keyup',()=>requestAnimationFrame(ctShowToolbar));
-  ctDragHandle(grab,outer,item.id,'move');
-  ctDragHandle(grip,outer,item.id,'resize');
  }
 }
 ctToolbar.addEventListener('pointerdown',e=>e.preventDefault());
@@ -5970,7 +6072,7 @@ function readLocalRegistry(){try{const v=JSON.parse(localStorage.getItem(REGISTR
 function blankGraph(){return {version:1,revision:0,nextNode:1,nextEdge:1,nextField:1,nextLine:2,view:null,nodes:[],edges:[],fields:[],canvasTexts:[],lanes:[{id:'l1',title:'Основная линия',color:COLORS[0],y:200}]}}
 function validateImported(g){if(!g||!Array.isArray(g.nodes)||!Array.isArray(g.edges)||!Array.isArray(g.fields)||!Array.isArray(g.lanes))throw Error('В JSON должны быть nodes, edges, fields и lanes');
  const out=structuredClone(g),ids=new Set(),fids=new Set(out.fields.map(f=>f.id)),lids=new Set(out.lanes.map(l=>l.id));if(out.nodes.length>5000||out.edges.length>15000)throw Error('Слишком много элементов');
- if(out.canvasTexts!==undefined){if(!Array.isArray(out.canvasTexts)||out.canvasTexts.length>160)throw Error('Некорректные текстовые блоки');for(const t of out.canvasTexts){if(!t||typeof t.id!=='string'||!Number.isFinite(t.x)||!Number.isFinite(t.y)||!Number.isFinite(t.width)||t.width<200||t.width>1200||!Array.isArray(t.blocks))throw Error('Некорректный текстовый блок')}}else out.canvasTexts=[];
+ if(out.canvasTexts!==undefined){if(!Array.isArray(out.canvasTexts)||out.canvasTexts.length>160)throw Error('Некорректные текстовые блоки');for(const t of out.canvasTexts){if(!t||typeof t.id!=='string'||!Number.isFinite(t.x)||!Number.isFinite(t.y)||!Number.isFinite(t.width)||t.width<200||t.width>1200||(t.height!==undefined&&(!Number.isFinite(t.height)||t.height<76||t.height>100000))||!Array.isArray(t.blocks))throw Error('Некорректный текстовый блок')}}else out.canvasTexts=[];
  for(const n of out.nodes){if(!n.id||ids.has(n.id)||!Number.isFinite(n.x)||!Number.isFinite(n.y))throw Error('Ошибка ID/координат ноды');ids.add(n.id);n.lineIds=n.lineIds||[];n.manualFieldIds=n.manualFieldIds||[];n.manualTags=n.manualTags||[];n.parent=n.parent??null;n.size=n.size||'normal';n.description=n.description||'';if(n.width!==undefined&&(!Number.isFinite(n.width)||n.width<180||n.width>780))throw Error('Некорректная ширина карточки');if(n.height!==undefined&&(!Number.isFinite(n.height)||n.height<95||n.height>640))throw Error('Некорректная высота карточки');if(n.color!==undefined&&!COLORS.includes(n.color))throw Error('Некорректный цвет карточки');if(n.lineIds.some(id=>!lids.has(id))||n.manualFieldIds.some(id=>!fids.has(id)))throw Error('Неизвестное поле или линия')}
  const eids=new Set();for(const e of out.edges){if(!ids.has(e.from)||!ids.has(e.to)||eids.has(e.id))throw Error('Невалидная связь');eids.add(e.id)}
  for(const f of out.fields){if(!f.id||!Number.isFinite(f.x)||!Number.isFinite(f.y)||!Number.isFinite(f.width)||!Number.isFinite(f.height))throw Error('Неверные границы поля');f.comment=f.comment||'';f.parent=f.parent??null}

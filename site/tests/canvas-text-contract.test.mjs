@@ -28,3 +28,15 @@ test('rejects duplicate ids, overlong text, unknown scope and invalid geometry',
   const g=clone(basic);mutate(g);assert.throws(()=>validateCanvasTexts(g),/CANVAS_TEXT_INVALID/);
  }
 });
+test('optional height survives validation; older annotations remain heightless',()=>{
+ const legacy=clone(basic);
+ assert.equal(validateCanvasTexts(legacy)[0].height,undefined);
+ const tall=clone(basic);tall.canvasTexts[0].height=320;
+ assert.equal(validateCanvasTexts(tall)[0].height,320);
+});
+test('rejects clipped, unbounded or nonfinite stored height',()=>{
+ for(const height of [0,60,75,-10,100001,Infinity,NaN,'240']){
+  const graph=clone(basic);graph.canvasTexts[0].height=height;
+  assert.throws(()=>validateCanvasTexts(graph),/CANVAS_TEXT_INVALID/);
+ }
+});

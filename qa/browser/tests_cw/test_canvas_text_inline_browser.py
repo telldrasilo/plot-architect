@@ -112,25 +112,51 @@ def main():
   # Selection collapsed -> menu gone.
   editor.click()
   page.wait_for_function("()=>document.querySelector('.canvas-text-format').hidden")
-  # Resize changes only this text block, never the field or story nodes.
+  # No permanent gray grab strip or single corner grip survives UX-126.
+  assert page.locator(".canvas-text-grab,.canvas-text-resize").count()==0
+  assert page.locator(".canvas-text-edge").count()==6
   page.locator("#close-inspect").click()
-  handle=page.locator(".canvas-text-resize").first
-  pos=handle.bounding_box()
-  page.mouse.move(pos["x"]+pos["width"]/2,pos["y"]+pos["height"]/2)
-  page.mouse.down()
-  page.mouse.move(pos["x"]+pos["width"]/2+90,pos["y"]+pos["height"]/2,steps=6)
-  page.mouse.up()
-  page.wait_for_function("()=>__graphite.getState().canvasTexts[0].width>420")
-  # Move the annotation across the semantic field; it never inherits field tags.
-  grab=page.locator(".canvas-text-grab").first
-  before=page.evaluate("()=>structuredClone(__graphite.getState().canvasTexts[0])")
-  box=grab.bounding_box()
-  page.mouse.move(box["x"]+box["width"]/2,box["y"]+box["height"]/2)
-  page.mouse.down()
-  page.mouse.move(box["x"]+box["width"]/2+480,box["y"]+box["height"]/2+380,steps=8)
-  page.mouse.up()
-  moved=page.evaluate("()=>structuredClone(__graphite.getState().canvasTexts[0])")
+  top=page.locator(".canvas-text-edge-move")
+  top.hover()
+  assert top.evaluate("(e)=>getComputedStyle(e).cursor")=="grab"
+  page.wait_for_function("()=>parseFloat(getComputedStyle(document.querySelector('.canvas-text-edge-move'),'::after').opacity)>0")
+  assert page.locator(".canvas-text-edge-left").evaluate("(e)=>getComputedStyle(e).cursor")=="ew-resize"
+  assert page.locator(".canvas-text-edge-bottom").evaluate("(e)=>getComputedStyle(e).cursor")=="ns-resize"
+  assert page.locator(".canvas-text-edge-bottom-right").evaluate("(e)=>getComputedStyle(e).cursor")=="nwse-resize"
+  assert page.locator(".canvas-text-editor").evaluate("(e)=>getComputedStyle(e).cursor")=="text"
+  def box():return page.evaluate("()=>structuredClone(__graphite.getState().canvasTexts[0])")
+  def drag(name,dx,dy):
+   edge=page.locator(".canvas-text-edge-"+name)
+   rect=edge.bounding_box()
+   assert rect is not None,name
+   cx=rect["x"]+rect["width"]/2
+   cy=rect["y"]+rect["height"]/2
+   page.mouse.move(cx,cy)
+   page.mouse.down()
+   page.mouse.move(cx+dx,cy+dy,steps=8)
+   page.mouse.up()
+   return box()
+  # Every side and both bottom corners provide visible resize feedback.
+  initial=box()
+  right=drag("right",90,0)
+  assert right["width"]>initial["width"] and right["x"]==initial["x"]
+  left=drag("left",55,0)
+  assert left["x"]>right["x"] and left["width"]<right["width"]
+  assert left["x"]+left["width"]==right["x"]+right["width"]
+  down=drag("bottom",0,75)
+  assert down["height"]>left.get("height",0)
+  shorter=drag("bottom",0,-30)
+  assert shorter["height"]<down["height"]
+  corner_right=drag("bottom-right",50,40)
+  assert corner_right["width"]>shorter["width"] and corner_right["height"]>shorter["height"]
+  corner_left=drag("bottom-left",-40,30)
+  assert corner_left["width"]>corner_right["width"] and corner_left["x"]<corner_right["x"]
+  assert corner_left["height"]>corner_right["height"]
+  # The top edge moves, without changing dimensions or inheriting field tags.
+  before=box()
+  moved=drag("move",80,40)
   assert (before["x"],before["y"])!=(moved["x"],moved["y"])
+  assert (before["width"],before["height"])==(moved["width"],moved["height"])
   assert moved["parent"] is None
   assert "fieldId" not in moved and "workspaceId" not in moved
   page.wait_for_timeout(1600)
@@ -141,6 +167,23 @@ def main():
   page.locator("#add-canvas-text").click()
   second=page.locator("[data-canvas-text-editor]").last
   second.type("Свободное пояснение внутри поля")
+  for i in range(6):
+   second.press("Enter")
+   second.type("Пункт "+str(i+1)+" — инструкция")
+  page.wait_for_function("()=>__graphite.getState().canvasTexts.length===2&&__graphite.getState().canvasTexts[1].height>100")
+  # Extra lines expand the block automatically; an upward drag must not clip them.
+  min_height=page.locator("[data-canvas-text]").last.evaluate(
+   "(e)=>Math.ceil(e.querySelector('[data-canvas-text-editor]').scrollHeight+28)")
+  bottom=page.locator("[data-canvas-text]").last.locator(".canvas-text-edge-bottom")
+  rect=bottom.bounding_box()
+  page.mouse.move(rect["x"]+rect["width"]/2,rect["y"]+rect["height"]/2)
+  page.mouse.down()
+  page.mouse.move(rect["x"]+rect["width"]/2,rect["y"]+rect["height"]/2-250,steps=10)
+  page.mouse.up()
+  content_box=page.evaluate("()=>structuredClone(__graphite.getState().canvasTexts[1])")
+  assert content_box["height"]>=min_height
+  assert page.locator("[data-canvas-text]").last.evaluate(
+   "(e)=>e.getBoundingClientRect().height >= e.querySelector('[data-canvas-text-editor]').getBoundingClientRect().height")
   second.press("Tab")
   page.wait_for_timeout(1400)
   ready()
