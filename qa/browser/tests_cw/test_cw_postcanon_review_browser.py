@@ -170,6 +170,7 @@ def main():
     ready()
     inspector()
     page.locator("#cw-review-replacement").click()
+    page.locator("#cw-postcanon-choices").wait_for(state="visible")
     assert page.locator("#cw-postcanon-choices select").count()==5
     page.keyboard.press("Escape")
     assert page.locator("#cw-postcanon-choices").count()==0
