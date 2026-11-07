@@ -155,7 +155,12 @@ def main():
         )
         note = page.locator('[data-gap-note="' + note_id + '"]')
         assert note.count() == 1
-        assert "не сюжетное событие" in note.inner_text()
+        assert "Редакторское задание" in note.inner_text()
+        assert "не сюжетное событие" not in note.inner_text()
+        assert note.locator(".gap-note-head").inner_text().strip()=="▤ Заметка"
+        assert note.locator(".gap-note-title").count()==0
+        assert note.locator(".gap-note-body").inner_text()==task
+        assert task not in note.locator(".gap-note-head").inner_text()
         assert page.evaluate("() => __graphite.getGapLinks().length") == 1
         note.click()
         assert_note_inspector_adjacent(page, note_id)
@@ -165,18 +170,39 @@ def main():
         # Legacy stored names remain exactly "Заметка" until an explicit rename.
         second = page.evaluate("() => __graphite.newGapNote({x:780,y:390})")
         page.wait_for_function("() => !__graphite.getRemote().busy && !__graphite.getRemote().dirty")
-        task2 = "Проверить мотивы свидетеля перед решением"
+        task2 = ("Проверить мотивы свидетеля перед решением. " +
+                 "Оценить протоколы и достоверность утверждений. "*9)
         page.evaluate("([id,value])=>__graphite.setGapNoteText(id,value)", [second, task2])
         page.wait_for_function(
             "id => !__graphite.getRemote().busy && !__graphite.getRemote().dirty"
             " && __graphite.getGapNotes().find(n=>n.id===id)?.text.startsWith('Проверить')",
             arg=second)
-        first_head = page.locator(f'[data-gap-note="{note_id}"] .gap-note-head').inner_text()
-        second_head = page.locator(f'[data-gap-note="{second}"] .gap-note-head').inner_text()
-        assert first_head != second_head, (first_head,second_head)
-        assert "Предложи четыре" in first_head and "Проверить мотивы" in second_head
-        assert note_id not in first_head and second not in second_head
+        first = page.locator(f'[data-gap-note="{note_id}"]')
+        other = page.locator(f'[data-gap-note="{second}"]')
+        first_head = first.locator(".gap-note-head").inner_text()
+        second_head = other.locator(".gap-note-head").inner_text()
+        assert first_head == second_head == "▤ Заметка"
+        assert first.locator(".gap-note-title").count()==0
+        assert other.locator(".gap-note-title").count()==0
+        assert first.locator(".gap-note-body").inner_text()==task
+        assert other.locator(".gap-note-body").inner_text()==task2
+        assert "Предложи четыре" not in first_head
+        assert "Проверить мотивы" not in second_head
+        assert note_id not in first.inner_text() and second not in other.inner_text()
         assert [n["title"] for n in db["graph"]["gapNotes"]] == ["Заметка", "Заметка"]
+        # Long task stays readable in inspector, but the card shows at most
+        # four lines. No repeated 52-character heading is permitted.
+        geometry=other.locator(".gap-note-body").evaluate("""el=>{
+            const css=getComputedStyle(el);
+            return {clamp:css.webkitLineClamp,visible:el.clientHeight,
+                    natural:el.scrollHeight,line:parseFloat(css.lineHeight),
+                    padding:parseFloat(css.paddingTop)+parseFloat(css.paddingBottom)};
+        }""")
+        assert geometry["clamp"]=="4",geometry
+        assert geometry["visible"]<=geometry["line"]*4+geometry["padding"]+2,geometry
+        assert geometry["natural"]>geometry["visible"],geometry
+        other.click()
+        assert page.locator("#gap-text").input_value()==task2
         # A user-authored title overrides the excerpt, and persists after reload.
         page.locator(f'[data-gap-note="{second}"]').click()
         page.locator("#gap-title").fill("Проверка свидетельства")
@@ -185,8 +211,9 @@ def main():
             "id => !__graphite.getRemote().busy && !__graphite.getRemote().dirty"
             " && __graphite.getGapNotes().find(n=>n.id===id)?.title==='Проверка свидетельства'",
             arg=second)
-        assert "Проверка свидетельства" in page.locator(
-            f'[data-gap-note="{second}"] .gap-note-head').inner_text()
+        assert page.locator(f'[data-gap-note="{second}"] .gap-note-head').inner_text()=="▤ Заметка"
+        assert page.locator(f'[data-gap-note="{second}"] .gap-note-title').inner_text()=="Проверка свидетельства"
+        assert page.locator(f'[data-gap-note="{second}"] .gap-note-body').inner_text()==task2
         assert db["graph"]["gapNotes"][0]["title"] == "Заметка"
         assert len(db["graph"]["nodes"]) == 2
         assert db["graph"]["edges"] == initial_graph()["edges"]
@@ -195,12 +222,24 @@ def main():
             "id => __graphite.getRemote().connected &&"
             " __graphite.getGapNotes().find(n=>n.id===id)?.title==='Проверка свидетельства'",
             arg=second)
-        assert "Предложи четыре" in page.locator(
-            f'[data-gap-note="{note_id}"] .gap-note-head').inner_text()
-        assert "Проверка свидетельства" in page.locator(
-            f'[data-gap-note="{second}"] .gap-note-head').inner_text()
+        assert page.locator(f'[data-gap-note="{note_id}"] .gap-note-head').inner_text()=="▤ Заметка"
+        assert page.locator(f'[data-gap-note="{note_id}"] .gap-note-body').inner_text()==task
+        assert page.locator(f'[data-gap-note="{second}"] .gap-note-head').inner_text()=="▤ Заметка"
+        assert page.locator(f'[data-gap-note="{second}"] .gap-note-title').inner_text()=="Проверка свидетельства"
+        assert page.locator(f'[data-gap-note="{second}"] .gap-note-body').inner_text()==task2
         assert [n["title"] for n in db["graph"]["gapNotes"]] == [
             "Заметка", "Проверка свидетельства"]
+        # Exact title==task must also avoid repeating the same words in card.
+        first.click()
+        page.locator("#gap-title").fill(task)
+        page.locator("#gap-title").press("Tab")
+        page.wait_for_function(
+            "([id,title]) => !__graphite.getRemote().busy && !__graphite.getRemote().dirty"
+            " && __graphite.getGapNotes().find(n=>n.id===id)?.title===title",
+            arg=[note_id,task])
+        assert first.locator(".gap-note-title").inner_text()==task
+        assert first.locator(".gap-note-body").count()==0
+        assert page.locator("#gap-text").input_value()==task
         assert not errors, errors
         context.close()
         browser.close()
