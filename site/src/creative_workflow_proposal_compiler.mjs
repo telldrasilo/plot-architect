@@ -51,7 +51,7 @@ function estimatedNoteHeight(note){
  // title (2 lines), task body (4 lines). The complete task lives in inspector.
  const text=String(note.text??''),title=String(note.title||'').trim();
  const custom=title&&title!=='Заметка'?title:'';
- const titleLines=custom?Math.min(2,ceil(Array.from(custom).length/30)):0;
+ const titleLines=custom?Math.min(2,ceil(Array.from(custom).length,30)):0;
  const distinctBody=!custom||custom!==text.trim();
  const textLines=distinctBody?Math.min(4,text.split(/\r?\n/).reduce((sum,line)=>
   sum+Math.max(1,ceil(Array.from(line).length,30)),0)):0;
