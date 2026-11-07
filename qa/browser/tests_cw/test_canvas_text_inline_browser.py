@@ -97,12 +97,26 @@ def main():
   # Move the annotation across the semantic field; it never inherits field tags.
   grab=page.locator(".canvas-text-grab").first
   before=page.evaluate("()=>structuredClone(__graphite.getState().canvasTexts[0])")
+  page.evaluate("""()=>{
+   const g=document.querySelector('.canvas-text-grab');
+   window.__ctDragEvents={};
+   for(const type of ['pointerdown','pointermove','pointerup','pointercancel'])
+    g.addEventListener(type,e=>{__ctDragEvents[type]=(__ctDragEvents[type]||0)+1;
+     __ctDragEvents.last={x:e.clientX,y:e.clientY,id:e.pointerId}},true);
+  }""")
   box=grab.bounding_box()
+  print("UX126 GRAB",page.evaluate("""()=>{
+   const g=document.querySelector('.canvas-text-grab'),r=g.getBoundingClientRect();
+   const target=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
+   return {rect:{x:r.x,y:r.y,width:r.width,height:r.height},target:target?.outerHTML?.slice(0,180),
+    opacity:getComputedStyle(g).opacity};
+  }"""),flush=True)
   page.mouse.move(box["x"]+box["width"]/2,box["y"]+box["height"]/2)
   page.mouse.down()
   page.mouse.move(box["x"]+box["width"]/2+480,box["y"]+box["height"]/2+380,steps=8)
   page.mouse.up()
   moved=page.evaluate("()=>structuredClone(__graphite.getState().canvasTexts[0])")
+  print("UX126 DRAG RESULT",{"before":before,"after":moved,"events":page.evaluate("()=>window.__ctDragEvents")},flush=True)
   assert (before["x"],before["y"])!=(moved["x"],moved["y"])
   assert moved["parent"] is None
   assert "fieldId" not in moved and "workspaceId" not in moved
