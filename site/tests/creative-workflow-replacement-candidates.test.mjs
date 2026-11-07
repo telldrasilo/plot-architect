@@ -13,6 +13,7 @@ const base=()=>({
   nodes:[{id:'a',title:'Начало',x:0,y:0},
     {id:'b',title:'Исходный поворот',description:'Старое событие',x:200,y:0},
     {id:'c',title:'Последствие',x:400,y:0},
+    {id:'d',title:'Параллельный сюжет',x:700,y:0},
     {id:'x',title:'Исходный поворот',description:'Новая трактовка',x:200,y:250,workspaceId:'w1'},
     {id:'y',title:'Идея Y',x:450,y:250,workspaceId:'w1'}],
   edges:[{id:'e1',from:'a',to:'b',type:'precedes'},
@@ -81,8 +82,8 @@ test('same candidate cannot be claimed twice, even by a later replacement',()=>{
     baselineGraph:baseline,expectedPreview:initial,expectedRevision:5}).graph;
   fails(()=>previewLinkReplacementCandidates(linked,{replacementId:'r1',nodeIds:['x'],baselineGraph:baseline}),
     'CANDIDATE_ALREADY_LINKED');
-  const secondPreview=previewReplacementStart(linked,['c']);
-  const second=applyStartReplacement(linked,{replacementId:'r2',sourceNodeIds:['c'],
+  const secondPreview=previewReplacementStart(linked,['d']);
+  const second=applyStartReplacement(linked,{replacementId:'r2',sourceNodeIds:['d'],
     expectedPreview:secondPreview,expectedRevision:5}).graph;
   // A second independent replacement cannot take ownership of X, even with its
   // own authentic source revision.
