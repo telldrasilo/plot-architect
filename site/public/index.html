@@ -4909,7 +4909,9 @@ $('search').onclick=()=>{modalOpen=true;
  $('modal-host').innerHTML=`<div class="backdrop"><div class="modal" role="dialog" aria-label="Поиск"><h2>Найти на полотне</h2><p>События и поля. Выбор откроет нужный уровень и перенесёт камеру.</p><input id="search-entry" placeholder="Название события или поля"><div class="results" id="search-results"></div><div class="buttons"><button id="search-close">Закрыть</button></div></div></div>`;
  const close=()=>{$('modal-host').innerHTML='';modalOpen=false};$('search-close').onclick=close;
  $('search-entry').oninput=e=>{const query=e.target.value.trim().toLocaleLowerCase('ru');
- const nodes=query?state.nodes.filter(n=>(n.title+' '+(n.description||'')).toLocaleLowerCase('ru').includes(query)).slice(0,15):[];
+ // Replaced originals are not active story search results; history/review
+ // will expose them separately in the later replacement workflow.
+ const nodes=query?cwActiveNodes().filter(n=>(n.title+' '+(n.description||'')).toLocaleLowerCase('ru').includes(query)).slice(0,15):[];
  const fields=query?state.fields.filter(f=>f.title.toLocaleLowerCase('ru').includes(query)).slice(0,8):[];
  $('search-results').innerHTML=[...nodes.map(n=>`<button data-focus-node="${esc(n.id)}">◻ ${esc(n.title)} <small>Событие</small></button>`),...fields.map(f=>`<button data-focus-field="${esc(f.id)}">▧ ${esc(f.title)} <small>Поле</small></button>`)].join('')||(query?'<div class="search-empty">Ничего не найдено</div>':'');
  $('search-results').querySelectorAll('[data-focus-node]').forEach(el=>el.onclick=()=>{const id=el.dataset.focusNode;close();jumpToNode(id)});
