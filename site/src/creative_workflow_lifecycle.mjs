@@ -43,10 +43,10 @@ function unresolved(r){
 }
 
 /**
- * Completion does not connect anything, delete drafts, release old original
- * nodes, or erase unanswered boundary questions. Unresolved edges are visible
- * in the reviewed result. A later separate 'reopen' workflow is needed to
- * resolve them after completion; the current reconnect API remains open-only.
+ * Completion does not connect anything, delete drafts, or release old
+ * original nodes. Every suspended original relation MUST be explicitly
+ * resolved before completion; the old acknowledgeUnresolved bypass is retired.
+ * The protected server applies this same domain guard to direct API calls.
  */
 export function previewCompleteReplacement(graph,{replacementId}={}){
   const r=replacementOf(graph,replacementId);
@@ -58,12 +58,12 @@ export function previewCompleteReplacement(graph,{replacementId}={}){
     unresolvedEdgeIds:unresolved(r)
   };
 }
-export function applyCompleteReplacement(graph,{replacementId,expectedPreview,expectedRevision,acknowledgeUnresolved=false}={}){
+export function applyCompleteReplacement(graph,{replacementId,expectedPreview,expectedRevision}={}){
   checkRevision(graph,expectedRevision);
   const plan=previewCompleteReplacement(graph,{replacementId});
   checkPreview(expectedPreview,plan);
-  if(plan.unresolvedEdgeIds.length&&acknowledgeUnresolved!==true)
-    fail('UNRESOLVED_ACK_REQUIRED','unresolved suspended relations must be acknowledged');
+  if(plan.unresolvedEdgeIds.length)
+    fail('UNRESOLVED_RELATIONS','every suspended original relation must be explicitly resolved before completion');
   const next=clone(graph);
   next.replacements.find(r=>r.id===replacementId).state='completed';
   validateCreativeWorkflowGraph(next);

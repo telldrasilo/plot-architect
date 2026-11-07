@@ -32,32 +32,42 @@ function begin(base=story()){
   return {baseline:original,graph:result.graph};
 }
 const completePreview=g=>previewCompleteReplacement(g,{replacementId:'r1'});
-const close=(g,acknowledgeUnresolved=false)=>applyCompleteReplacement(g,{replacementId:'r1',expectedPreview:completePreview(g),expectedRevision:10,acknowledgeUnresolved}).graph;
+const close=g=>applyCompleteReplacement(g,{replacementId:'r1',expectedPreview:completePreview(g),expectedRevision:10}).graph;
 const cancelPreview=(g,baseline)=>previewCancelReplacement(g,{replacementId:'r1',baselineGraph:baseline});
 const cancel=(g,baseline)=>applyCancelReplacement(g,{replacementId:'r1',baselineGraph:baseline,expectedPreview:cancelPreview(g,baseline),expectedRevision:10}).graph;
 function resolve(g,decisions){
   const expectedPreview=previewReplacementReconnection(g,{replacementId:'r1',decisions});
   return applyReplacementReconnection(g,{replacementId:'r1',decisions,expectedPreview,expectedRevision:10}).graph;
 }
+const resolveAll=g=>resolve(g,[{edgeId:'e1',decision:'drop'},{edgeId:'e2',decision:'drop'},{edgeId:'e3',decision:'drop'}]);
 test('starting replacement stores an exact revision pointer, not duplicated source texts',()=>{
   const {graph:g}=begin();
   assert.equal(g.replacements[0].sourceGraphRevision,10);
   assert.deepEqual(Object.keys(g.replacements[0]).sort(),['id','sourceGraphRevision','sourceNodeIds','state','suspendedEdgeIds'].sort());
 });
-test('completion preserves original nodes and links, does not invent causal edges',()=>{
-  const {graph:g}=begin(),before=clone(g),plan=completePreview(g);
-  assert.deepEqual(plan.unresolvedEdgeIds,['e1','e2','e3']);
-  const result=applyCompleteReplacement(g,{replacementId:'r1',expectedPreview:plan,expectedRevision:10,acknowledgeUnresolved:true});
-  assert.deepEqual(g,before);assert.equal(result.graph.replacements[0].state,'completed');
-  assert.deepEqual(result.graph.nodes,g.nodes);assert.deepEqual(result.graph.edges,g.edges);
+test('completion with resolved edges preserves original nodes/links without inventing causal edges',()=>{
+  const {graph:g}=begin(),resolved=resolveAll(g),before=clone(resolved),plan=completePreview(resolved);
+  assert.deepEqual(plan.unresolvedEdgeIds,[]);
+  const result=applyCompleteReplacement(resolved,{replacementId:'r1',expectedPreview:plan,expectedRevision:10});
+  assert.deepEqual(resolved,before);assert.equal(result.graph.replacements[0].state,'completed');
+  assert.deepEqual(result.graph.nodes,resolved.nodes);assert.deepEqual(result.graph.edges,resolved.edges);
   assert.deepEqual(ids(canonicalProjection(result.graph).nodes),['n1','n3','n4']);
   assert.deepEqual(ids(canonicalProjection(result.graph).edges),['e4']);
-  assert.deepEqual(result.changes.unresolvedEdgeIds,['e1','e2','e3']);assert.equal(result.changes.autoRewiredEdgeIds.length,0);
+  assert.deepEqual(result.changes.unresolvedEdgeIds,[]);assert.equal(result.changes.autoRewiredEdgeIds.length,0);
 });
-test('unfinished boundary questions require explicit acknowledgement to complete',()=>{
-  const {graph:g}=begin(),before=clone(g);
-  raises(()=>applyCompleteReplacement(g,{replacementId:'r1',expectedPreview:completePreview(g),expectedRevision:10}),'UNRESOLVED_ACK_REQUIRED');
+test('unresolved relations block completion even when obsolete acknowledgement is supplied',()=>{
+  const {graph:g}=begin(),before=clone(g),preview=completePreview(g);
+  assert.deepEqual(preview.unresolvedEdgeIds,['e1','e2','e3']);
+  raises(()=>applyCompleteReplacement(g,{replacementId:'r1',expectedPreview:preview,expectedRevision:10}),'UNRESOLVED_RELATIONS');
+  raises(()=>applyCompleteReplacement(g,{replacementId:'r1',expectedPreview:preview,expectedRevision:10,acknowledgeUnresolved:true}),'UNRESOLVED_RELATIONS');
   assert.deepEqual(g,before);
+});
+test('even one remaining suspended relation blocks completion after partial decisions',()=>{
+  const {graph:g}=begin(),part=resolve(g,[{edgeId:'e1',decision:'drop'},{edgeId:'e3',decision:'drop'}]);
+  const before=clone(part),preview=completePreview(part);
+  assert.deepEqual(preview.unresolvedEdgeIds,['e2']);
+  raises(()=>applyCompleteReplacement(part,{replacementId:'r1',expectedPreview:preview,expectedRevision:10}),'UNRESOLVED_RELATIONS');
+  assert.deepEqual(part,before);
 });
 test('completion with all old edges resolved needs no unresolved acknowledgement',()=>{
   const {graph:g}=begin();const decided=resolve(g,[{edgeId:'e1',decision:'drop'},{edgeId:'e2',decision:'drop'},{edgeId:'e3',decision:'drop'}]);
@@ -65,24 +75,24 @@ test('completion with all old edges resolved needs no unresolved acknowledgement
   assert.deepEqual(completePreview(decided).unresolvedEdgeIds,[]);assert.deepEqual(after.replacements[0].edgeResolutions,decided.replacements[0].edgeResolutions);
 });
 test('completed originals remain retired and drafts remain isolated',()=>{
-  const {graph:g}=begin();const done=close(g,true);
+  const {graph:g}=begin();const done=close(resolveAll(g));
   assert.equal(done.nodes.find(n=>n.id==='x').workspaceId,'w1');
   assert.deepEqual(ids(canonicalProjection(done).nodes),['n1','n3','n4']);
   assert.deepEqual(done.replacements[0].suspendedEdgeIds,['e1','e2','e3']);
   raises(()=>completePreview(done),'REPLACEMENT_NOT_OPEN');
 });
 test('a completed replacement cannot silently transition back to open',()=>{
-  const {graph:g}=begin(),completed=close(g,true),altered=clone(completed);altered.replacements[0].state='open';
+  const {graph:g}=begin(),completed=close(resolveAll(g)),altered=clone(completed);altered.replacements[0].state='open';
   raises(()=>assertProtectedOriginalsUnchanged(completed,altered),'REPLACEMENT_STATE_CHANGED');
 });
 test('completion rejects stale preview after a relation decision',()=>{
   const {graph:g}=begin(),old=completePreview(g),changed=resolve(g,[{edgeId:'e1',decision:'drop'}]);
-  raises(()=>applyCompleteReplacement(changed,{replacementId:'r1',expectedPreview:old,expectedRevision:10,acknowledgeUnresolved:true}),'PREVIEW_STALE');
+  raises(()=>applyCompleteReplacement(changed,{replacementId:'r1',expectedPreview:old,expectedRevision:10}),'PREVIEW_STALE');
 });
 test('completion checks revision and explicit review without side effects',()=>{
   const {graph:g}=begin(),before=clone(g);
-  raises(()=>applyCompleteReplacement(g,{replacementId:'r1',expectedRevision:10,acknowledgeUnresolved:true}),'PREVIEW_REQUIRED');
-  raises(()=>applyCompleteReplacement(g,{replacementId:'r1',expectedPreview:completePreview(g),expectedRevision:9,acknowledgeUnresolved:true}),'REVISION_CONFLICT');
+  raises(()=>applyCompleteReplacement(g,{replacementId:'r1',expectedRevision:10}),'PREVIEW_REQUIRED');
+  raises(()=>applyCompleteReplacement(g,{replacementId:'r1',expectedPreview:completePreview(g),expectedRevision:9}),'REVISION_CONFLICT');
   assert.deepEqual(g,before);
 });
 test('pristine cancel restores original node and all arrows, retains workspace',()=>{
@@ -149,7 +159,7 @@ test('a mismatching baseline revision cannot be silently substituted',()=>{
   raises(()=>cancelPreview(g,baseline),'BASELINE_REVISION_MISMATCH');
 });
 test('cancel is refused after completion',()=>{
-  const {baseline,graph:g}=begin(),done=close(g,true);
+  const {baseline,graph:g}=begin(),done=close(resolveAll(g));
   raises(()=>cancelPreview(done,baseline),'REPLACEMENT_NOT_OPEN');
 });
 test('cancel rejects stale review and wrong in-memory revision without side effects',()=>{
@@ -167,7 +177,7 @@ test('a second replacement after the baseline blocks cancellation of first',()=>
 });
 test('completion and cancellation are non-mutating, JSON-roundtrip validated',()=>{
   const {baseline,graph:g}=begin();
-  const completed=close(g,true);assert.doesNotThrow(()=>validateCreativeWorkflowGraph(JSON.parse(JSON.stringify(completed))));
+  const completed=close(resolveAll(g));assert.doesNotThrow(()=>validateCreativeWorkflowGraph(JSON.parse(JSON.stringify(completed))));
   const canceled=cancel(g,baseline);assert.doesNotThrow(()=>validateCreativeWorkflowGraph(JSON.parse(JSON.stringify(canceled))));
   assert.equal(g.replacements[0].state,'open');assert.equal(g.revision,10);
 });
