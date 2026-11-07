@@ -149,14 +149,16 @@ def main():
         review.wait_for()
         assert "Исходное событие" in review.inner_text()
         assert db["applies"]==0
+        before_nodes=copy.deepcopy(db["graph"]["nodes"])
+        before_edges=copy.deepcopy(db["graph"]["edges"])
 
         page.locator("#cw-start-replacement-confirm").click()
         page.wait_for_function(
             "()=>__graphite.getState().replacements?.[0]?.state==='open'"
             " && !__graphite.getRemote().busy && !__graphite.getRemote().dirty")
         assert db["applies"]==1
-        assert db["graph"]["nodes"]==plot()["nodes"]
-        assert db["graph"]["edges"]==plot()["edges"]
+        assert db["graph"]["nodes"]==before_nodes
+        assert db["graph"]["edges"]==before_edges
         assert not any(e["from"]=="a" and e["to"]=="c" for e in db["graph"]["edges"])
         assert page.locator('[data-node="b"]').count()==0
         assert page.locator('[data-cw-original="b"]').count()==1
