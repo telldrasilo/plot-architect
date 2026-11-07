@@ -33,13 +33,24 @@ export function validateCreativeWorkflowGraph(graph){
     if(w!==null&&!areaIds.has(w))fail('WORKSPACE_NOT_FOUND',n.id);
     if(n.draftBranchId!==undefined&&(!id(n.draftBranchId)||w===null))fail('DRAFT_BRANCH_INVALID',n.id);
   }
-  const originalNodes=new Set(),suspended=new Set(),replacementIds=new Set();
+  const originalNodes=new Set(),suspended=new Set(),replacementIds=new Set(),candidateOwners=new Set();
   for(const r of replacements){
     if(!obj(r)||!id(r.id)||replacementIds.has(r.id)||!['open','completed'].includes(r.state)
       ||!Array.isArray(r.sourceNodeIds)||!r.sourceNodeIds.length||!Array.isArray(r.suspendedEdgeIds)
       ||(r.sourceGraphRevision!==undefined&&(!Number.isSafeInteger(r.sourceGraphRevision)||r.sourceGraphRevision<0)))fail('REPLACEMENT_INVALID','identity, state, revision or arrays');
     replacementIds.add(r.id);
     if(new Set(r.sourceNodeIds).size!==r.sourceNodeIds.length||new Set(r.suspendedEdgeIds).size!==r.suspendedEdgeIds.length)fail('REPLACEMENT_INVALID',r.id+' duplicate source');
+    if(r.candidateNodeIds!==undefined){
+      if(!Array.isArray(r.candidateNodeIds)||r.candidateNodeIds.length>80||
+         new Set(r.candidateNodeIds).size!==r.candidateNodeIds.length)
+        fail('CANDIDATE_PROVENANCE_INVALID',r.id+' invalid candidate IDs');
+      for(const candidateId of r.candidateNodeIds){
+        if(!id(candidateId)||!nodes.has(candidateId)||r.sourceNodeIds.includes(candidateId)||
+           candidateOwners.has(candidateId))
+          fail('CANDIDATE_PROVENANCE_INVALID',r.id+' duplicate, missing or original candidate '+candidateId);
+        candidateOwners.add(candidateId);
+      }
+    }
     for(const sourceId of r.sourceNodeIds){
       const n=nodes.get(sourceId);
       if(!n||workspaceOf(n)!==null||originalNodes.has(sourceId))fail('SOURCE_INVALID',sourceId);
@@ -196,6 +207,10 @@ export function assertProtectedOriginalsUnchanged(previous,next){
     if(JSON.stringify(r.sourceNodeIds)!==JSON.stringify(match.sourceNodeIds)||JSON.stringify(r.suspendedEdgeIds)!==JSON.stringify(match.suspendedEdgeIds))fail('REPLACEMENT_CHANGED',r.id);
     if(r.sourceGraphRevision!==match.sourceGraphRevision)fail('REPLACEMENT_CHANGED',r.id+' baseline revision');
     if(r.state==='completed'&&match.state!=='completed')fail('REPLACEMENT_STATE_CHANGED',r.id+' completed replacement cannot reopen implicitly');
+    const pastCandidates=r.candidateNodeIds??[],nextCandidates=match.candidateNodeIds??[];
+    if(pastCandidates.length>nextCandidates.length||
+       pastCandidates.some((candidateId,i)=>candidateId!==nextCandidates[i]))
+      fail('CANDIDATE_PROVENANCE_CHANGED',r.id);
     const past=r.edgeResolutions??[],now=match.edgeResolutions??[];
     if(past.length>now.length||past.some((decision,i)=>JSON.stringify(decision)!==JSON.stringify(now[i])))fail('RESOLUTION_CHANGED',r.id);
     for(const nodeId of r.sourceNodeIds)if(JSON.stringify(a.nodes.get(nodeId))!==JSON.stringify(b.nodes.get(nodeId)))fail('ORIGINAL_CHANGED',nodeId);
