@@ -47,12 +47,16 @@ const overlap=(a,b)=>a.x<b.x+b.width+28&&a.x+a.width+28>b.x
 // A note can be much taller than the old 158px shortcut: the editor wraps
 // the task body and, for default titles, displays a contextual excerpt.
 function estimatedNoteHeight(note){
- const text=String(note.text??''),title=String(note.title||'Заметка');
- const label=title==='Заметка'&&text.trim()
-  ?title+' · '+Array.from(text.replace(/\s+/g,' ').trim()).slice(0,52).join(''):title;
- const bodyLines=text.split(/\r?\n/).reduce((sum,line)=>
-  sum+Math.max(1,ceil(Array.from(line).length,30)),0);
- return Math.max(158,80+Math.max(1,ceil(Array.from(label).length,30))*18+bodyLines*20);
+ // Mirror the compact card: small fixed "Заметка" kind, optional author
+ // title (2 lines), task body (4 lines). The complete task lives in inspector.
+ const text=String(note.text??''),title=String(note.title||'').trim();
+ const custom=title&&title!=='Заметка'?title:'';
+ const titleLines=custom?Math.min(2,ceil(Array.from(custom).length/30)):0;
+ const distinctBody=!custom||custom!==text.trim();
+ const textLines=distinctBody?Math.min(4,text.split(/\r?\n/).reduce((sum,line)=>
+  sum+Math.max(1,ceil(Array.from(line).length,30)),0)):0;
+ // Conservative footprint: kind line, clipped title/body, footer and padding.
+ return Math.max(158,78+titleLines*20+textLines*21);
 }
 function availablePosition(graph,note,width,height,{singleCard=false}={}){
  const sourceHeight=estimatedNoteHeight(note);
