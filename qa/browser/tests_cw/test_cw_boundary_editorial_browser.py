@@ -121,6 +121,44 @@ def main():
             assert page.locator(f'[data-cw-boundary-direction="{key}"]').count()==1
         assert page.locator('[data-cw-boundary-edge="ea"]').evaluate(
             "el=>getComputedStyle(el).strokeDasharray")!="none"
+        # The accepted A uses its real canonical card height; draft B uses
+        # its own measured card height. No old +56 fixed-height anchors.
+        endpoints=page.evaluate("""() => {
+          const a=document.querySelector('[data-node="a"]');
+          const b=document.querySelector('[data-cw-node="b"]');
+          const box=document.querySelector('[data-cw-workspace="w1"]');
+          const line=document.querySelector('[data-cw-boundary-edge="ea"]');
+          const coordinates=[...line.getAttribute('d').matchAll(/-?\\d+(?:\\.\\d+)?/g)]
+            .map(match=>Number(match[0]));
+          return {actual:coordinates,
+            expected:[150+a.offsetWidth-95,510+a.offsetHeight/2-450,
+                      460-95,510+b.offsetHeight/2-450],
+            ports:[...box.querySelectorAll('[data-cw-boundary-socket]')]
+              .filter(el=>el.dataset.cwBoundarySocket.startsWith('ea:'))
+              .map(el=>el.dataset.cwBoundarySocket),
+            arrow:box.querySelector('[data-cw-boundary-direction="ea"]')?.tagName
+          };
+        }""")
+        assert len(endpoints["actual"])==4,endpoints
+        assert all(abs(a-b)<.2 for a,b in zip(
+            endpoints["actual"],endpoints["expected"])),endpoints
+        assert set(endpoints["ports"])=={"ea:source","ea:target"},endpoints
+        assert endpoints["arrow"]=="path",endpoints
+
+        # Live drag of the remaining draft moves only its boundary endpoint.
+        # Return to the original position before release: no server mutation.
+        original=page.locator('[data-cw-boundary-edge="ea"]').get_attribute("d")
+        b=page.locator('[data-cw-node="b"]').bounding_box()
+        start=(b["x"]+min(45,b["width"]/3),b["y"]+min(43,b["height"]/3))
+        page.mouse.move(*start)
+        page.mouse.down()
+        page.mouse.move(start[0]+26,start[1]+14,steps=6)
+        during=page.locator('[data-cw-boundary-edge="ea"]').get_attribute("d")
+        assert during!=original,("boundary line is stale during draft drag",original)
+        page.mouse.move(*start,steps=6)
+        page.mouse.up()
+        assert db["previews"]==0 and db["applies"]==0 and db["generic"]==0
+
         assert db["previews"]==0 and db["applies"]==0 and db["generic"]==0
 
         # Real pointer hit-test. The canvas must NOT steal pointerdown/click to
