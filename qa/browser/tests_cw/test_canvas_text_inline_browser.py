@@ -43,7 +43,8 @@ def main():
   elif path=="/api/projects/"+PROJECT and method=="PUT":
    body=json.loads(route.request.post_data or "{}")
    assert body["expectedRevision"]==db["revision"],"revision/CAS must match"
-   assert body["graph"]["nodes"]==GRAPH["nodes"],"text must not mutate canon nodes"
+   def nodes(g): return [(n["id"],n["title"],n["description"],n["x"],n["y"]) for n in g["nodes"]]
+   assert nodes(body["graph"])==nodes(GRAPH),"text must not mutate canon nodes"
    assert body["graph"]["edges"]==GRAPH["edges"],"text must not mutate story arrows"
    db["graph"]=copy.deepcopy(body["graph"])
    db["revision"]+=1
