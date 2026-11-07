@@ -65,7 +65,7 @@ function command(g,kind,extra={}){
     const decisions=extra.decisions??[{edgeId:'e1',decision:'drop'}];
     return {kind,replacementId:'r1',decisions,expectedPreview:previewReplacementReconnection(g,{replacementId:'r1',decisions})};
   }
-  if(kind==='complete')return {kind,replacementId:'r1',expectedPreview:previewCompleteReplacement(g,{replacementId:'r1'}),acknowledgeUnresolved:true};
+  if(kind==='complete')return {kind,replacementId:'r1',expectedPreview:previewCompleteReplacement(g,{replacementId:'r1'})};
   throw Error('unknown command');
 }
 const send=(db,command,revision=0,operationId='operation-1',projectId='project-1')=>commitSyntheticWorkflowCommand(db,{projectId,operationId,expectedRevision:revision,command});
