@@ -222,7 +222,10 @@ def main():
     assert db["applies"]==0
     for check in dialog.locator('[data-cw-post-title]').all():check.check()
     dialog.locator("#cw-postcanon-submit").click()
-    dialog.wait_for()
+    page.wait_for_function("""()=>{const d=document.querySelector('#cw-postcanon-review');
+      return !!d&&!d.innerText.includes('Операция заблокирована')&&
+        d.querySelector('#cw-postcanon-submit')?.textContent.includes('Подтвердить изменения');
+    }""")
     assert "Операция заблокирована" not in dialog.inner_text()
     assert dialog.locator("#cw-postcanon-submit").inner_text()=="Подтвердить изменения"
     assert db["applies"]==0
