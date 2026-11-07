@@ -29,6 +29,7 @@ import {
 } from './creative_workflow_contract.mjs';
 import {previewReplacementReconnection,applyReplacementReconnection} from './creative_workflow_reconnection.mjs';
 import {previewLinkReplacementCandidates,applyLinkReplacementCandidates} from './creative_workflow_replacement_candidates.mjs';
+import {previewPostCanonReview,applyPostCanonReview} from './creative_workflow_postcanon_review.mjs';
 import {
   previewCompleteReplacement,
   previewCancelReplacement,
@@ -54,6 +55,7 @@ const fields={
   start_replacement:['replacementId','sourceNodeIds','expectedPreview'],
   reconnect:['replacementId','decisions','expectedPreview'],
   link_replacement_candidates:['replacementId','nodeIds','expectedPreview'],
+  review_replacement:['replacementId','originalAction','candidateDecisions','edgeDecisions','acknowledgedTitleConflicts','expectedPreview'],
   complete:['replacementId','expectedPreview'],
   cancel:['replacementId','expectedPreview']
 };
@@ -107,6 +109,10 @@ async function runDomain(db,projectId,graph,expectedRevision,command){
     case 'link_replacement_candidates':{
       const baselineGraph=await baselineFromHistory(db,projectId,graph,command.replacementId);
       return applyLinkReplacementCandidates(graph,{...args,baselineGraph});
+    }
+    case 'review_replacement':{
+      const baselineGraph=await baselineFromHistory(db,projectId,graph,command.replacementId);
+      return applyPostCanonReview(graph,{...args,baselineGraph});
     }
     case 'complete':return applyCompleteReplacement(graph,args);
     case 'cancel':{
@@ -244,6 +250,11 @@ export async function previewWorkflowCommand(db,{projectId,expectedRevision,comm
     case 'link_replacement_candidates':{
       const baselineGraph=await baselineFromHistory(db,projectId,graph,command.replacementId);
       preview=previewLinkReplacementCandidates(graph,{...command,baselineGraph});
+      break;
+    }
+    case 'review_replacement':{
+      const baselineGraph=await baselineFromHistory(db,projectId,graph,command.replacementId);
+      preview=previewPostCanonReview(graph,{...command,baselineGraph});
       break;
     }
     case 'complete': preview=previewCompleteReplacement(graph,command);break;

@@ -91,7 +91,11 @@ export function assertOrdinaryGraphWrite(previousRaw,nextRaw){
     fail('EXPLICIT_WORKFLOW_COMMAND_REQUIRED','working areas and replacements are read-only to generic PUT');
 
   const oldNodes=byId(previous.nodes),oldEdges=byId(previous.edges);
+  const archivedCandidates=new Set((previous.replacements??[]).flatMap(r=>
+    ((r.postCanonReviews??[]).at(-1)?.candidateDecisions??[])
+     .filter(x=>x.decision==='archive').map(x=>x.nodeId)));
   const frozenNodeIds=new Set([
+    ...archivedCandidates,
     ...previous.nodes.filter(n=>scopeOf(n)!==null).map(n=>n.id),
     ...(previous.replacements??[]).flatMap(r=>r.sourceNodeIds)
   ]);
@@ -100,6 +104,10 @@ export function assertOrdinaryGraphWrite(previousRaw,nextRaw){
     ...(previous.replacements??[]).flatMap(r=>r.suspendedEdgeIds)
   ]);
   const newNodes=byId(next.nodes),newEdges=byId(next.edges);
+  // A generic editor PUT cannot quietly reattach an archived scene.
+  for(const e of next.edges)if(!oldEdges.has(e.id)&&
+      (archivedCandidates.has(e.from)||archivedCandidates.has(e.to)))
+    fail('ARCHIVED_CANDIDATE_EDGE',e.id);
   // Authored replacement candidates remain auditable after later edits.
   // Ordinary generic PUT cannot erase a linked candidate without a distinct,
   // reviewed workflow. Unlike protected originals, their text is editable.
