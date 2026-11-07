@@ -205,6 +205,41 @@ def main():
             "stroke:getComputedStyle(el).stroke,active:document.activeElement===el})")
         assert focus["active"] and focus["outline"]=="none",focus
         assert "Не в сюжете" in panel.inner_text()
+
+        # A boundary panel is contextual, not a permanently pinned inspector.
+        # Click inside it to inspect: that must not dismiss the panel.
+        panel.locator("strong").click()
+        assert panel.count()==1
+        # Find genuinely empty canvas pixels after fit, away from nodes/edges.
+        empty=page.evaluate("""() => {
+          const r=document.querySelector('#canvas').getBoundingClientRect();
+          const block='.node,.cw-preview-card,.cw-boundary-details,'+
+            '[data-cw-boundary-hit],[data-cw-edge-hit],[data-edge-target],'+
+            '.float-toolbar,.pa-context-menu,.inspector,.cw-preview-area-head';
+          for(let y=r.top+75;y<r.bottom-35;y+=68)
+            for(let x=r.left+75;x<r.right-35;x+=68){
+              const el=document.elementFromPoint(x,y);
+              if(el?.closest('#canvas')&&!el.closest(block))
+                return {x,y};
+            }
+          return null;
+        }""")
+        assert empty, "no empty canvas click point found"
+        page.mouse.click(empty["x"],empty["y"])
+        assert panel.count()==0, "outside click leaves boundary panel pinned"
+        assert db["previews"]==0 and db["applies"]==0 and db["generic"]==0
+
+        # Reopen and dismiss by Escape without changing any graph data.
+        point=line_midpoint("ea")
+        page.mouse.click(point["x"],point["y"])
+        panel.wait_for()
+        page.keyboard.press("Escape")
+        assert panel.count()==0, "Escape does not dismiss boundary panel"
+        assert db["previews"]==0 and db["applies"]==0 and db["generic"]==0
+        # Deliberate click still opens details after click-away/Escape.
+        point=line_midpoint("ea")
+        page.mouse.click(point["x"],point["y"])
+        panel.wait_for()
         assert not page.locator('.pa-marquee').is_visible()
         assert db["previews"]==0 and db["applies"]==0 and db["generic"]==0
         panel.get_by_role("button",name="Закрыть").click()
@@ -251,6 +286,17 @@ def main():
         panel=page.locator('[data-cw-boundary-details="proposal-n1-a"]')
         panel.get_by_role("button",name="Подтвердить отказ").wait_for(timeout=6000)
         assert db["applies"]==0
+        # Never silently discard a pending guarded refusal on an outside click.
+        page.mouse.click(empty["x"],empty["y"])
+        assert panel.get_by_role("button",name="Подтвердить отказ").count()==1
+        assert db["applies"]==0
+        # Escape cancels only this pending preview; the relation stays selected.
+        page.keyboard.press("Escape")
+        assert panel.get_by_role("button",name="Не использовать связь").count()==1
+        assert panel.get_by_role("button",name="Подтвердить отказ").count()==0
+        assert db["applies"]==0
+        panel.get_by_role("button",name="Не использовать связь").click()
+        panel.get_by_role("button",name="Подтвердить отказ").wait_for(timeout=6000)
         panel.get_by_role("button",name="Отмена").click()
         assert db["applies"]==0
         assert page.locator('[data-cw-boundary-edge="proposal-n1-a"]').count()==1
