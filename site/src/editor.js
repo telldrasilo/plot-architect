@@ -2017,6 +2017,8 @@ function renderCreativeWorkspacePreview(){
     hit.classList.add('cw-draft-edge-hit');
     hit.setAttribute('d',path.getAttribute('d'));
     hit.dataset.cwEdgeHit=edge.id;hit.setAttribute('role','button');
+    // The canvas marquee must not capture pointer events intended for a draft edge.
+    hit.addEventListener('pointerdown',event=>event.stopPropagation());
     hit.setAttribute('tabindex','0');
     hit.setAttribute('aria-label','Изменить тип связи «'+from.title+'» — «'+to.title+'»');
     hit.addEventListener('click',e=>{
@@ -2063,6 +2065,8 @@ function renderCreativeWorkspacePreview(){
     hit.setAttribute('d',d);hit.classList.add('cw-draft-edge-hit','cw-boundary-hit');
     hit.setAttribute('role','button');hit.setAttribute('tabindex','0');
     hit.dataset.cwBoundaryHit=edge.id;
+    // Keep mouse click on this exact relation; do not start canvas marquee.
+    hit.addEventListener('pointerdown',event=>event.stopPropagation());
     hit.setAttribute('aria-label','Нерешённая редакторская связь: '+
       from.title+' — '+to.title+'. Показать подробности');
     hit.addEventListener('click',event=>{
@@ -3912,7 +3916,7 @@ function cancelGesture(){const i=interaction;if(!i)return false;interaction=null
 $('canvas').addEventListener('pointerdown',e=>{
  const semanticTarget=e.target.closest('.pa-semantic-item');
  const panMode=e.button===1||spacePan||e.pointerType==='touch';
- const blocked=e.target.closest('.node,.gap-note,.editorial-inline-note,.field-head,.field-grip,.float-toolbar,.nav-mini,.overview-panel,.inspector,.notice,.breadcrumbs,.toolbar-restore,.pa-context-menu,[data-edge-target],[data-bridge-target]');
+ const blocked=e.target.closest('.node,.gap-note,.editorial-inline-note,.field-head,.field-grip,.float-toolbar,.nav-mini,.overview-panel,.inspector,.notice,.breadcrumbs,.toolbar-restore,.pa-context-menu,[data-edge-target],[data-bridge-target],[data-cw-edge-hit],[data-cw-boundary-hit]');
  // Space+drag or middle drag pans even when the pointer starts on an overview label.
  if(![0,1].includes(e.button)||blocked||(semanticTarget&&!panMode))return;
  if(e.button===1)e.preventDefault();

@@ -123,6 +123,36 @@ def main():
             "el=>getComputedStyle(el).strokeDasharray")!="none"
         assert db["previews"]==0 and db["applies"]==0 and db["generic"]==0
 
+        # Real pointer hit-test. The canvas must NOT steal pointerdown/click to
+        # start marquee selection: keyboard-only testing hid this regression.
+        def line_midpoint(edge_id):
+            return page.locator(f'[data-cw-boundary-hit="{edge_id}"]').evaluate("""el=>{
+                const p=el.getPointAtLength(el.getTotalLength()/2);
+                const m=el.getScreenCTM();
+                return {x:p.x*m.a+p.y*m.c+m.e,
+                        y:p.x*m.b+p.y*m.d+m.f};
+            }""")
+        point=line_midpoint("ea")
+        target=page.evaluate("p=>document.elementFromPoint(p.x,p.y)?.getAttribute('data-cw-boundary-hit')",point)
+        assert target=="ea",("boundary SVG pointer target",target,point)
+        page.mouse.click(point["x"],point["y"])
+        panel=page.locator('[data-cw-boundary-details="ea"]')
+        panel.wait_for()
+        assert "Не в сюжете" in panel.inner_text()
+        assert not page.locator('.pa-marquee').is_visible()
+        assert db["previews"]==0 and db["applies"]==0 and db["generic"]==0
+        panel.get_by_role("button",name="Закрыть").click()
+        assert panel.count()==0
+        point=line_midpoint("ea")
+        page.mouse.move(point["x"],point["y"])
+        page.mouse.down()
+        page.mouse.move(point["x"]+24,point["y"]-4,steps=4)
+        assert not page.locator('.pa-marquee').is_visible(), "line drag wrongly starts canvas marquee"
+        page.mouse.up()
+        if page.locator('[data-cw-boundary-details="ea"]').count():
+            page.locator('[data-cw-boundary-details="ea"]').get_by_role(
+                "button",name="Закрыть").click()
+
         # Keyboard accessible selection opens an editorial review panel, never
         # the canonical edge editing toolbar.
         hit=page.locator('[data-cw-boundary-hit="ea"]')
