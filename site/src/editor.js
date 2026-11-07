@@ -3691,7 +3691,9 @@ function cwRenderReplacementInspector(el,id){
   return '<li class="cw-relation-row" data-cw-old-edge="'+esc(e.id)+'">'+
    '<div class="cw-relation-old"><b>'+esc(label)+'</b>'+
    '<span>'+esc(cwReplacementEdgeLabels[e.type]||e.type)+' · исходная связь</span></div>'+
-   suffix+actions+'</li>';
+   suffix+(edgeOutcomes.has(e.id)?'<p class="cw-relation-outcome">'+
+    (edgeOutcomes.get(e.id)==='restore'?'Восстановлена по решению автора':
+      'Оставлена приостановленной при пересмотре')+'</p>':'')+actions+'</li>';
  }).join('');
  el.hidden=false;
  el.innerHTML='<div class="inspect-head"><b>Замена события</b><button id="close-inspect" title="Закрыть">×</button></div>'+
@@ -3700,9 +3702,11 @@ function cwRenderReplacementInspector(el,id){
   original.map(n=>'<div class="ux014-original"><strong>'+esc(n.title)+'</strong>'+
    '<p>'+esc(n.description||'Описание отсутствует')+'</p></div>').join('')+
   '<div class="cw-relations-panel" data-cw-relations="'+esc(id)+'">'+
-  '<b>Исходные связи · '+resolved.size+' из '+suspended.length+' разобраны</b>'+
-  '<p class="muted">Исходных связей: '+suspended.length+
-  '. Восстанавливаются только явно выбранные при пересмотре. Остальные сохранены для истории.</p>'+
+  '<b>Приостановленные связи · '+resolved.size+' из '+suspended.length+' решены</b>'+
+  '<p class="muted">'+(r.state==='restored'
+   ?'Восстановлены только явно выбранные связи; остальные остаются приостановленными.'
+   :'Приостановлено связей: '+suspended.length+
+    '. Прежние стрелки не действуют в сюжете. Каждая требует отдельного решения.')+'</p>'+
   (edgeRows?'<ol class="cw-relations-list">'+edgeRows+'</ol>':
    '<p class="muted">У события нет приостановленных связей.</p>')+
   '<div class="cw-relations-panel" data-cw-candidates="'+esc(id)+'">'+
@@ -4042,7 +4046,7 @@ function cwShowPostCanonReview(){
  $('modal-host').innerHTML='<div class="backdrop"><form class="modal" id="cw-postcanon-review" role="dialog" aria-modal="true"'+
   ' aria-label="Проверить последствия пересмотра">'+
   '<h2>Подтвердить пересмотр?</h2>'+
-  '<p>Это изменит действующую проекцию сюжета **только** согласно выбранным решениям. '+
+  '<p>Это изменит действующую проекцию сюжета только согласно выбранным решениям. '+
   'Сохранённые исходники и новые события не удаляются.</p>'+
   '<ol class="cw-replacement-review-edges">'+report+'</ol>'+
   (titleRows?'<div class="cw-relations-panel"><b>Возможные дубли названий</b>'+
