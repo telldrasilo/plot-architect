@@ -131,7 +131,7 @@ test('whole stage→partial acceptance→replace→reconnect→complete succeeds
   {edgeId:'e2',decision:'rewire',newEdge:{id:'new-e2',from:'draft-b',to:'n3',type:'causes'}}
  ]});
  assert.equal(r.status,200,JSON.stringify(r.data));
- r=await apply(env,id,4,'complete',{kind:'complete',replacementId:'r1',acknowledgeUnresolved:false});
+ r=await apply(env,id,4,'complete',{kind:'complete',replacementId:'r1'});
  assert.equal(r.status,200,JSON.stringify(r.data));
  assert.deepEqual(counts(sql,id),{revision:5,history:6,receipts:5});
  g=(await graph(env,id)).graph;assert.equal(g.replacements[0].state,'completed');
@@ -140,6 +140,45 @@ test('whole stage→partial acceptance→replace→reconnect→complete succeeds
  assert.equal(rpc.status,200);
  assert.deepEqual(rpc.data.result.structuredContent.edges.map(e=>e.id),['new-e1']);
  assert.equal(JSON.stringify(rpc.data).includes('draft-c'),false);
+});
+test('direct guarded API forbids completion with outstanding relations and retired acknowledgement bypass',async()=>{
+  const {db,sql}=storage(),env={DB:db,CW_WORKFLOW_ENABLED:'true'},id=await create(env);
+  const started=await apply(env,id,0,'start-c',{kind:'start_replacement',replacementId:'r1',sourceNodeIds:['n2']});
+  assert.equal(started.status,200,JSON.stringify(started.data));
+  const command={kind:'complete',replacementId:'r1'};
+  const review=await preview(env,id,1,command);
+  assert.equal(review.status,200,JSON.stringify(review.data));
+  assert.deepEqual(review.data.preview.unresolvedEdgeIds,['e1','e2']);
+  const before=await graph(env,id),stats=counts(sql,id);
+  const denied=await request(env,'POST',path(id)+'apply',{
+    expectedRevision:1,operationId:'try-unresolved',command:{...command,expectedPreview:review.data.preview}
+  });
+  assert.equal(denied.status,422,JSON.stringify(denied.data));
+  assert.equal(denied.data.error,'UNRESOLVED_RELATIONS');
+  const bypass=await request(env,'POST',path(id)+'apply',{
+    expectedRevision:1,operationId:'try-bypass',command:{...command,acknowledgeUnresolved:true,expectedPreview:review.data.preview}
+  });
+  assert.equal(bypass.status,422,JSON.stringify(bypass.data));
+  assert.equal(bypass.data.error,'COMMAND_INVALID');
+  assert.deepEqual(await graph(env,id),before);
+  assert.deepEqual(counts(sql,id),stats,'failed direct calls must not write graph/history/receipts');
+
+  const partial=await apply(env,id,1,'drop-e1',{kind:'reconnect',replacementId:'r1',decisions:[{edgeId:'e1',decision:'drop'}]});
+  assert.equal(partial.status,200,JSON.stringify(partial.data));
+  const partialReview=await preview(env,id,2,command);
+  assert.deepEqual(partialReview.data.preview.unresolvedEdgeIds,['e2']);
+  const partialDenied=await request(env,'POST',path(id)+'apply',{
+    expectedRevision:2,operationId:'try-partial',command:{...command,expectedPreview:partialReview.data.preview}
+  });
+  assert.equal(partialDenied.status,422,JSON.stringify(partialDenied.data));
+  assert.equal(partialDenied.data.error,'UNRESOLVED_RELATIONS');
+  assert.deepEqual(counts(sql,id),{revision:2,history:3,receipts:2});
+  const resolved=await apply(env,id,2,'drop-e2',{kind:'reconnect',replacementId:'r1',decisions:[{edgeId:'e2',decision:'drop'}]});
+  assert.equal(resolved.status,200,JSON.stringify(resolved.data));
+  const completed=await apply(env,id,3,'finish',{kind:'complete',replacementId:'r1'});
+  assert.equal(completed.status,200,JSON.stringify(completed.data));
+  assert.equal((await graph(env,id)).graph.replacements[0].state,'completed');
+  assert.deepEqual(counts(sql,id),{revision:4,history:5,receipts:4});
 });
 test('cancel uses trusted historical revision from DB, not client-supplied baseline',async()=>{
  const {db,sql}=storage(),env={DB:db,CW_WORKFLOW_ENABLED:'true'},id=await create(env);
