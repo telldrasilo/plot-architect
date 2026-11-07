@@ -174,6 +174,27 @@ def main():
         assert page.locator('[data-node="b"]').count()==0
         page.reload();ready()
         assert page.locator('[data-cw-original="b"]').count()==0
+        assert page.locator('[data-node="b"]').count()==0
+
+        # Hidden completed original remains accessible through a read-only history.
+        page.locator("#tools-more").click()
+        page.locator("#cw-replacement-history").click()
+        history=page.locator("#cw-replacement-history-dialog")
+        history.wait_for()
+        assert "Original scene" in history.inner_text()
+        assert "2 из 2 решены" in history.inner_text()
+        assert db["applies"]==2 and db["generic"]==0
+        page.keyboard.press("Escape")
+        assert history.count()==0 and db["applies"]==2
+        page.locator("#tools-more").click()
+        page.locator("#cw-replacement-history").click()
+        history.locator('[data-cw-history-id="r1"]').click()
+        assert history.count()==0
+        assert "Original scene" in inspector.inner_text()
+        assert "2 из 2 решены" in inspector.inner_text()
+        assert "Заменено" in inspector.inner_text()
+        assert db["applies"]==2
+        assert page.locator('[data-node="b"]').count()==0
 
         # A changed canon is NEVER restored with a generic rollback.
         db.update({"graph":initial(blocked=True),"revision":14,
