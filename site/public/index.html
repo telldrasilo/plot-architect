@@ -4301,9 +4301,14 @@ async function cwOpenCandidateReview(replacementId){
    JSON.stringify(plan.suspendedEdges?.map(e=>e.id))!==JSON.stringify(source.suspendedEdgeIds)||
    !Array.isArray(plan.availableCandidates)||plan.selectedNodeIds?.length!==0)
    throw Error('История замены не совпадает с предпросмотром');
-  if(plan.originalNodes.some(n=>JSON.stringify(nby(n.id))!==JSON.stringify(n))||
-   plan.suspendedEdges.some(e=>JSON.stringify(eby(e.id))!==JSON.stringify(e)))
-   throw Error('Оригинал или исходные стрелки изменились');
+  if(plan.originalNodes.some(n=>{
+     const old=nby(n.id);
+     return !old||old.title!==n.title||old.description!==n.description||
+       old.x!==n.x||old.y!==n.y;
+   })||plan.suspendedEdges.some(e=>{
+     const old=eby(e.id);
+     return !old||old.from!==e.from||old.to!==e.to||old.type!==e.type;
+   }))throw Error('Оригинал или исходные стрелки изменились');
   const eligible=new Set(cwActiveNodes().map(n=>n.id));
   if(plan.availableCandidates.some(c=>!eligible.has(c.node?.id)))
    throw Error('Сервер предложил неактивное событие');
