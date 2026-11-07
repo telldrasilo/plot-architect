@@ -4613,6 +4613,21 @@ function renderOverviewTitles(){
   }
   if(rect){label.style.left=(rect.x-x)+'px';label.style.top=(rect.y-y)+'px';occupied.push(rect)}
   else{label.hidden=true;item.classList.add('label-collided')}
+  // Retired originals are read-only even in semantic zoom. In particular,
+  // never allow the ordinary node drag, link, rename or keyboard delete path.
+  if(cwRetiredNodeIds().has(n.id)){
+   const replacement=(state.replacements||[]).find(r=>
+    r.state==='open'&&r.sourceNodeIds.includes(n.id));
+   const inspect=e=>{
+    e.preventDefault();e.stopPropagation();
+    if(!replacement)return;
+    selected={type:'replacement',id:replacement.id};render();
+   };
+   item.setAttribute('aria-label','На замене: '+n.title);
+   item.onclick=inspect;
+   item.onkeydown=e=>{if(e.key==='Enter'||e.key===' ')inspect(e)};
+   continue;
+  }
   // UX-016: semantic zoom items are real drag handles, not just navigation buttons.
   // Preview updates node coordinates only transiently; one existing safe-transfer
   // transaction (including Undo and tag-preservation) commits on pointerup.
