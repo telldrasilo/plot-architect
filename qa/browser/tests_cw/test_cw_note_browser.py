@@ -195,10 +195,11 @@ def main():
         geometry=other.locator(".gap-note-body").evaluate("""el=>{
             const css=getComputedStyle(el);
             return {clamp:css.webkitLineClamp,visible:el.clientHeight,
-                    natural:el.scrollHeight,line:parseFloat(css.lineHeight)};
+                    natural:el.scrollHeight,line:parseFloat(css.lineHeight),
+                    padding:parseFloat(css.paddingTop)+parseFloat(css.paddingBottom)};
         }""")
         assert geometry["clamp"]=="4",geometry
-        assert geometry["visible"]<=geometry["line"]*4+2,geometry
+        assert geometry["visible"]<=geometry["line"]*4+geometry["padding"]+2,geometry
         assert geometry["natural"]>geometry["visible"],geometry
         other.click()
         assert page.locator("#gap-text").input_value()==task2
