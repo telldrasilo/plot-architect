@@ -52,7 +52,7 @@ const fields={
   accept_draft:['workspaceId','nodeIds','placements','expectedPreview'],
   start_replacement:['replacementId','sourceNodeIds','expectedPreview'],
   reconnect:['replacementId','decisions','expectedPreview'],
-  complete:['replacementId','expectedPreview','acknowledgeUnresolved'],
+  complete:['replacementId','expectedPreview'],
   cancel:['replacementId','expectedPreview']
 };
 function canonical(value){
