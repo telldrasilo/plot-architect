@@ -310,6 +310,8 @@ body.pa-multi-modifier .inspector{pointer-events:none;opacity:.35}/* allows Ctrl
 .canvas-text-format[hidden]{display:none}
 .canvas-text-format button{border:0;border-radius:6px;background:transparent;padding:6px 9px;font-size:11px}
 .canvas-text-format button:hover{background:#49464b}
+.modal.cw-postcanon-modal{width:min(650px,calc(100vw - 28px));max-height:min(88vh,900px);overflow-y:auto;overscroll-behavior:contain}
+.node.cw-restored-readonly{border-style:solid;cursor:default}
 </style></head>
 <body>
 <header><div class="logo" aria-hidden="true">✦</div><div class="project-label"><b>Plot Architect</b><span id="project-current">Кризис наследования</span></div><button id="projects-open" title="Список историй, создание и импорт">▤ Проекты <span id="project-mode">Локально</span></button><div class="spacer"></div><div class="saved" id="saved">● Сохранено локально</div><div class="top-actions"><button class="opt" id="search" data-tip="Найти событие или поле (Ctrl+K)" title="Поиск (Ctrl+K)">⌕ Поиск</button><button class="opt" id="undo" data-tip="Отменить последнее изменение (Ctrl+Z)" title="Отменить (Ctrl+Z)">↶ Отменить</button><button class="opt" id="export">⇩ Экспорт</button><button id="more" title="Сбросить демо">⋯</button></div></header>
@@ -997,8 +999,21 @@ const gapInView=()=>state.gapNotes.filter(n=>n.parent===state.view&&!cwNoteHasWo
 let gapLinkFrom=null;
 const editorialInView=()=>state.editorialFields.filter(f=>f.parent===state.view);
 // Never conflate editorial node.status='proposed' with draft ownership.
-const cwRetiredNodeIds=()=>new Set((state.replacements||[]).flatMap(r=>r.sourceNodeIds||[]));
-const cwSuspendedEdgeIds=()=>new Set((state.replacements||[]).flatMap(r=>r.suspendedEdgeIds||[]));
+const cwLatestPostCanonReview=r=>(r.postCanonReviews||[]).at(-1)||null;
+const cwRestoredOriginal=id=>(state.replacements||[]).find(r=>
+  r.state==='restored'&&(r.sourceNodeIds||[]).includes(id));
+const cwRetiredNodeIds=()=>new Set((state.replacements||[]).flatMap(r=>{
+  const sources=r.state==='restored'?[]:(r.sourceNodeIds||[]);
+  const archived=(cwLatestPostCanonReview(r)?.candidateDecisions||[])
+   .filter(d=>d.decision==='archive').map(d=>d.nodeId);
+  return [...sources,...archived];
+}));
+const cwSuspendedEdgeIds=()=>new Set((state.replacements||[]).flatMap(r=>{
+  const restored=r.state==='restored'
+    ?new Set((cwLatestPostCanonReview(r)?.edgeDecisions||[])
+      .filter(d=>d.decision==='restore').map(d=>d.edgeId)):new Set();
+  return (r.suspendedEdgeIds||[]).filter(id=>!restored.has(id));
+}));
 const cwActiveNodes=()=>{const retired=cwRetiredNodeIds();return state.nodes.filter(n=>!n.workspaceId&&!retired.has(n.id))};
 const visible=()=>cwActiveNodes().filter(n=>n.parent===state.view);
 const currentEdges=()=>{const ids=new Set(visible().map(n=>n.id)),suspended=cwSuspendedEdgeIds();return state.edges.filter(e=>!e.workspaceId&&!suspended.has(e.id)&&ids.has(e.from)&&ids.has(e.to))};
@@ -2553,7 +2568,7 @@ function cwPersistedWorkspaceScene(){
  // workspace is unchanged; endpoints can be canon or an unaccepted draft.
  // Do not feed these edges to active plot rendering or draft socket editing.
  const all=new Map([...state.nodes.map(n=>[n.id,n]),...nodes.map(n=>[n.id,n])]);
- const retired=new Set((state.replacements||[]).flatMap(r=>r.sourceNodeIds));
+ const retired=cwRetiredNodeIds();
  const boundaryEdges=state.edges.filter(e=>{
   if(!ownerIds.has(e.workspaceId)||!['internal','boundary-proposal'].includes(e.draftRelation))
    return false;
@@ -4301,6 +4316,9 @@ function cwRenderReplacementInspector(el,id){
  const resolved=new Map((r.edgeResolutions||[]).map(d=>[d.edgeId,d]));
  const suspended=(r.suspendedEdgeIds||[]).map(edgeId=>eby(edgeId)).filter(Boolean);
  const isOpen=r.state==='open';
+ const latestReview=cwLatestPostCanonReview(r);
+ const candidateOutcomes=new Map((latestReview?.candidateDecisions||[]).map(d=>[d.nodeId,d.decision]));
+ const edgeOutcomes=new Map((latestReview?.edgeDecisions||[]).map(d=>[d.edgeId,d.decision]));
  const choice=cwReplacementChoice?.replacementId===id?cwReplacementChoice:null;
  const active=cwActiveNodes();
  const activeIds=new Set(active.map(n=>n.id));
@@ -4342,26 +4360,36 @@ function cwRenderReplacementInspector(el,id){
   return '<li class="cw-relation-row" data-cw-old-edge="'+esc(e.id)+'">'+
    '<div class="cw-relation-old"><b>'+esc(label)+'</b>'+
    '<span>'+esc(cwReplacementEdgeLabels[e.type]||e.type)+' · исходная связь</span></div>'+
-   suffix+actions+'</li>';
+   suffix+(edgeOutcomes.has(e.id)?'<p class="cw-relation-outcome">'+
+    (edgeOutcomes.get(e.id)==='restore'?'Восстановлена по решению автора':
+      'Оставлена приостановленной при пересмотре')+'</p>':'')+actions+'</li>';
  }).join('');
  el.hidden=false;
  el.innerHTML='<div class="inspect-head"><b>Замена события</b><button id="close-inspect" title="Закрыть">×</button></div>'+
-  '<p class="cw-replacement-status">'+(isOpen?'На замене':'Заменено')+
+  '<p class="cw-replacement-status">'+(r.state==='restored'?'Восстановлено в каноне · оригинал защищён':isOpen?'На замене':'Заменено')+
   ' · исходный сюжет сохранён</p>'+
   original.map(n=>'<div class="ux014-original"><strong>'+esc(n.title)+'</strong>'+
    '<p>'+esc(n.description||'Описание отсутствует')+'</p></div>').join('')+
   '<div class="cw-relations-panel" data-cw-relations="'+esc(id)+'">'+
   '<b>Приостановленные связи · '+resolved.size+' из '+suspended.length+' решены</b>'+
-  '<p class="muted">Приостановлено связей: '+suspended.length+
-  '. Прежние стрелки не действуют в сюжете. Каждая требует отдельного решения.</p>'+
+  '<p class="muted">'+(r.state==='restored'
+   ?'Восстановлены только явно выбранные связи; остальные остаются приостановленными.'
+   :'Приостановлено связей: '+suspended.length+
+    '. Прежние стрелки не действуют в сюжете. Каждая требует отдельного решения.')+'</p>'+
   (edgeRows?'<ol class="cw-relations-list">'+edgeRows+'</ol>':
    '<p class="muted">У события нет приостановленных связей.</p>')+
   '<div class="cw-relations-panel" data-cw-candidates="'+esc(id)+'">'+
   '<b>Новые события, связанные автором · '+(r.candidateNodeIds||[]).length+'</b>'+
   ((r.candidateNodeIds||[]).length?'<ol class="cw-relations-list">'+
-   r.candidateNodeIds.map(nodeId=>'<li>'+esc(nby(nodeId)?.title||nodeId)+'</li>').join('')+'</ol>':
+   r.candidateNodeIds.map(nodeId=>'<li>'+esc(nby(nodeId)?.title||nodeId)+
+   (candidateOutcomes.get(nodeId)==='archive'?' · Исключено из канона':
+    candidateOutcomes.get(nodeId)==='keep'?' · В каноне':' · Не рассмотрено')+'</li>').join('')+'</ol>':
    '<p class="muted">Новые события пока не сопоставлены с этой заменой.</p>')+
-  '<button id="cw-associate-candidates" type="button">Сопоставить новые события…</button>'+
+  (r.state!=='restored'?'<button id="cw-associate-candidates" type="button">Сопоставить новые события…</button>':'')+
+  (r.state!=='restored'&&r.candidateNodeIds?.length?
+   '<button id="cw-review-replacement" type="button">Пересмотреть замену…</button>':'')+
+  (latestReview?'<p class="muted">Пересмотров: '+r.postCanonReviews.length+'. '+
+   (r.state==='restored'?'Оригинал восстановлен и защищён от обычного редактирования.':'Решения можно уточнить новым пересмотром.')+'</p>':'')+
   '<p class="muted">Сопоставление не меняет существующие события и стрелки.</p></div>'+
   (isOpen?'<div class="cw-relation-actions" role="group" aria-label="Действия с заменой">'+
     '<button id="cw-replacement-postpone" type="button">Отложить</button>'+
@@ -4377,7 +4405,10 @@ function cwRenderReplacementInspector(el,id){
  el.querySelector('#close-inspect').onclick=()=>{
   cwReplacementChoice=null;selected=null;render();
  };
- el.querySelector('#cw-associate-candidates').onclick=()=>void cwOpenCandidateReview(id);
+ if(el.querySelector('#cw-associate-candidates'))
+   el.querySelector('#cw-associate-candidates').onclick=()=>void cwOpenCandidateReview(id);
+ if(el.querySelector('#cw-review-replacement'))
+   el.querySelector('#cw-review-replacement').onclick=()=>void cwOpenPostCanonReview(id);
  if(!isOpen)return;
  el.querySelector('#cw-replacement-postpone').onclick=()=>{
   cwReplacementChoice=null;selected=null;render();
@@ -4548,13 +4579,14 @@ function cwOpenReplacementHistory(){
   const resolved=(r.edgeResolutions||[]).length;
   return '<li><button type="button" data-cw-history-id="'+esc(r.id)+'">'+
    '<strong>'+esc(titles.join(', '))+'</strong> · '+
-   (r.state==='completed'?'Завершена':'На замене')+
+   (r.state==='restored'?'Восстановлена':r.state==='completed'?'Завершена':'На замене')+
    '<small>Прежние связи: '+resolved+' из '+(r.suspendedEdgeIds||[]).length+
-   ' решены. Оригинал и исходные отношения сохранены.</small></button></li>';
+   ' решены. Пересмотров: '+(r.postCanonReviews||[]).length+
+   '. Оригинал и исходные отношения сохранены.</small></button></li>';
  }).join('');
  $('modal-host').innerHTML='<div class="backdrop"><section class="modal" role="dialog" aria-modal="true" id="cw-replacement-history-dialog" aria-labelledby="cw-history-title">'+
   '<h2 id="cw-history-title">История замен</h2>'+
-  '<p>Исходные события не удаляются. Завершённые оригиналы скрыты с сюжетного полотна, но здесь доступны для чтения.</p>'+
+  '<p>Исходники не удаляются. Завершённые скрыты с полотна; явно восстановленные видны в каноне, но защищены от обычного редактирования.</p>'+
   '<ol class="cw-relations-list">'+records+'</ol>'+
   '<p class="muted">Просмотр не восстанавливает события и не изменяет прежние решения о связях.</p>'+
   '<div class="buttons"><button type="button" id="cw-history-close">Закрыть</button></div></section></div>';
@@ -4570,6 +4602,268 @@ function cwOpenReplacementHistory(){
  $('cw-replacement-history-dialog').querySelector('[data-cw-history-id]')?.focus();
 }
 
+
+
+/** CW-010 C3b4: post-canon decisions are explicit author choices, never guesses. */
+let cwPostCanonReview=null;
+function cwClosePostCanonReview(){
+ if(cwAcceptanceBusy)return;
+ cwPostCanonReview=null;modalOpen=false;$('modal-host').innerHTML='';
+}
+function cwShowPostCanonChoices(){
+ const r=cwPostCanonReview;if(!r||r.phase!=='choose')return;
+ const prior=r.command;
+ const current=key=>key==='original'?prior?.originalAction||'':'';
+ const select=(attr,id,options,value='')=>
+  '<select required '+attr+'="'+esc(id)+'">'+
+   '<option value="">Выберите решение…</option>'+
+   options.map(([k,label])=>'<option value="'+k+'" '+(value===k?'selected':'')+'>'+label+'</option>').join('')+
+  '</select>';
+ const orig=r.initial.originalNodes.map(n=>'<li><b>'+esc(n.title)+'</b> — '+
+  esc(n.description||'Без описания')+'</li>').join('');
+ const candidates=r.initial.candidateNodes.map(n=>{
+  const value=prior?.candidateDecisions?.find(x=>x.nodeId===n.id)?.decision||'';
+  return '<label class="field">Новое событие: <b>'+esc(n.title)+'</b>'+
+   '<p class="muted">'+esc(n.description||'Без описания')+'</p>'+
+   select('data-cw-post-candidate',n.id,[
+    ['keep','Оставить в действующем каноне'],
+    ['archive','Исключить из канона, но сохранить в истории']
+   ],value)+'</label>';
+ }).join('');
+ const relations=r.initial.suspendedEdges.map(e=>{
+  const value=prior?.edgeDecisions?.find(x=>x.edgeId===e.id)?.decision||'';
+  return '<label class="field">Исходная связь: <b>'+
+    esc(cwReplacementRelationLabel(e))+'</b> · '+
+    esc(cwReplacementEdgeLabels[e.type]||e.type)+
+    select('data-cw-post-edge',e.id,[
+      ['keep_suspended','Оставить приостановленной'],
+      ['restore','Восстановить эту исходную связь (только с оригиналом)']
+    ],value)+'</label>';
+ }).join('');
+ modalOpen=true;
+ $('modal-host').innerHTML='<div class="backdrop"><form class="modal cw-postcanon-modal" id="cw-postcanon-choices" role="dialog" aria-modal="true"'+
+  ' aria-label="Пересмотреть замену">'+
+  '<h2>Пересмотреть замену</h2>'+
+  '<p>Сохранённый оригинал:</p><ul class="cw-replacement-review-edges">'+orig+'</ul>'+
+  '<p>Выберите судьбу оригинала, каждой связанной новой сцены и каждой прежней стрелки. '+
+  'Ничего не выбирается автоматически.</p>'+
+  '<label class="field">Оригинал'+
+  select('data-cw-post-original','original',[
+    ['keep_replaced','Оставить на замене / в истории'],
+    ['restore','Вернуть исходное событие в канон (сохранив историю)']
+  ],current('original'))+'</label>'+
+  '<div class="cw-relations-panel"><b>Каждое новое событие</b>'+candidates+'</div>'+
+  '<div class="cw-relations-panel"><b>Каждая исходная связь</b>'+relations+'</div>'+
+  '<p class="muted">Архивирование сцены с действующими связями блокируется. '+
+  'Ни одна карточка и стрелка физически не удаляется. Старые стрелки не переподключаются автоматически.</p>'+
+  '<div class="buttons"><button id="cw-postcanon-cancel" type="button">Отмена</button>'+
+  '<button id="cw-postcanon-check" type="submit" class="primary">Проверить последствия</button></div>'+
+  '</form></div>';
+ $('cw-postcanon-cancel').onclick=cwClosePostCanonReview;
+ $('cw-postcanon-choices').onsubmit=e=>{
+  e.preventDefault();
+  const originalAction=$('cw-postcanon-choices').querySelector('[data-cw-post-original]').value;
+  const candidateDecisions=[...$('cw-postcanon-choices').querySelectorAll('[data-cw-post-candidate]')]
+   .map(x=>({nodeId:x.dataset.cwPostCandidate,decision:x.value}));
+  const edgeDecisions=[...$('cw-postcanon-choices').querySelectorAll('[data-cw-post-edge]')]
+   .map(x=>({edgeId:x.dataset.cwPostEdge,decision:x.value}));
+  if(!originalAction||candidateDecisions.some(x=>!x.decision)||edgeDecisions.some(x=>!x.decision))
+   return note('Нужно явно решить судьбу каждого события и каждой связи');
+  void cwPreparePostCanonPlan({kind:'review_replacement',replacementId:r.replacementId,
+    originalAction,candidateDecisions,edgeDecisions,acknowledgedTitleConflicts:[]});
+ };
+ $('cw-postcanon-choices').querySelector('select')?.focus();
+}
+function cwPostCanonBlockerText(code){
+ const [kind,id]=code.split(':');
+ const labels={
+  CANDIDATE_NO_LONGER_CANON:'Сцена больше не находится в каноне',
+  CANDIDATE_HAS_RELATIONS:'У сцены есть связи; сначала отдельно разберите их',
+  CANDIDATE_HAS_CHILDREN:'У сцены есть дочерняя детализация',
+  CANDIDATE_IS_OTHER_ORIGINAL:'Сцена является оригиналом другой замены',
+  REWIRED_RELATION_CONFLICT:'Старая связь уже переподключена; её возврат может удвоить причинность',
+  OTHER_ENDPOINT_INACTIVE:'Другой конец прежней связи больше не действует в каноне',
+  DUPLICATE_PLOT_EDGE:'Такая сюжетная связь уже существует',
+  TITLE_CONFLICT_UNACKNOWLEDGED:'Возможное совпадение названий требует явного подтверждения'
+ };
+ return (labels[kind]||kind)+(id?' · '+id:'');
+}
+function cwShowPostCanonReview(){
+ const r=cwPostCanonReview;if(!r||r.phase!=='review')return;
+ const p=r.plan,action=r.command.originalAction;
+ const report=[
+  '<li>Оригинал: '+(action==='restore'?'вернуть в действующий канон':'оставить на замене')+'</li>',
+  ...p.candidateDecisions.map(d=>'<li>Новое событие <b>'+esc(nby(d.nodeId)?.title||d.nodeId)+
+    '</b>: '+(d.decision==='archive'?'исключить из канона, сохранить данные':'сохранить в каноне')+'</li>'),
+  ...p.edgeDecisions.map(d=>'<li>Связь <b>'+esc(cwReplacementRelationLabel(eby(d.edgeId)))+
+    '</b>: '+(d.decision==='restore'?'восстановить':'оставить приостановленной')+'</li>')
+ ].join('');
+ const ack=new Set(r.command.acknowledgedTitleConflicts||[]);
+ const titleRows=p.possibleTitleConflicts.map(id=>{
+  const n=nby(id);
+  return '<label class="check-row"><input type="checkbox" data-cw-post-title="'+esc(id)+
+    '" '+(ack.has(id)?'checked':'')+'>'+
+    '<span>Осознанно оставить одновременно активными события с названием «'+
+    esc(n?.title||id)+'»</span></label>';
+ }).join('');
+ const blockedOther=p.blockers.filter(x=>!x.startsWith('TITLE_CONFLICT_UNACKNOWLEDGED:'));
+ const blockedTitle=p.blockers.filter(x=>x.startsWith('TITLE_CONFLICT_UNACKNOWLEDGED:'));
+ const needConfirm=blockedTitle.length>0||
+  p.possibleTitleConflicts.some(id=>!ack.has(id));
+ const canApply=blockedOther.length===0&&!needConfirm;
+ modalOpen=true;
+ $('modal-host').innerHTML='<div class="backdrop"><form class="modal cw-postcanon-modal" id="cw-postcanon-review" role="dialog" aria-modal="true"'+
+  ' aria-label="Проверить последствия пересмотра">'+
+  '<h2>Подтвердить пересмотр?</h2>'+
+  '<p>Это изменит действующую проекцию сюжета только согласно выбранным решениям. '+
+  'Сохранённые исходники и новые события не удаляются.</p>'+
+  '<ol class="cw-replacement-review-edges">'+report+'</ol>'+
+  (titleRows?'<div class="cw-relations-panel"><b>Возможные дубли названий</b>'+
+    '<p class="muted">Это текстовое совпадение, не доказанная смысловая тождественность.</p>'+
+    titleRows+'</div>':'')+
+  (p.blockers.length?'<div role="alert" class="cw-relations-panel"><b>Операция заблокирована</b>'+
+   '<ul>'+p.blockers.map(x=>'<li>'+esc(cwPostCanonBlockerText(x))+'</li>').join('')+'</ul>'+
+   '<p>Измените решения либо подтвердите совпадения и повторите проверку. Данные не изменены.</p></div>':'')+
+  '<p class="muted">Изменения применятся одним защищённым сохранением после проверки ревизии. '+
+  'При Esc ничего не записывается.</p>'+
+  '<div class="buttons"><button type="button" id="cw-postcanon-cancel">Отмена</button>'+
+  '<button type="button" id="cw-postcanon-back">Изменить решения</button>'+
+  '<button type="submit" id="cw-postcanon-submit" class="primary" '+(blockedOther.length?'disabled':'')+'>'+
+  (canApply?'Подтвердить изменения':'Проверить подтверждения')+'</button></div>'+
+  '</form></div>';
+ $('cw-postcanon-cancel').onclick=cwClosePostCanonReview;
+ $('cw-postcanon-back').onclick=()=>{
+  cwPostCanonReview={...r,phase:'choose'};cwShowPostCanonChoices();
+ };
+ $('cw-postcanon-review').onsubmit=e=>{
+  e.preventDefault();
+  const next=[...$('cw-postcanon-review').querySelectorAll('[data-cw-post-title]:checked')]
+   .map(x=>x.dataset.cwPostTitle).sort();
+  const same=JSON.stringify(next)===JSON.stringify([...ack].sort());
+  if(!same||needConfirm)return void cwPreparePostCanonPlan({...r.command,
+    acknowledgedTitleConflicts:next});
+  if(!p.blockers.length)return void cwCommitPostCanonReview();
+  note('Операция заблокирована: сначала устраните конфликты');
+ };
+ $('cw-postcanon-submit').focus();
+}
+async function cwOpenPostCanonReview(replacementId){
+ const replacement=(state.replacements||[]).find(r=>r.id===replacementId);
+ if(!replacement||replacement.state==='restored'||!replacement.candidateNodeIds?.length||
+    !cwCleanForOperation()||cwPostCanonReview)
+  return note('Нужны сохранённая замена, явно связанные кандидаты и синхронизация');
+ const projectId=activeProjectId,revision=remote.revision;
+ cwAcceptanceBusy=true;
+ try{
+  const reply=await cwWorkflowRequest(projectId,'preview',{expectedRevision:revision,
+   command:{kind:'review_replacement',replacementId}});
+  const initial=reply.preview;
+  if(activeProjectId!==projectId||remote.revision!==revision||remote.dirty||remote.blocked||
+   initial?.replacementId!==replacementId||initial.state!==replacement.state||
+   initial.selectionComplete!==false||
+   initial.earlierReviewCount!==(replacement.postCanonReviews||[]).length||
+   JSON.stringify(initial.originalNodes?.map(n=>n.id))!==JSON.stringify(replacement.sourceNodeIds)||
+   JSON.stringify(initial.suspendedEdges?.map(e=>e.id))!==JSON.stringify(replacement.suspendedEdgeIds)||
+   JSON.stringify(initial.candidateNodes?.map(n=>n.id))!==JSON.stringify(replacement.candidateNodeIds))
+   throw Error('Невозможно доверять предпросмотру без совпадающей истории');
+  for(const n of [...initial.originalNodes,...initial.candidateNodes])
+   if(nby(n.id)?.title!==n.title||nby(n.id)?.description!==n.description||
+      nby(n.id)?.x!==n.x||nby(n.id)?.y!==n.y)
+    throw Error('Событие изменилось после открытия инспектора');
+  for(const edge of initial.suspendedEdges)
+   if(eby(edge.id)?.from!==edge.from||eby(edge.id)?.to!==edge.to||eby(edge.id)?.type!==edge.type)
+    throw Error('Исходная связь больше не совпадает с историей');
+  cwPostCanonReview={phase:'choose',projectId,revision,replacementId,initial};
+  cwShowPostCanonChoices();
+ }catch(err){
+  cwPostCanonReview=null;note('Пересмотр не открыт: '+err.message);
+ }finally{cwAcceptanceBusy=false}
+}
+async function cwPreparePostCanonPlan(command){
+ const r=cwPostCanonReview;
+ if(!r||!cwCleanForOperation()||cwAcceptanceBusy||
+   activeProjectId!==r.projectId||remote.revision!==r.revision)
+  return note('Проект изменился. Обновите его перед пересмотром');
+ cwAcceptanceBusy=true;
+ try{
+  const response=await cwWorkflowRequest(r.projectId,'preview',{
+    expectedRevision:r.revision,command});
+  const plan=response.preview;
+  if(activeProjectId!==r.projectId||remote.revision!==r.revision||remote.dirty||remote.blocked||
+     plan?.replacementId!==r.replacementId||plan.selectionComplete!==true||
+     plan.earlierReviewCount!==r.initial.earlierReviewCount||
+     JSON.stringify(plan.originalNodes)!==JSON.stringify(r.initial.originalNodes)||
+     JSON.stringify(plan.candidateNodes)!==JSON.stringify(r.initial.candidateNodes)||
+     JSON.stringify(plan.suspendedEdges)!==JSON.stringify(r.initial.suspendedEdges)||
+     JSON.stringify(plan.candidateDecisions)!==JSON.stringify(command.candidateDecisions)||
+     JSON.stringify(plan.edgeDecisions)!==JSON.stringify(command.edgeDecisions)||
+     plan.originalAction!==command.originalAction||!Array.isArray(plan.blockers))
+    throw Error('Серверный план отличается от подтверждённых исходных данных');
+  cwPostCanonReview={...r,phase:'review',command,plan,operationId:crypto.randomUUID()};
+  cwShowPostCanonReview();
+ }catch(err){note('Не удалось проверить решения: '+err.message)}
+ finally{cwAcceptanceBusy=false}
+}
+async function cwCommitPostCanonReview(){
+ const r=cwPostCanonReview;
+ if(!r||r.phase!=='review'||r.plan.blockers.length||cwAcceptanceBusy||
+    !cwCleanForOperation()||activeProjectId!==r.projectId||remote.revision!==r.revision)
+  return note('Пересмотр не готов к сохранению');
+ cwAcceptanceBusy=true;
+ if($('cw-postcanon-submit'))$('cw-postcanon-submit').disabled=true;
+ try{
+  const saved=await cwWorkflowRequest(r.projectId,'apply',{
+   expectedRevision:r.revision,operationId:r.operationId,
+   command:{...r.command,expectedPreview:r.plan}
+  });
+  if(saved.kind!=='review_replacement'||!Number.isSafeInteger(saved.revision)||
+     !saved.changes?.originalAndCandidatesPreserved||
+     (saved.changes.autoRewiredEdgeIds||[]).length)
+   throw Error('Нет подтверждения безопасного пересмотра');
+  const readback=await apiRequest('/api/projects/'+encodeURIComponent(r.projectId));
+  const record=readback.graph?.replacements?.find(x=>x.id===r.replacementId);
+  const latest=(record?.postCanonReviews||[]).at(-1);
+  const nodes=new Map((readback.graph?.nodes||[]).map(n=>[n.id,n]));
+  const edges=new Map((readback.graph?.edges||[]).map(e=>[e.id,e]));
+  if(activeProjectId!==r.projectId||remote.dirty||remote.blocked||
+     !Number.isSafeInteger(readback.revision)||readback.revision<saved.revision||
+     (record.postCanonReviews||[]).length!==r.initial.earlierReviewCount+1||
+     record.state!==(r.command.originalAction==='restore'?'restored':r.initial.state)||
+     !latest||latest.originalAction!==r.command.originalAction||
+     JSON.stringify(latest.candidateDecisions)!==JSON.stringify(r.plan.candidateDecisions)||
+     JSON.stringify(latest.edgeDecisions)!==JSON.stringify(r.plan.edgeDecisions)||
+     JSON.stringify(latest.acknowledgedTitleConflicts)!==
+        JSON.stringify(r.plan.acknowledgedTitleConflicts))
+    throw Error('Сохранённое решение не совпадает с предпросмотром');
+  for(const n of [...r.initial.originalNodes,...r.initial.candidateNodes]){
+   const savedNode=nodes.get(n.id);
+   if(!savedNode||savedNode.title!==n.title||savedNode.description!==n.description||
+      savedNode.x!==n.x||savedNode.y!==n.y)
+    throw Error('Сохранённое событие изменилось во время пересмотра');
+  }
+  for(const edge of r.initial.suspendedEdges){
+   const savedEdge=edges.get(edge.id);
+   if(!savedEdge||savedEdge.from!==edge.from||savedEdge.to!==edge.to||
+      savedEdge.type!==edge.type)
+    throw Error('Прежняя связь была изменена при пересмотре');
+  }
+  state=validateImported(readback.graph);remote.revision=readback.revision;remote.dirty=false;
+  cwPostCanonReview=null;modalOpen=false;$('modal-host').innerHTML='';
+  history=[];selectedNodeIds.clear();linkFrom=null;cwReplacementChoice=null;
+  selected={type:'replacement',id:r.replacementId};
+  recomputeFieldTags();save(false);render();
+  $('saved').textContent='✓ Сохранено локально · '+remote.revision;
+  note('Пересмотр сохранён. События и прежние связи не удалены');
+ }catch(err){
+  if(['REVISION_CONFLICT','PREVIEW_STALE','OPERATION_ID_REUSED'].includes(err.code)){
+   cwPostCanonReview=null;modalOpen=false;$('modal-host').innerHTML='';
+   note('Конфликт ревизий. Перечитайте проект перед следующим пересмотром');
+  }else note('Сохранение пересмотра не подтверждено: '+err.message);
+ }finally{
+  cwAcceptanceBusy=false;
+  if($('cw-postcanon-submit'))$('cw-postcanon-submit').disabled=false;
+ }
+}
 
 let cwCandidateReview=null; // ephemeral reviewed candidate selection, never a story edit
 function cwCloseCandidateReview(){
@@ -4986,7 +5280,7 @@ async function cwConfirmStartReplacement(){
   if($('cw-start-replacement-confirm'))$('cw-start-replacement-confirm').disabled=false;
  }
 }
-function renderNodes(){const host=$('nodes');host.innerHTML='';const keep=focusIds(),chosen=new Set(groupIds()),parentsWithChildren=new Set(state.nodes.filter(k=>k.parent).map(k=>k.parent));for(const n of visible()){const rewrite=rewriteBy(n.id);const el=document.createElement('article');el.className='node '+(n.size||'normal')+(rewrite?' rewrite-draft':'')+(chosen.has(n.id)?' selected':'')+(n.status==='proposed'?' node-proposed':'')+(keep&&!keep.has(n.id)?' focus-muted':'');el.dataset.node=n.id;el.style.left=n.x+'px';el.style.top=n.y+'px';if(Number.isFinite(n.width)||Number.isFinite(n.height))el.classList.add('node-custom-size');if(Number.isFinite(n.width))el.style.width=widthOf(n)+'px';if(Number.isFinite(n.height))el.style.minHeight=heightOf(n)+'px';el.style.setProperty('--color',colorOf(n));el.tabIndex=0;el.setAttribute('aria-label',(rewrite?'Заметка переработки: ':'Событие: ')+n.title);el.innerHTML=`${chosen.size===1&&chosen.has(n.id)?`<div class="node-actions">${!rewrite?'<button data-command="inside" title="Открыть детали">↗ Внутрь</button><button data-command="link" title="Соединить с другим событием">↗ Связать</button><button data-command="after" title="Продолжить сюжет" aria-label="Продолжить сюжет">＋</button>':''}<button data-command="edit" title="Редактировать">⋯</button></div>`:''}${rewrite?'<div class="ux014-node-kind">▤ Заметка · переработка</div>':''}<div class="node-header"><div class="node-marker"></div><div class="node-title">${esc(n.title)}</div></div><div class="node-note">${esc(rewrite?(rewrite.taskText||'Что изменить?'):(n.description||'Добавьте короткое описание события'))}</div><div class="node-foot">${rewrite?`<span class="ux014-rewrite-status">Исходник сохранён · задание на переработку</span>`:tagNames(n).map(tag=>`<span class="field-chip ${tag.manual?'manual-chip':''}" title="${tag.manual?'Закреплённый тег':'Назначен полем'}">${esc(tag.name)}</span>`).join('')}${!rewrite&&!tagNames(n).length?'<span>Без поля</span>':''}${!rewrite?editorialInView().filter(ef=>ef.memberIds.includes(n.id)).map(ef=>`<span class="editorial-chip" title="Редакторское задание, не смысловой тег">▨ ${esc(ef.title)}</span>`).join(''):''}${!rewrite&&parentsWithChildren.has(n.id)?'<span class="tag">Есть детали</span>':''}</div>${chosen.size===1&&chosen.has(n.id)?'<button class="node-resize-grip" title="Изменить ширину и высоту карточки" aria-label="Изменить размер ноды">⤡</button>':''}`;if(!rewrite){
+function renderNodes(){const host=$('nodes');host.innerHTML='';const keep=focusIds(),chosen=new Set(groupIds()),parentsWithChildren=new Set(state.nodes.filter(k=>k.parent).map(k=>k.parent));for(const n of visible()){const rewrite=rewriteBy(n.id),protectedOriginal=cwRestoredOriginal(n.id);const el=document.createElement('article');el.className='node '+(n.size||'normal')+(protectedOriginal?' cw-restored-readonly':'')+(rewrite?' rewrite-draft':'')+(chosen.has(n.id)?' selected':'')+(n.status==='proposed'?' node-proposed':'')+(keep&&!keep.has(n.id)?' focus-muted':'');el.dataset.node=n.id;el.style.left=n.x+'px';el.style.top=n.y+'px';if(Number.isFinite(n.width)||Number.isFinite(n.height))el.classList.add('node-custom-size');if(Number.isFinite(n.width))el.style.width=widthOf(n)+'px';if(Number.isFinite(n.height))el.style.minHeight=heightOf(n)+'px';el.style.setProperty('--color',colorOf(n));el.tabIndex=0;el.setAttribute('aria-label',(protectedOriginal?'Восстановленный оригинал, только чтение: ':rewrite?'Заметка переработки: ':'Событие: ')+n.title);el.innerHTML=`${!protectedOriginal&&chosen.size===1&&chosen.has(n.id)?`<div class="node-actions">${!rewrite?'<button data-command="inside" title="Открыть детали">↗ Внутрь</button><button data-command="link" title="Соединить с другим событием">↗ Связать</button><button data-command="after" title="Продолжить сюжет" aria-label="Продолжить сюжет">＋</button>':''}<button data-command="edit" title="Редактировать">⋯</button></div>`:''}${rewrite?'<div class="ux014-node-kind">▤ Заметка · переработка</div>':protectedOriginal?'<div class="ux014-node-kind">Восстановлен · оригинал защищён</div>':''}<div class="node-header"><div class="node-marker"></div><div class="node-title">${esc(n.title)}</div></div><div class="node-note">${esc(rewrite?(rewrite.taskText||'Что изменить?'):(n.description||'Добавьте короткое описание события'))}</div><div class="node-foot">${rewrite?`<span class="ux014-rewrite-status">Исходник сохранён · задание на переработку</span>`:tagNames(n).map(tag=>`<span class="field-chip ${tag.manual?'manual-chip':''}" title="${tag.manual?'Закреплённый тег':'Назначен полем'}">${esc(tag.name)}</span>`).join('')}${!rewrite&&!tagNames(n).length?'<span>Без поля</span>':''}${!rewrite?editorialInView().filter(ef=>ef.memberIds.includes(n.id)).map(ef=>`<span class="editorial-chip" title="Редакторское задание, не смысловой тег">▨ ${esc(ef.title)}</span>`).join(''):''}${!rewrite&&parentsWithChildren.has(n.id)?'<span class="tag">Есть детали</span>':''}</div>${!protectedOriginal&&chosen.size===1&&chosen.has(n.id)?'<button class="node-resize-grip" title="Изменить ширину и высоту карточки" aria-label="Изменить размер ноды">⤡</button>':''}`;if(!rewrite&&!protectedOriginal){
   const socket=document.createElement('button');
   socket.type='button';socket.className='cw-free-source';
   socket.dataset.linkSource=n.id;
@@ -4997,7 +5291,8 @@ function renderNodes(){const host=$('nodes');host.innerHTML='';const keep=focusI
   el.append(socket);
  }
  host.append(el);
- el.onclick=e=>{if(e.target.closest('button'))return;e.stopPropagation();if(dragCompletedFor===n.id){dragCompletedFor=null;return}if(completeGapLink('plot_node',n.id))return;if(linkFrom){finishLink(n.id);return}if(e.ctrlKey||e.metaKey){toggleNodeSelection(n.id);return}setNodeSelection([n.id],n.id)};el.ondblclick=e=>{if(e.target.closest('button'))return;e.stopPropagation();notifyModal('Переименовать','Изменение не затронет связи.', 'Название',v=>commit(()=>{nby(n.id).title=v},'Название изменено'),n.title)};
+ el.onclick=e=>{if(e.target.closest('button'))return;e.stopPropagation();
+  if(protectedOriginal){selectedNodeIds.clear();selected={type:'replacement',id:protectedOriginal.id};render();return}if(dragCompletedFor===n.id){dragCompletedFor=null;return}if(completeGapLink('plot_node',n.id))return;if(linkFrom){finishLink(n.id);return}if(e.ctrlKey||e.metaKey){toggleNodeSelection(n.id);return}setNodeSelection([n.id],n.id)};el.ondblclick=e=>{if(e.target.closest('button'))return;e.stopPropagation();if(protectedOriginal)return;notifyModal('Переименовать','Изменение не затронет связи.', 'Название',v=>commit(()=>{nby(n.id).title=v},'Название изменено'),n.title)};
  el.querySelectorAll('[data-command]').forEach(b=>b.onclick=e=>{e.stopPropagation();const id=n.id;const c=b.dataset.command;if(c==='after')addAfter(id);if(c==='link'){linkFrom=id;selected={type:'node',id};render();note('Нажмите на другую карточку — создадим последовательность')}if(c==='edit'){suppressInspectorForNode=null;selected={type:'node',id};renderInspector()}if(c==='inside'){state.view=id;selected=null;pan={x:110,y:95,scale:1};render();note('Внутренний уровень — отдельное полотно')}});
  const grip=el.querySelector('.node-resize-grip');
  if(grip){
@@ -5007,7 +5302,7 @@ function renderNodes(){const host=$('nodes');host.innerHTML='';const keep=focusI
   grip.addEventListener('pointercancel',()=>{if(interaction?.type==='node-resize'&&interaction.id===n.id){interaction=null;render()}});
  }
  el.addEventListener('pointerdown',ev=>{
-  if(ev.button!==0||ev.target.closest('button')||ev.ctrlKey||ev.metaKey)return;
+  if(protectedOriginal||ev.button!==0||ev.target.closest('button')||ev.ctrlKey||ev.metaKey)return;
   const ids=selected?.type==='node'&&groupIds().includes(n.id)?groupIds():[n.id];
   const members=ids.map(id=>{const nd=nby(id);return nd?{id,x:nd.x,y:nd.y}:null}).filter(Boolean);
   interaction={type:'node',id:n.id,startX:ev.clientX,startY:ev.clientY,members,moved:false};
@@ -5031,7 +5326,11 @@ function renderNodes(){const host=$('nodes');host.innerHTML='';const keep=focusI
   askPreserveFieldTags(previewNodeMove(i.members,dx,dy));
  });
  el.addEventListener('pointercancel',()=>{const i=interaction;if(i?.type==='node'&&i.id===n.id){interaction=null;restoreMove(i);render()}});
- el.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();if(e.ctrlKey||e.metaKey)toggleNodeSelection(n.id);else setNodeSelection([n.id],n.id)}if(e.key==='Delete'){e.preventDefault();if(groupIds().length>1&&groupIds().includes(n.id))deleteSelectedGroup();else{selected={type:'node',id:n.id};selectedNodeIds.clear();deleteSelected()}}};
+ el.onkeydown=e=>{if(protectedOriginal){
+   if(e.key==='Enter'||e.key===' '){e.preventDefault();selectedNodeIds.clear();selected={type:'replacement',id:protectedOriginal.id};render()}
+   if(e.key==='Delete'){e.preventDefault();note('Восстановленный оригинал сохранён в истории. Удаление здесь недоступно')}
+   return;
+  }if(e.key==='Enter'){e.preventDefault();if(e.ctrlKey||e.metaKey)toggleNodeSelection(n.id);else setNodeSelection([n.id],n.id)}if(e.key==='Delete'){e.preventDefault();if(groupIds().length>1&&groupIds().includes(n.id))deleteSelectedGroup();else{selected={type:'node',id:n.id};selectedNodeIds.clear();deleteSelected()}}};
  }
  cwRenderReplacementOriginals(host);
  renderEdges()}
@@ -5062,6 +5361,10 @@ function renderInspector(){const el=$('inspector');if(!selected||
   (selected.type==='node'&&suppressInspectorForNode===selected.id)){
   el.hidden=true;return}
  if(selected.type==='node'&&groupIds().length>1){el.hidden=false;el.innerHTML=`<div class="inspect-head"><b>Выделено ${groupIds().length} событий</b><button id="close-inspect">×</button></div><p class="muted">Перетаскивайте любую выбранную карточку, чтобы переместить группу. Ctrl/⌘+клик — добавить или исключить. Shift+рамка — расширить выбор.</p><p class="muted">При выходе из смыслового поля предлагается сохранить его тег.</p><div class="inspect-actions"><button id="group-editorial">▨ Поле переработки</button>${editorialInView().length?'<button id="group-add-existing">Добавить в задание…</button>':''}<button id="group-clear">Снять выделение</button><button id="group-delete">Удалить выбранные…</button></div>`;$('close-inspect').onclick=$('group-clear').onclick=()=>setNodeSelection([]);$('group-delete').onclick=deleteSelectedGroup;$('group-editorial').onclick=createEditorialFieldFromSelection;if($('group-add-existing'))$('group-add-existing').onclick=addSelectedToEditorialField;return}
+if(selected.type==='node'){
+  const returned=cwRestoredOriginal(selected.id);
+  if(returned){selected={type:'replacement',id:returned.id};return cwRenderReplacementInspector(el,returned.id)}
+ }
 if(selected.type==='replacement')return cwRenderReplacementInspector(el,selected.id);
 if(selected.type==='gapNote'){const n=gnby(selected.id);if(!n){el.hidden=true;return}return renderGapInspector(el,n)}
  if(selected.type==='gapLink'){const l=state.gapLinks.find(x=>x.id===selected.id);if(!l){el.hidden=true;return}el.hidden=false;el.innerHTML=`<div class="inspect-head"><b>Связь заметки</b><button id="close-inspect">×</button></div><p class="muted">Редакторский контекст, не причинная связь истории.</p><button id="gap-link-delete">Удалить связь</button>`;$('close-inspect').onclick=()=>{selected=null;render()};$('gap-link-delete').onclick=()=>{commit(()=>{state.gapLinks=state.gapLinks.filter(x=>x.id!==l.id)},'Связь удалена');selected=null;render()};return}
@@ -5903,6 +6206,7 @@ document.addEventListener('keydown',e=>{
   }
   if(!$('tools-menu').hidden){$('tools-menu').hidden=true;$('tools-more').setAttribute('aria-expanded','false')}
   if(gapLinkFrom){gapLinkFrom=null;note('Редакторская связь отменена');return}if(linkFrom){linkFrom=null;render();return}
+  if(cwPostCanonReview&&!cwAcceptanceBusy){e.preventDefault();cwClosePostCanonReview();return;}
   if(cwCandidateReview&&!cwAcceptanceBusy){e.preventDefault();cwCloseCandidateReview();return;}
   if(cwReplacementHistoryDialog){e.preventDefault();cwCloseReplacementHistory();return;}
   if(cwReplacementLifecycleReview&&!cwAcceptanceBusy){
