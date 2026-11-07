@@ -202,8 +202,10 @@ body.pa-multi-modifier .inspector{pointer-events:none;opacity:.35}/* allows Ctrl
 .gap-note-layer{position:absolute;inset:0;pointer-events:none;z-index:3}
 .gap-note{position:absolute;width:252px;min-height:105px;border:1px solid #8c7a59;border-radius:12px;background:#302c25;box-shadow:0 10px 27px #0005;pointer-events:auto;cursor:grab;touch-action:none;color:#e8ddc8}
 .gap-note.selected{border-color:#d1b780;box-shadow:0 0 0 2px #ad956252,0 10px 30px #0006}
-.gap-note-head{font-size:12px;font-weight:650;color:#d9c5a1;padding:13px 15px 8px;display:flex;align-items:center;gap:7px}
-.gap-note-body{font-size:12px;line-height:1.55;color:#eee6da;padding:0 15px 14px;white-space:pre-wrap;overflow-wrap:anywhere}
+/* Quiet object type; the task appears just once below it. */
+.gap-note-head{font-size:10px;font-weight:550;color:#bfae91;padding:11px 15px 5px}
+.gap-note-title{font-size:13px;font-weight:650;line-height:1.4;color:#f0e7d7;padding:0 15px 5px;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere}
+.gap-note-body{font-size:13px;line-height:1.55;color:#eee6da;padding:0 15px 12px;white-space:pre-wrap;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hidden}
 .gap-note-empty{color:#aaa08d;font-style:italic}
 .gap-note-foot{padding:0 15px 10px;font-size:10px;color:#c3ad8d}
 .gap-note-editor{width:100%;min-height:110px;resize:vertical}
