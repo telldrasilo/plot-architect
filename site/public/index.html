@@ -4018,6 +4018,13 @@ function cwRenderReplacementInspector(el,id){
   '. Прежние стрелки не действуют в сюжете. Каждая требует отдельного решения.</p>'+
   (edgeRows?'<ol class="cw-relations-list">'+edgeRows+'</ol>':
    '<p class="muted">У события нет приостановленных связей.</p>')+
+  '<div class="cw-relations-panel" data-cw-candidates="'+esc(id)+'">'+
+  '<b>Новые события, связанные автором · '+(r.candidateNodeIds||[]).length+'</b>'+
+  ((r.candidateNodeIds||[]).length?'<ol class="cw-relations-list">'+
+   r.candidateNodeIds.map(nodeId=>'<li>'+esc(nby(nodeId)?.title||nodeId)+'</li>').join('')+'</ol>':
+   '<p class="muted">Новые события пока не сопоставлены с этой заменой.</p>')+
+  '<button id="cw-associate-candidates" type="button">Сопоставить новые события…</button>'+
+  '<p class="muted">Сопоставление не меняет существующие события и стрелки.</p></div>'+
   (isOpen?'<div class="cw-relation-actions" role="group" aria-label="Действия с заменой">'+
     '<button id="cw-replacement-postpone" type="button">Отложить</button>'+
     '<button id="cw-complete-replacement" type="button" '+(resolved.size<suspended.length?'disabled ':'')+
@@ -4032,6 +4039,7 @@ function cwRenderReplacementInspector(el,id){
  el.querySelector('#close-inspect').onclick=()=>{
   cwReplacementChoice=null;selected=null;render();
  };
+ el.querySelector('#cw-associate-candidates').onclick=()=>void cwOpenCandidateReview(id);
  if(!isOpen)return;
  el.querySelector('#cw-replacement-postpone').onclick=()=>{
   cwReplacementChoice=null;selected=null;render();
@@ -4224,9 +4232,172 @@ function cwOpenReplacementHistory(){
  $('cw-replacement-history-dialog').querySelector('[data-cw-history-id]')?.focus();
 }
 
+
+let cwCandidateReview=null; // ephemeral reviewed candidate selection, never a story edit
+function cwCloseCandidateReview(){
+ if(cwAcceptanceBusy)return;
+ cwCandidateReview=null;modalOpen=false;$('modal-host').innerHTML='';
+}
+function cwShowCandidateChoices(){
+ const r=cwCandidateReview;if(!r||r.phase!=='choose')return;
+ const rows=r.plan.availableCandidates.map(c=>
+  '<label class="check-row"><input data-cw-candidate="'+esc(c.node.id)+'" type="checkbox">'+
+  '<span><b>'+esc(c.node.title)+'</b> <small>'+
+  (c.provenance==='draft_at_start'?'черновик на момент начала':'создано после начала')+
+  '</small><span class="muted"> · '+esc(c.node.description||'Без описания')+'</span></span></label>').join('');
+ modalOpen=true;
+ $('modal-host').innerHTML='<div class="backdrop"><form class="modal" id="cw-candidate-choose">'+
+  '<h2>Сопоставить новые события</h2>'+
+  '<p>Оригинал: <b>'+esc(r.plan.originalNodes.map(n=>n.title).join(', '))+'</b></p>'+
+  '<p>Отметьте только события, которые вы сами связываете с этой заменой. Совпадение названий и расположение карточек ничего не доказывают.</p>'+
+  '<div role="group" aria-label="Новые события">'+rows+'</div>'+
+  '<p class="muted">Новые события останутся действующим сюжетом. Прежние связи не восстановятся автоматически.</p>'+
+  '<div class="buttons"><button id="cw-candidates-cancel" type="button">Отмена</button>'+
+  '<button id="cw-candidates-check" type="submit" class="primary">Проверить выбор</button></div></form></div>';
+ $('cw-candidates-cancel').onclick=cwCloseCandidateReview;
+ $('cw-candidate-choose').onsubmit=e=>{
+  e.preventDefault();
+  const ids=[...$('cw-candidate-choose').querySelectorAll('[data-cw-candidate]:checked')].map(x=>x.dataset.cwCandidate);
+  if(!ids.length)return note('Выберите хотя бы одно событие');
+  void cwPrepareCandidateConfirmation(ids);
+ };
+ $('cw-candidate-choose').querySelector('[data-cw-candidate]')?.focus();
+}
+function cwShowCandidateConfirmation(){
+ const r=cwCandidateReview;if(!r||r.phase!=='confirm')return;
+ const selected=new Set(r.command.nodeIds);
+ const rows=r.plan.availableCandidates.filter(c=>selected.has(c.node.id)).map(c=>
+  '<li><b>'+esc(c.node.title)+'</b> · '+esc(c.node.description||'Без описания')+'</li>').join('');
+ const matches=r.plan.possibleExactTitleDuplicates||[];
+ modalOpen=true;
+ $('modal-host').innerHTML='<div class="backdrop"><form class="modal" id="cw-candidate-confirm-dialog">'+
+  '<h2>Сохранить сопоставление?</h2>'+
+  '<p>Исходное событие: <b>'+esc(r.plan.originalNodes.map(n=>n.title).join(', '))+'</b></p>'+
+  '<ul class="cw-replacement-review-edges">'+rows+'</ul>'+
+  (matches.length?'<p class="muted">Проверка: '+matches.length+
+   ' совпадений названий с оригиналом. Возможные сюжетные дубли потребуют отдельного решения.</p>':'')+
+  '<p>Это только редакторская привязка. Никаких новых стрелок, удаления событий или отката канона.</p>'+
+  '<div class="buttons"><button id="cw-candidate-confirm-cancel" type="button">Отмена</button>'+
+  '<button id="cw-candidate-confirm" type="submit" class="primary">Сохранить сопоставление</button></div></form></div>';
+ $('cw-candidate-confirm-cancel').onclick=cwCloseCandidateReview;
+ $('cw-candidate-confirm-dialog').onsubmit=e=>{e.preventDefault();void cwConfirmCandidateLink()};
+ $('cw-candidate-confirm').focus();
+}
+async function cwOpenCandidateReview(replacementId){
+ const source=(state.replacements||[]).find(r=>r.id===replacementId);
+ if(!source||!cwCleanForOperation()||cwAcceptanceBusy||cwCandidateReview)
+  return note('Дождитесь синхронизации Graphite Local');
+ const projectId=activeProjectId,revision=remote.revision;
+ cwAcceptanceBusy=true;
+ try{
+  const response=await cwWorkflowRequest(projectId,'preview',{expectedRevision:revision,
+   command:{kind:'link_replacement_candidates',replacementId,nodeIds:[]}});
+  if(activeProjectId!==projectId||remote.revision!==revision||remote.dirty||remote.blocked)
+   throw Error('Проект изменился');
+  const plan=response.preview;
+  if(plan?.replacementId!==replacementId||plan.state!==source.state||
+   JSON.stringify(plan.alreadyLinkedNodeIds)!==JSON.stringify(source.candidateNodeIds||[])||
+   JSON.stringify(plan.originalNodes?.map(n=>n.id))!==JSON.stringify(source.sourceNodeIds)||
+   JSON.stringify(plan.suspendedEdges?.map(e=>e.id))!==JSON.stringify(source.suspendedEdgeIds)||
+   !Array.isArray(plan.availableCandidates)||plan.selectedNodeIds?.length!==0)
+   throw Error('История замены не совпадает с предпросмотром');
+  if(plan.originalNodes.some(n=>{
+     const old=nby(n.id);
+     return !old||old.title!==n.title||old.description!==n.description||
+       old.x!==n.x||old.y!==n.y;
+   })||plan.suspendedEdges.some(e=>{
+     const old=eby(e.id);
+     return !old||old.from!==e.from||old.to!==e.to||old.type!==e.type;
+   }))throw Error('Оригинал или исходные стрелки изменились');
+  const eligible=new Set(cwActiveNodes().map(n=>n.id));
+  if(plan.availableCandidates.some(c=>!eligible.has(c.node?.id)))
+   throw Error('Сервер предложил неактивное событие');
+  if(!plan.availableCandidates.length)return note('Пока нет новых событий для сопоставления');
+  cwCandidateReview={phase:'choose',projectId,revision,replacementId,plan};
+  cwShowCandidateChoices();
+ }catch(err){
+  cwCandidateReview=null;note('Сопоставление не открыто: '+err.message);
+ }finally{cwAcceptanceBusy=false}
+}
+async function cwPrepareCandidateConfirmation(nodeIds){
+ const r=cwCandidateReview;
+ if(!r||r.phase!=='choose'||!cwCleanForOperation()||cwAcceptanceBusy||
+   activeProjectId!==r.projectId||remote.revision!==r.revision)return note('Ревизия изменилась');
+ const available=new Set(r.plan.availableCandidates.map(c=>c.node.id));
+ if(!nodeIds.length||new Set(nodeIds).size!==nodeIds.length||nodeIds.some(id=>!available.has(id)))
+  return note('Выбор содержит недоступное событие');
+ cwAcceptanceBusy=true;
+ try{
+  const command={kind:'link_replacement_candidates',replacementId:r.replacementId,nodeIds};
+  const response=await cwWorkflowRequest(r.projectId,'preview',{expectedRevision:r.revision,command});
+  const plan=response.preview;
+  if(activeProjectId!==r.projectId||remote.revision!==r.revision||remote.dirty||remote.blocked||
+   JSON.stringify(plan?.selectedNodeIds)!==JSON.stringify(nodeIds)||
+   JSON.stringify(plan?.alreadyLinkedNodeIds)!==JSON.stringify(r.plan.alreadyLinkedNodeIds)||
+   JSON.stringify(plan?.availableCandidates)!==JSON.stringify(r.plan.availableCandidates)||
+   JSON.stringify(plan?.originalNodes)!==JSON.stringify(r.plan.originalNodes)||
+   JSON.stringify(plan?.suspendedEdges)!==JSON.stringify(r.plan.suspendedEdges))
+   throw Error('Изменился состав событий в серверном предпросмотре');
+  cwCandidateReview={...r,phase:'confirm',command,plan,operationId:crypto.randomUUID()};
+  cwShowCandidateConfirmation();
+ }catch(err){note('Не удалось проверить сопоставление: '+err.message)}
+ finally{cwAcceptanceBusy=false}
+}
+async function cwConfirmCandidateLink(){
+ const r=cwCandidateReview;
+ if(!r||r.phase!=='confirm'||cwAcceptanceBusy||!cwCleanForOperation()||
+  activeProjectId!==r.projectId||remote.revision!==r.revision)return note('Ревизия изменилась');
+ cwAcceptanceBusy=true;
+ if($('cw-candidate-confirm'))$('cw-candidate-confirm').disabled=true;
+ try{
+  const saved=await cwWorkflowRequest(r.projectId,'apply',{
+   expectedRevision:r.revision,operationId:r.operationId,
+   command:{...r.command,expectedPreview:r.plan}});
+  if(saved.kind!=='link_replacement_candidates'||!Number.isSafeInteger(saved.revision))
+   throw Error('Нет серверного подтверждения');
+  const latest=await apiRequest('/api/projects/'+encodeURIComponent(r.projectId));
+  const updated=latest.graph?.replacements?.find(x=>x.id===r.replacementId);
+  if(activeProjectId!==r.projectId||remote.dirty||remote.blocked||
+   !Number.isSafeInteger(latest.revision)||latest.revision<saved.revision||
+   updated?.state!==r.plan.state||
+   JSON.stringify(updated.candidateNodeIds)!==
+    JSON.stringify([...r.plan.alreadyLinkedNodeIds,...r.command.nodeIds]))
+   throw Error('Повторное чтение не подтвердило сопоставление');
+  for(const old of r.plan.originalNodes){
+   const n=latest.graph.nodes.find(x=>x.id===old.id);
+   if(JSON.stringify(n)!==JSON.stringify(old))throw Error('Оригинал изменился');
+  }
+  for(const old of r.plan.suspendedEdges){
+   const e=latest.graph.edges.find(x=>x.id===old.id);
+   if(JSON.stringify(e)!==JSON.stringify(old))throw Error('Прежняя стрелка изменилась');
+  }
+  for(const item of r.plan.availableCandidates.filter(c=>r.command.nodeIds.includes(c.node.id))){
+   const n=latest.graph.nodes.find(x=>x.id===item.node.id);
+   if(JSON.stringify(n)!==JSON.stringify(item.node))throw Error('Новая сцена изменилась');
+  }
+  state=validateImported(latest.graph);remote.revision=latest.revision;remote.dirty=false;
+  cwCandidateReview=null;modalOpen=false;$('modal-host').innerHTML='';
+  history=[];selectedNodeIds.clear();linkFrom=null;
+  selected={type:'replacement',id:r.replacementId};
+  recomputeFieldTags();save(false);render();
+  $('saved').textContent='✓ Сохранено локально · '+remote.revision;
+  note('Авторское сопоставление сохранено, сюжет не изменился');
+ }catch(err){
+  // The same operationId is retained on ambiguous apply/readback errors.
+  if(['REVISION_CONFLICT','PREVIEW_STALE','OPERATION_ID_REUSED'].includes(err.code)){
+   cwCandidateReview=null;modalOpen=false;$('modal-host').innerHTML='';
+   note('Конфликт ревизии. Перечитайте проект и повторите проверку');
+  }else note('Сопоставление не подтверждено: '+err.message);
+ }finally{
+  cwAcceptanceBusy=false;
+  if($('cw-candidate-confirm'))$('cw-candidate-confirm').disabled=false;
+ }
+}
+
 let cwReplacementLifecycleReview=null; // server preview + stable operationId; never plot data
 const cwRestoreReasons={
  DECISIONS_ALREADY_APPLIED:'По старым стрелкам уже сохранены решения',
+ CANDIDATES_ALREADY_LINKED:'Новые события уже сопоставлены с заменой',
  ORIGINALS_CHANGED:'Исходные события или их связи изменились',
  CANON_CHANGED_SINCE_REPLACEMENT:'После начала замены изменился действующий сюжет',
  RESTORED_GRAPH_INVALID:'Восстановленный граф не проходит проверку'
@@ -5386,6 +5557,7 @@ document.addEventListener('keydown',e=>{
   }
   if(!$('tools-menu').hidden){$('tools-menu').hidden=true;$('tools-more').setAttribute('aria-expanded','false')}
   if(gapLinkFrom){gapLinkFrom=null;note('Редакторская связь отменена');return}if(linkFrom){linkFrom=null;render();return}
+  if(cwCandidateReview&&!cwAcceptanceBusy){e.preventDefault();cwCloseCandidateReview();return;}
   if(cwReplacementHistoryDialog){e.preventDefault();cwCloseReplacementHistory();return;}
   if(cwReplacementLifecycleReview&&!cwAcceptanceBusy){
    e.preventDefault();cwCloseReplacementLifecycleReview();return;
