@@ -66,6 +66,7 @@ def main():
   page.locator("#add-canvas-text").click()
   editor=page.locator("[data-canvas-text-editor]").first
   editor.wait_for()
+  assert editor.evaluate("(e)=>getComputedStyle(e).fontSize")=="14px","annotation body should be readable at 14px"
   assert editor.evaluate("(e)=>document.activeElement===e"),"single click creates active inline editor"
   assert not page.locator("#modal-host .modal").count(),"no modal or settings window"
   editor.type("Тест 03 — завершение замены",delay=1)
@@ -103,6 +104,7 @@ def main():
   select_block(0)
   menu.locator('[data-ct-format="heading"]').click()
   page.wait_for_function("()=>__graphite.getState().canvasTexts[0].blocks[0].type==='heading'")
+  assert editor.locator("h3").first.evaluate("(e)=>getComputedStyle(e).fontSize")=="16px","annotation heading should be 16px"
   select_block(1)
   menu.locator('[data-ct-format="underline"]').click()
   page.wait_for_function("()=>__graphite.getState().canvasTexts[0].blocks[1].runs.some(r=>r.underline)")
@@ -193,6 +195,8 @@ def main():
   page.wait_for_function("()=>Array.isArray(__graphite.getState().canvasTexts)&&__graphite.getState().canvasTexts.length===2")
   new=page.evaluate("()=>structuredClone(__graphite.getState().canvasTexts[0])")
   assert new["blocks"]==db["graph"]["canvasTexts"][0]["blocks"]
+  assert page.locator("[data-canvas-text]").first.evaluate(
+   "(e)=>e.getBoundingClientRect().height>=e.querySelector('[data-canvas-text-editor]').getBoundingClientRect().height"),"larger text must remain visible after reload"
   assert new["width"]>420
   assert len(db["graph"]["canvasTexts"])==2
   assert db["graph"]["canvasTexts"][1]["blocks"][0]["runs"][0]["text"]=="Свободное пояснение внутри поля"
