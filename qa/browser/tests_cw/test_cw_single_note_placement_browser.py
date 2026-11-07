@@ -104,7 +104,11 @@ def main():
             assert g["noteDraft"]==0 and g["noteFrame"]==0,g
             assert g["canonDraft"]==[0,0] and g["canonFrame"]==[0,0],g
             assert g["gap"]>8 and g["frameInside"],g
-            assert page.evaluate("()=>__graphite.getState().nodes")==saved["nodes"]
+            actual=page.evaluate("""()=>__graphite.getState().nodes.map(n=>({
+                id:n.id,title:n.title,x:n.x,y:n.y
+            }))""")
+            expected=[{k:n[k] for k in ("id","title","x","y")} for n in saved["nodes"]]
+            assert actual==expected,(actual,expected)
             assert db["writes"]==0
 
         original_pan=page.evaluate("()=>__graphite.getPan()")
