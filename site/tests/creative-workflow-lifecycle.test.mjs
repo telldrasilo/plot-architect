@@ -59,7 +59,7 @@ test('unresolved relations block completion even when obsolete acknowledgement i
   const {graph:g}=begin(),before=clone(g),preview=completePreview(g);
   assert.deepEqual(preview.unresolvedEdgeIds,['e1','e2','e3']);
   raises(()=>applyCompleteReplacement(g,{replacementId:'r1',expectedPreview:preview,expectedRevision:10}),'UNRESOLVED_RELATIONS');
-  raises(()=>applyCompleteReplacement(g,{replacementId:'r1',expectedPreview:preview,expectedRevision:10}),'UNRESOLVED_RELATIONS');
+  raises(()=>applyCompleteReplacement(g,{replacementId:'r1',expectedPreview:preview,expectedRevision:10,acknowledgeUnresolved:true}),'UNRESOLVED_RELATIONS');
   assert.deepEqual(g,before);
 });
 test('even one remaining suspended relation blocks completion after partial decisions',()=>{
