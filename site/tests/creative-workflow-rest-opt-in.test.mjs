@@ -180,6 +180,53 @@ test('direct guarded API forbids completion with outstanding relations and retir
   assert.equal((await graph(env,id)).graph.replacements[0].state,'completed');
   assert.deepEqual(counts(sql,id),{revision:4,history:5,receipts:4});
 });
+test('C3b explicit candidate linkage is guarded, attributed from trusted history and replayable',async()=>{
+ const {db,sql}=storage(),env={DB:db,CW_WORKFLOW_ENABLED:'true'},id=await create(env);
+ let started=await apply(env,id,0,'start-provenance',{kind:'start_replacement',replacementId:'r1',sourceNodeIds:['n2']});
+ assert.equal(started.status,200,JSON.stringify(started.data));
+ // A deliberately unconnected new canon event is added through ordinary editor
+ // saving. The candidate workflow does not guess that it replaces N2.
+ let saved=await graph(env,id),working=structuredClone(saved.graph);
+ working.nodes.push({id:'new-scene',title:'Исходный поворот',description:'Другой исход',x:700,y:320,parent:null});
+ let ordinary=await request(env,'PUT','/api/projects/'+id,{
+  name:saved.name,expectedRevision:1,graph:working});
+ assert.equal(ordinary.status,200,JSON.stringify(ordinary.data));
+ const before=(await graph(env,id)).graph;
+ assert.deepEqual(before.replacements[0].candidateNodeIds??[],[]);
+ const kind={kind:'link_replacement_candidates',replacementId:'r1',nodeIds:['new-scene']};
+ const previewed=await preview(env,id,2,kind);
+ assert.equal(previewed.status,200,JSON.stringify(previewed.data));
+ assert.deepEqual(previewed.data.preview.selectedNodeIds,['new-scene']);
+ assert.deepEqual(previewed.data.preview.possibleExactTitleDuplicates,['new-scene']);
+ assert.deepEqual(previewed.data.preview.availableCandidates.map(c=>c.provenance),['created_after_start']);
+ const sizeBefore=counts(sql,id);
+ const payload={expectedRevision:2,operationId:'link-new-scene',
+  command:{...kind,expectedPreview:previewed.data.preview}};
+ const one=await request(env,'POST',path(id)+'apply',payload);
+ assert.equal(one.status,200,JSON.stringify(one.data));
+ assert.deepEqual(one.data.changes.linkedNodeIds,['new-scene']);
+ const replay=await request(env,'POST',path(id)+'apply',payload);
+ assert.equal(replay.status,200);assert.equal(replay.data.replayed,true);
+ assert.deepEqual(counts(sql,id),{revision:3,history:sizeBefore.history+1,receipts:sizeBefore.receipts+1});
+ const after=(await graph(env,id)).graph;
+ assert.deepEqual(after.replacements[0].candidateNodeIds,['new-scene']);
+ assert.deepEqual(after.nodes,before.nodes);
+ assert.deepEqual(after.edges,before.edges);
+ // Nor can generic PUT silently erase a newly linked candidate.
+ const missing=structuredClone(after);missing.nodes=missing.nodes.filter(n=>n.id!=='new-scene');
+ const denied=await request(env,'PUT','/api/projects/'+id,{name:saved.name,expectedRevision:3,graph:missing});
+ assert.equal(denied.status,422,JSON.stringify(denied.data));
+ assert.deepEqual(counts(sql,id),{revision:3,history:sizeBefore.history+1,receipts:sizeBefore.receipts+1});
+ const injected=await request(env,'POST',path(id)+'preview',{expectedRevision:3,
+  command:{...kind,baselineGraph:working}});
+ assert.equal(injected.status,422);assert.equal(injected.data.error,'COMMAND_INVALID');
+ const oldCanon=await preview(env,id,3,{...kind,nodeIds:['n1']});
+ assert.equal(oldCanon.status,422);assert.equal(oldCanon.data.error,'CANDIDATE_PREEXISTING_CANON');
+ const stale=await request(env,'POST',path(id)+'apply',{expectedRevision:2,operationId:'stale-candidate',
+  command:{...kind,expectedPreview:previewed.data.preview}});
+ assert.equal(stale.status,409);assert.equal(stale.data.error,'REVISION_CONFLICT');
+ assert.deepEqual((await graph(env,id)).graph.replacements[0].candidateNodeIds,['new-scene']);
+});
 test('cancel uses trusted historical revision from DB, not client-supplied baseline',async()=>{
  const {db,sql}=storage(),env={DB:db,CW_WORKFLOW_ENABLED:'true'},id=await create(env);
  const r=await apply(env,id,0,'start',{kind:'start_replacement',replacementId:'r1',sourceNodeIds:['n2']});

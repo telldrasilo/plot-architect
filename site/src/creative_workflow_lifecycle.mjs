@@ -98,6 +98,7 @@ export function previewCancelReplacement(graph,{replacementId,baselineGraph}={})
     fail('BASELINE_REVISION_MISMATCH','snapshot does not represent the recorded prior revision');
   const blockers=[];
   if((r.edgeResolutions??[]).length)blockers.push('DECISIONS_ALREADY_APPLIED');
+  if((r.candidateNodeIds??[]).length)blockers.push('CANDIDATES_ALREADY_LINKED');
   const old=originals(baselineGraph,r),now=originals(graph,r);
   if(JSON.stringify(old)!==JSON.stringify(now))blockers.push('ORIGINALS_CHANGED');
   const after=clone(graph);

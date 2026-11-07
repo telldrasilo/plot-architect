@@ -28,6 +28,7 @@ import {
   applyStartReplacement
 } from './creative_workflow_contract.mjs';
 import {previewReplacementReconnection,applyReplacementReconnection} from './creative_workflow_reconnection.mjs';
+import {previewLinkReplacementCandidates,applyLinkReplacementCandidates} from './creative_workflow_replacement_candidates.mjs';
 import {
   previewCompleteReplacement,
   previewCancelReplacement,
@@ -52,6 +53,7 @@ const fields={
   accept_draft:['workspaceId','nodeIds','placements','expectedPreview'],
   start_replacement:['replacementId','sourceNodeIds','expectedPreview'],
   reconnect:['replacementId','decisions','expectedPreview'],
+  link_replacement_candidates:['replacementId','nodeIds','expectedPreview'],
   complete:['replacementId','expectedPreview'],
   cancel:['replacementId','expectedPreview']
 };
@@ -102,6 +104,10 @@ async function runDomain(db,projectId,graph,expectedRevision,command){
     case 'accept_draft':return applyDraftAcceptance(graph,args);
     case 'start_replacement':return applyStartReplacement(graph,args);
     case 'reconnect':return applyReplacementReconnection(graph,args);
+    case 'link_replacement_candidates':{
+      const baselineGraph=await baselineFromHistory(db,projectId,graph,command.replacementId);
+      return applyLinkReplacementCandidates(graph,{...args,baselineGraph});
+    }
     case 'complete':return applyCompleteReplacement(graph,args);
     case 'cancel':{
       // Always load the baseline from THIS project's immutable history.
@@ -235,6 +241,11 @@ export async function previewWorkflowCommand(db,{projectId,expectedRevision,comm
     case 'accept_draft': preview=previewDraftAcceptance(graph,command);break;
     case 'start_replacement': preview=previewReplacementStart(graph,command.sourceNodeIds);break;
     case 'reconnect': preview=previewReplacementReconnection(graph,command);break;
+    case 'link_replacement_candidates':{
+      const baselineGraph=await baselineFromHistory(db,projectId,graph,command.replacementId);
+      preview=previewLinkReplacementCandidates(graph,{...command,baselineGraph});
+      break;
+    }
     case 'complete': preview=previewCompleteReplacement(graph,command);break;
     case 'cancel':{
       const baselineGraph=await baselineFromHistory(db,projectId,graph,command.replacementId);

@@ -100,6 +100,11 @@ export function assertOrdinaryGraphWrite(previousRaw,nextRaw){
     ...(previous.replacements??[]).flatMap(r=>r.suspendedEdgeIds)
   ]);
   const newNodes=byId(next.nodes),newEdges=byId(next.edges);
+  // Authored replacement candidates remain auditable after later edits.
+  // Ordinary generic PUT cannot erase a linked candidate without a distinct,
+  // reviewed workflow. Unlike protected originals, their text is editable.
+  for(const candidateId of (previous.replacements??[]).flatMap(r=>r.candidateNodeIds??[]))
+    if(!newNodes.has(candidateId))fail('PROTECTED_CANDIDATE_REMOVED',candidateId);
   for(const id of frozenNodeIds){
     if(!newNodes.has(id)||!exact(protectedNodeContent(oldNodes.get(id)),
       protectedNodeContent(newNodes.get(id))))
