@@ -3487,22 +3487,26 @@ function completeGapLink(kind,id){if(!gapLinkFrom)return false;const source=gapL
 function deleteGapNote(id){if(!gnby(id))return; if(!confirm('Удалить заметку и её контекстные связи? Сюжетные события останутся.'))return;
  commit(()=>{state.gapNotes=state.gapNotes.filter(n=>n.id!==id);state.gapLinks=state.gapLinks.filter(l=>!(l.from.kind==='gap_note'&&l.from.id===id)&&!(l.to.kind==='gap_note'&&l.to.id===id))},'Заметка удалена');selected=null;render();
 }
-// The user has not named a legacy/default note yet. Distinguish active tasks
-// by a short visible excerpt; never rewrite persisted titles behind their back.
-function gapNoteDisplayTitle(n){
- const title=String(n.title||'Заметка').trim()||'Заметка';
- if(title!=='Заметка')return title;
- const task=String(n.text||'').replace(/\s+/g,' ').trim();
- if(!task)return title;
- const chars=Array.from(task),excerpt=chars.slice(0,52).join('');
- return title+' · '+excerpt+(chars.length>52?'…':'');
+// Existing default names are stored as "Заметка". They remain unchanged:
+ // distinguish pending tasks by their ONE visible body, not by repeating
+ // that body in a generated heading. Authored names are separate headings.
+function gapNoteCustomTitle(n){
+ const title=String(n.title||'').trim();
+ return title&&title!=='Заметка'?title:'';
 }
 function renderGapNotes(){const host=$('gap-notes');host.innerHTML='';
  for(const n of gapInView()){
   const el=document.createElement('article');el.className='gap-note'+(selected?.type==='gapNote'&&selected.id===n.id?' selected':'');
   el.dataset.gapNote=n.id;el.style.left=n.x+'px';el.style.top=n.y+'px';el.tabIndex=0;
-  el.setAttribute('aria-label',gapNoteDisplayTitle(n));
-  el.innerHTML=`<div class="gap-note-head">▤ ${esc(gapNoteDisplayTitle(n))}</div><div class="gap-note-body ${!n.text?'gap-note-empty':''}">${esc(n.text||'Напишите, что нужно придумать здесь…')}</div><div class="gap-note-foot">${cwWorkflowEnabled()?(cwNoteHasWorkspace(n.id)?'Варианты в рабочей области':cwPreparedNoteAlternatives.has(n.id)?'Подготовлено '+cwPreparedNoteAlternatives.get(n.id).branches.length+' ветвей':'Редакторское задание') :'Редакторское задание'} · не сюжетное событие</div>`;
+  const customTitle=gapNoteCustomTitle(n),task=String(n.text||'');
+  // When the author's exact title IS the task, show it once as a heading.
+  const showBody=!customTitle||customTitle.trim()!==task.trim();
+  const accessibleTask=task.replace(/\s+/g,' ').trim();
+  el.setAttribute('aria-label','Заметка: '+(customTitle||accessibleTask||'Без задания').slice(0,120));
+  el.innerHTML=`<div class="gap-note-head">▤ Заметка</div>`+
+   (customTitle?'<div class="gap-note-title">'+esc(customTitle)+'</div>':'')+
+   (showBody?`<div class="gap-note-body ${!task?'gap-note-empty':''}">${esc(task||'Напишите, что нужно придумать здесь…')}</div>`:'')+
+   `<div class="gap-note-foot">${cwWorkflowEnabled()?(cwNoteHasWorkspace(n.id)?'Варианты в рабочей области':cwPreparedNoteAlternatives.has(n.id)?'Подготовлено '+cwPreparedNoteAlternatives.get(n.id).branches.length+' ветвей':'Редакторское задание') :'Редакторское задание'}</div>`;
   host.append(el);
   el.onclick=e=>{e.stopPropagation();if(dragCompletedFor===n.id){dragCompletedFor=null;return}if(completeGapLink('gap_note',n.id))return;selected={type:'gapNote',id:n.id};render()};
   el.addEventListener('pointerdown',e=>{if(e.button!==0||e.target.closest('input,textarea')||e.ctrlKey)return;interaction={type:'gap-note-move',id:n.id,px:e.clientX,py:e.clientY,x:n.x,y:n.y,moved:false};el.setPointerCapture(e.pointerId)});
