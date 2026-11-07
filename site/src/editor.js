@@ -3351,6 +3351,7 @@ function cwShowReplacementStartReview(){
  $('modal-host').innerHTML='<div class="backdrop"><form class="modal" id="cw-start-replacement-dialog">'+
   '<h2>Начать замену события?</h2>'+
   '<p><strong>'+esc(r.plan.originalNodes[0].title)+'</strong> останется на старом месте, но временно выйдет из действующего сюжета. Текст и координаты сохраняются.</p>'+
+  '<p class="cw-replacement-original-preview">'+esc(r.plan.originalNodes[0].description||'Описание отсутствует')+'</p>'+
   '<p>Приостановленные связи ('+r.plan.suspendedEdges.length+'). Они не подключатся автоматически:</p>'+
   (edges?'<ul class="cw-replacement-review-edges">'+edges+'</ul>':'')+
   '<p class="muted">Позднее каждую прежнюю связь потребуется разобрать отдельно.</p>'+
