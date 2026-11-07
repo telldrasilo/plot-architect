@@ -32,6 +32,8 @@ jobs:
         run: python qa/browser/tests_cw/test_cw_note_browser.py
       - name: Inspect same-canvas transient workspace prototype
         run: python qa/browser/tests_cw/test_cw_workspace_preview_browser.py
+      - name: Verify single draft beside its note at zoom and pan
+        run: python qa/browser/tests_cw/test_cw_single_note_placement_browser.py
       - name: Verify persisted workspace reviewed acceptance in synthetic browser
         run: python qa/browser/tests_cw/test_cw_persisted_workspace_accept_browser.py
       - name: Verify cross-boundary editorial arrows after partial acceptance

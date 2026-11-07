@@ -46,6 +46,52 @@ test('one creative idea is one block, not three imposed alternatives',()=>{
  assert.equal(result.command.branches[0].edges.length,0);
  assert.deepEqual(g,old);
 });
+test('single event is placed beside its source note, not down the multi-branch spiral',()=>{
+ const g=graph(),old=clone(g),note=g.gapNotes[0];
+ const result=compile(g,single(1)),area=result.command.workspace;
+ assert.equal(area.x,note.x+272+60);
+ assert.equal(area.y,note.y);
+ assert.equal(result.command.branches[0].nodes[0].x,area.x+36);
+ assert.equal(result.command.branches[0].nodes[0].y,area.y+48);
+ assert.deepEqual(g,old,'compilation cannot move the source note or canonical neighbors');
+ const preview=previewStageNoteAlternatives(g,result.command);
+ const staged=applyStageNoteAlternatives(g,{...result.command,
+  expectedPreview:preview,expectedRevision:g.revision});
+ assert.deepEqual(canonicalProjection(staged.graph),canonicalProjection(g));
+});
+test('blocked adjacent side selects another nearby position without moving canon',()=>{
+ const g=graph(),note=g.gapNotes[0];
+ g.nodes.push({id:'block-right',title:'Сосед',description:'Занимает место справа',
+  x:note.x+332,y:note.y,parent:null});
+ const old=clone(g),area=compile(g,single(1)).command.workspace;
+ assert.equal(area.x,note.x-280-60,'right and bottom occupied, use left side');
+ assert.equal(area.y,note.y);
+ assert.deepEqual(g,old);
+});
+test('long source task uses a wrapped note footprint, not fixed 158px',()=>{
+ const text='Подготовить содержательное событие со множеством ограничений и пояснений. '.repeat(8);
+ const g=validateServerGraph({version:1,revision:5,view:null,nodes:[
+  {id:'right',title:'Сосед справа',description:'Занято',x:900,y:500,parent:null},
+  {id:'left',title:'Сосед слева',description:'Занято',x:180,y:500,parent:null}
+ ],edges:[],fields:[],lanes:[],gapNotes:[
+  {id:'gn1',title:'Заметка',text,status:'pending',x:500,y:500,parent:null}
+ ]});
+ // The right/left blockers are positioned directly at the one-card candidates.
+ const note=g.gapNotes[0],area=compile(g,single(1)).command.workspace;
+ assert.equal(area.x,note.x,'place lone event under the long note');
+ assert.ok(area.y>=note.y+350,'allow for a multiline note before the workspace');
+ assert.ok(area.y<note.y+1200,'still near the note rather than arbitrarily far below');
+});
+test('world translation keeps the single-card placement relative to its note',()=>{
+ const g=graph(),first=compile(g,single(1)).command.workspace;
+ const moved=clone(g),dx=1250,dy=920;
+ for(const n of [...moved.nodes,...moved.gapNotes,...moved.workspaces]){
+  n.x+=dx;n.y+=dy;
+ }
+ const second=compile(moved,single(1)).command.workspace;
+ assert.deepEqual([second.x-first.x,second.y-first.y],[dx,dy]);
+});
+
 test('one idea may contain multiple linked blocks and remain one proposal',()=>{
  const result=compile(graph(),single(3));
  assert.deepEqual(result.shape,{kind:'single',groupCount:1,nodeCount:3,edgeCount:2});

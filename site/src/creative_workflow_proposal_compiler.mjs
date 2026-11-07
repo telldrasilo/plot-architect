@@ -44,24 +44,55 @@ function estimatedHeight(node){
 const overlap=(a,b)=>a.x<b.x+b.width+28&&a.x+a.width+28>b.x
   &&a.y<b.y+b.height+28&&a.y+a.height+28>b.y;
 
-function availablePosition(graph,note,width,height){
+// A note can be much taller than the old 158px shortcut: the editor wraps
+// the task body and, for default titles, displays a contextual excerpt.
+function estimatedNoteHeight(note){
+ const text=String(note.text??''),title=String(note.title||'Заметка');
+ const label=title==='Заметка'&&text.trim()
+  ?title+' · '+Array.from(text.replace(/\s+/g,' ').trim()).slice(0,52).join(''):title;
+ const bodyLines=text.split(/\r?\n/).reduce((sum,line)=>
+  sum+Math.max(1,ceil(Array.from(line).length,30)),0);
+ return Math.max(158,80+Math.max(1,ceil(Array.from(label).length,30))*18+bodyLines*20);
+}
+function availablePosition(graph,note,width,height,{singleCard=false}={}){
+ const sourceHeight=estimatedNoteHeight(note);
  const obstacles=[
   ...(graph.workspaces??[]).map(w=>({x:w.x,y:w.y,width:w.width,height:w.height})),
   ...(graph.nodes??[]).map(n=>({
    x:n.x,y:n.y,width:n.width??270,
    height:Math.max(n.height??0,estimatedHeight(n)+30)
   })),
-  ...(graph.gapNotes??[]).map(n=>({x:n.x,y:n.y,width:272,height:158}))
+  ...(graph.gapNotes??[]).map(n=>({
+   x:n.x,y:n.y,width:272,height:estimatedNoteHeight(n)
+  }))
  ];
- const homeX=Math.round(note.x-30),homeY=Math.round(note.y+210);
+ const vacant=(x,y)=>{
+  const candidate={x,y,width,height};
+  return [x,y,x+width,y+height].every(finite)
+   &&!obstacles.some(rect=>overlap(candidate,rect));
+ };
+ if(singleCard){
+  // A lone proposed event deserves a compact, adjacent workspace. Search
+  // each side of the source note before the general multi-branch fallback.
+  // Never displace surrounding plot nodes, notes, or older workspaces.
+  const gap=60,nearby=[
+   [note.x+272+gap,note.y],
+   [note.x,note.y+sourceHeight+gap],
+   [note.x-width-gap,note.y],
+   [note.x,note.y-height-gap],
+   [note.x+272+gap,note.y+sourceHeight-height],
+   [note.x-width-gap,note.y+sourceHeight-height]
+  ];
+  for(const [x,y] of nearby)
+   if(vacant(x,y))return {x,y};
+ }
+ const homeX=Math.round(note.x-30),homeY=Math.round(note.y+sourceHeight+52);
  const offsets=[0,width+180,-width-180];
  for(let ring=0;ring<40;ring++){
   const y=homeY+ring*(height+110);
   for(const dx of offsets){
    const x=homeX+dx;
-   const candidate={x,y,width,height};
-   if(![x,y,x+width,y+height].every(finite))continue;
-   if(!obstacles.some(rect=>overlap(candidate,rect)))return {x,y};
+   if(vacant(x,y))return {x,y};
   }
  }
  fail('LAYOUT_NO_SPACE','no unobstructed nearby working-area position found');
@@ -121,7 +152,9 @@ export function compileNoteProposal(raw,{noteId,generationId:genId,proposal}={})
  const width=PAD_X*2+maxColumns*WIDTH+(maxColumns-1)*GAP_X;
  const height=PAD_TOP+BOTTOM+groupHeights.reduce((a,b)=>a+b,0)
   +(proposal.groups.length-1)*ROW_GAP;
- const {x,y}=availablePosition(graph,note,width,height);
+ const {x,y}=availablePosition(graph,note,width,height,{
+  singleCard:proposal.kind==='single'&&nodeCount===1
+ });
  const workspaceId='gw-'+genId;
  let rowY=y+PAD_TOP;
  const branches=proposal.groups.map((group,index)=>{
