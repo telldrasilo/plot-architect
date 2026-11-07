@@ -1474,6 +1474,7 @@ function cwBeginDraftDrag(event,card,node,area,svg,links,byId,getSockets){
   }
   const movements=new Map(initial.map(n=>[n.id,{dx,dy}]));
   cwDrawDraftConnections(svg,area,links,getSockets(),movements);
+  cwPaintBoundaryRoutes(svg,movements);
  };
  const move=e=>{
   e.stopPropagation();
@@ -1928,6 +1929,95 @@ function cwPositionDropReview(panel,box,nodeIds){
  panel.style.left=((best.x-boxRect.left)/scale)+'px';
  panel.style.top=((best.y-boxRect.top)/scale)+'px';
 }
+// Boundary relations remain editorial, but their endpoints use the same measured
+// world-space socket geometry as canonical and internal draft relations.
+function cwPaintBoundaryRoutes(svg,moves=new Map()){
+ for(const line of svg.querySelectorAll('[data-cw-boundary-edge]')){
+  const a=moves.get(line.dataset.cwBoundaryFrom)??{dx:0,dy:0};
+  const b=moves.get(line.dataset.cwBoundaryTo)??{dx:0,dy:0};
+  const x1=Number(line.dataset.cwSourceX)+a.dx,y1=Number(line.dataset.cwSourceY)+a.dy;
+  const x2=Number(line.dataset.cwTargetX)+b.dx,y2=Number(line.dataset.cwTargetY)+b.dy;
+  if(![x1,y1,x2,y2].every(Number.isFinite))continue;
+  const d='M '+x1+' '+y1+' L '+x2+' '+y2;
+  line.setAttribute('d',d);
+  const edgeId=line.dataset.cwBoundaryEdge;
+  const hit=[...svg.querySelectorAll('[data-cw-boundary-hit]')]
+   .find(el=>el.dataset.cwBoundaryHit===edgeId);
+  hit?.setAttribute('d',d);
+  const existing=[...svg.querySelectorAll('[data-cw-boundary-direction]')]
+   .find(el=>el.dataset.cwBoundaryDirection===edgeId);
+  const arrow=cwPositionPathDirection(line,existing);
+  if(arrow)arrow.dataset.cwBoundaryDirection=edgeId;
+  for(const [role,x,y] of [['source',x1,y1],['target',x2,y2]]){
+   const key=socketKey(edgeId,role);
+   const dot=[...svg.querySelectorAll('[data-cw-boundary-socket]')]
+    .find(el=>el.dataset.cwBoundarySocket===key);
+   if(dot){dot.setAttribute('cx',String(x));dot.setAttribute('cy',String(y))}
+  }
+ }
+}
+function cwRefreshBoundaryRoutes(data,host){
+ const pending=data.boundaryEdges||[];
+ if(!pending.length)return;
+ const canon=visible().filter(n=>!n.workspaceId);
+ const drafts=data.nodes;
+ const all=[...canon,...drafts];
+ const canonCards=new Map([...document.querySelectorAll('[data-node]')]
+  .map(el=>[el.dataset.node,el]));
+ const draftCards=new Map([...host.querySelectorAll('[data-cw-node]')]
+  .map(el=>[el.dataset.cwNode,el]));
+ const bounds=Object.fromEntries(all.map(n=>{
+  const draft=!!n.workspaceId;
+  const el=(draft?draftCards:canonCards).get(n.id);
+  const fallback=draft?{w:208,h:105}:itemDims(n);
+  return [n.id,{x:n.x,y:n.y,width:el?.offsetWidth||fallback.w,
+   height:el?.offsetHeight||fallback.h}];
+ }));
+ // Include both unchanged canonical and draft edges when allocating distinct
+ // boundary ports. This changes presentation only, never edge ownership/type.
+ const edges=[...new Map([...currentEdges(),...data.edges,...pending]
+  .map(e=>[e.id,e])).values()];
+ const sockets=layoutEdgeSockets({nodes:all,edges,bounds,mode:'full'});
+ for(const area of data.workspaces){
+  const box=[...host.querySelectorAll('[data-cw-workspace]')]
+   .find(el=>el.dataset.cwWorkspace===area.id);
+  const svg=box?.querySelector('.cw-preview-arrows');
+  if(!svg)continue;
+  const owned=pending.filter(e=>e.workspaceId===area.id);
+  const activeIds=new Set(owned.map(e=>e.id));
+  for(const rail of cwRailGeometry(sockets,bounds)){
+   const group=sockets.byNode.get(rail.nodeId)?.[
+    rail.role==='source'?'outgoing':'incoming']||[];
+   if(!group.some(p=>activeIds.has(p.edgeId)))continue;
+   const guide=document.createElementNS('http://www.w3.org/2000/svg','path');
+   guide.setAttribute('class','cw-socket-rail');
+   guide.dataset.cwBoundaryRail=rail.nodeId+':'+rail.role;
+   guide.setAttribute('d',cwRailPath(rail,area.x,area.y));
+   svg.insertBefore(guide,svg.firstChild);
+  }
+  for(const edge of owned){
+   const source=sockets.ports.get(socketKey(edge.id,'source'));
+   const target=sockets.ports.get(socketKey(edge.id,'target'));
+   const line=[...svg.querySelectorAll('[data-cw-boundary-edge]')]
+    .find(el=>el.dataset.cwBoundaryEdge===edge.id);
+   if(!line)continue;
+   if(!source||!target){line.remove();continue}
+   line.dataset.cwBoundaryFrom=edge.from;line.dataset.cwBoundaryTo=edge.to;
+   line.dataset.cwSourceX=String(source.x-area.x);
+   line.dataset.cwSourceY=String(source.y-area.y);
+   line.dataset.cwTargetX=String(target.x-area.x);
+   line.dataset.cwTargetY=String(target.y-area.y);
+   if(semanticZoomLevel()==='full')for(const port of [source,target]){
+    const dot=document.createElementNS('http://www.w3.org/2000/svg','circle');
+    dot.setAttribute('class','cw-preview-socket cw-boundary-socket');
+    dot.dataset.cwBoundarySocket=port.key;
+    dot.setAttribute('r',String(socketUiMetrics({scale:pan.scale}).visualRadiusWorld));
+    svg.append(dot);
+   }
+  }
+  cwPaintBoundaryRoutes(svg);
+ }
+}
 function renderCreativeWorkspacePreview(){
  const host=$('cw-workspace-preview');if(!host)return;
  // Lift the selected editorial panel above canonical cards, not the entire
@@ -2048,18 +2138,8 @@ function renderCreativeWorkspacePreview(){
    line.setAttribute('class','cw-boundary-link'+(selected?' cw-boundary-link-selected':''));
    line.dataset.cwBoundaryEdge=edge.id;
    svg.append(line);
-   const length=Math.hypot(bx-ax,by-ay);
-   if(length>12){
-    const ux=(bx-ax)/length,uy=(by-ay)/length;
-    const hx=bx-13*ux,hy=by-13*uy;
-    const p1=[hx,hy],p2=[hx-8*ux+5*uy,hy-8*uy-5*ux];
-    const p3=[hx-8*ux-5*uy,hy-8*uy+5*ux];
-    const tip=document.createElementNS(namespace,'polygon');
-    tip.setAttribute('points',[p1,p2,p3].map(p=>p.join(',')).join(' '));
-    tip.setAttribute('class','cw-boundary-arrowhead');
-    tip.dataset.cwBoundaryDirection=edge.id;
-    svg.append(tip);
-   }
+   // Direction is positioned on the complete measured path after DOM layout,
+   // using the same V2 arrow utility as canonical and internal draft edges.
    if(edgeEditable){
     const hit=document.createElementNS(namespace,'path');
     hit.setAttribute('d',d);hit.classList.add('cw-draft-edge-hit','cw-boundary-hit');
@@ -2498,6 +2578,7 @@ function renderCreativeWorkspacePreview(){
   }
   if(dropReviewPanel)cwPositionDropReview(dropReviewPanel,box,dropReviewIds);
  }
+ cwRefreshBoundaryRoutes(data,host);
  cwRefreshSocketVisuals();
 }
 
