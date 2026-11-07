@@ -997,8 +997,21 @@ const gapInView=()=>state.gapNotes.filter(n=>n.parent===state.view&&!cwNoteHasWo
 let gapLinkFrom=null;
 const editorialInView=()=>state.editorialFields.filter(f=>f.parent===state.view);
 // Never conflate editorial node.status='proposed' with draft ownership.
-const cwRetiredNodeIds=()=>new Set((state.replacements||[]).flatMap(r=>r.sourceNodeIds||[]));
-const cwSuspendedEdgeIds=()=>new Set((state.replacements||[]).flatMap(r=>r.suspendedEdgeIds||[]));
+const cwLatestPostCanonReview=r=>(r.postCanonReviews||[]).at(-1)||null;
+const cwRestoredOriginal=id=>(state.replacements||[]).find(r=>
+  r.state==='restored'&&(r.sourceNodeIds||[]).includes(id));
+const cwRetiredNodeIds=()=>new Set((state.replacements||[]).flatMap(r=>{
+  const sources=r.state==='restored'?[]:(r.sourceNodeIds||[]);
+  const archived=(cwLatestPostCanonReview(r)?.candidateDecisions||[])
+   .filter(d=>d.decision==='archive').map(d=>d.nodeId);
+  return [...sources,...archived];
+}));
+const cwSuspendedEdgeIds=()=>new Set((state.replacements||[]).flatMap(r=>{
+  const restored=r.state==='restored'
+    ?new Set((cwLatestPostCanonReview(r)?.edgeDecisions||[])
+      .filter(d=>d.decision==='restore').map(d=>d.edgeId)):new Set();
+  return (r.suspendedEdgeIds||[]).filter(id=>!restored.has(id));
+}));
 const cwActiveNodes=()=>{const retired=cwRetiredNodeIds();return state.nodes.filter(n=>!n.workspaceId&&!retired.has(n.id))};
 const visible=()=>cwActiveNodes().filter(n=>n.parent===state.view);
 const currentEdges=()=>{const ids=new Set(visible().map(n=>n.id)),suspended=cwSuspendedEdgeIds();return state.edges.filter(e=>!e.workspaceId&&!suspended.has(e.id)&&ids.has(e.from)&&ids.has(e.to))};
@@ -2553,7 +2566,7 @@ function cwPersistedWorkspaceScene(){
  // workspace is unchanged; endpoints can be canon or an unaccepted draft.
  // Do not feed these edges to active plot rendering or draft socket editing.
  const all=new Map([...state.nodes.map(n=>[n.id,n]),...nodes.map(n=>[n.id,n])]);
- const retired=new Set((state.replacements||[]).flatMap(r=>r.sourceNodeIds));
+ const retired=cwRetiredNodeIds();
  const boundaryEdges=state.edges.filter(e=>{
   if(!ownerIds.has(e.workspaceId)||!['internal','boundary-proposal'].includes(e.draftRelation))
    return false;
@@ -4301,6 +4314,9 @@ function cwRenderReplacementInspector(el,id){
  const resolved=new Map((r.edgeResolutions||[]).map(d=>[d.edgeId,d]));
  const suspended=(r.suspendedEdgeIds||[]).map(edgeId=>eby(edgeId)).filter(Boolean);
  const isOpen=r.state==='open';
+ const latestReview=cwLatestPostCanonReview(r);
+ const candidateOutcomes=new Map((latestReview?.candidateDecisions||[]).map(d=>[d.nodeId,d.decision]));
+ const edgeOutcomes=new Map((latestReview?.edgeDecisions||[]).map(d=>[d.edgeId,d.decision]));
  const choice=cwReplacementChoice?.replacementId===id?cwReplacementChoice:null;
  const active=cwActiveNodes();
  const activeIds=new Set(active.map(n=>n.id));
@@ -4346,22 +4362,28 @@ function cwRenderReplacementInspector(el,id){
  }).join('');
  el.hidden=false;
  el.innerHTML='<div class="inspect-head"><b>Замена события</b><button id="close-inspect" title="Закрыть">×</button></div>'+
-  '<p class="cw-replacement-status">'+(isOpen?'На замене':'Заменено')+
+  '<p class="cw-replacement-status">'+(r.state==='restored'?'Восстановлено в каноне · оригинал защищён':isOpen?'На замене':'Заменено')+
   ' · исходный сюжет сохранён</p>'+
   original.map(n=>'<div class="ux014-original"><strong>'+esc(n.title)+'</strong>'+
    '<p>'+esc(n.description||'Описание отсутствует')+'</p></div>').join('')+
   '<div class="cw-relations-panel" data-cw-relations="'+esc(id)+'">'+
-  '<b>Приостановленные связи · '+resolved.size+' из '+suspended.length+' решены</b>'+
-  '<p class="muted">Приостановлено связей: '+suspended.length+
-  '. Прежние стрелки не действуют в сюжете. Каждая требует отдельного решения.</p>'+
+  '<b>Исходные связи · '+resolved.size+' из '+suspended.length+' разобраны</b>'+
+  '<p class="muted">Исходных связей: '+suspended.length+
+  '. Восстанавливаются только явно выбранные при пересмотре. Остальные сохранены для истории.</p>'+
   (edgeRows?'<ol class="cw-relations-list">'+edgeRows+'</ol>':
    '<p class="muted">У события нет приостановленных связей.</p>')+
   '<div class="cw-relations-panel" data-cw-candidates="'+esc(id)+'">'+
   '<b>Новые события, связанные автором · '+(r.candidateNodeIds||[]).length+'</b>'+
   ((r.candidateNodeIds||[]).length?'<ol class="cw-relations-list">'+
-   r.candidateNodeIds.map(nodeId=>'<li>'+esc(nby(nodeId)?.title||nodeId)+'</li>').join('')+'</ol>':
+   r.candidateNodeIds.map(nodeId=>'<li>'+esc(nby(nodeId)?.title||nodeId)+
+   (candidateOutcomes.get(nodeId)==='archive'?' · Исключено из канона':
+    candidateOutcomes.get(nodeId)==='keep'?' · В каноне':' · Не рассмотрено')+'</li>').join('')+'</ol>':
    '<p class="muted">Новые события пока не сопоставлены с этой заменой.</p>')+
-  '<button id="cw-associate-candidates" type="button">Сопоставить новые события…</button>'+
+  (r.state!=='restored'?'<button id="cw-associate-candidates" type="button">Сопоставить новые события…</button>':'')+
+  (r.state!=='restored'&&r.candidateNodeIds?.length?
+   '<button id="cw-review-replacement" type="button">Пересмотреть замену…</button>':'')+
+  (latestReview?'<p class="muted">Пересмотров: '+r.postCanonReviews.length+'. '+
+   (r.state==='restored'?'Оригинал восстановлен и защищён от обычного редактирования.':'Решения можно уточнить новым пересмотром.')+'</p>':'')+
   '<p class="muted">Сопоставление не меняет существующие события и стрелки.</p></div>'+
   (isOpen?'<div class="cw-relation-actions" role="group" aria-label="Действия с заменой">'+
     '<button id="cw-replacement-postpone" type="button">Отложить</button>'+
@@ -4377,7 +4399,10 @@ function cwRenderReplacementInspector(el,id){
  el.querySelector('#close-inspect').onclick=()=>{
   cwReplacementChoice=null;selected=null;render();
  };
- el.querySelector('#cw-associate-candidates').onclick=()=>void cwOpenCandidateReview(id);
+ if(el.querySelector('#cw-associate-candidates'))
+   el.querySelector('#cw-associate-candidates').onclick=()=>void cwOpenCandidateReview(id);
+ if(el.querySelector('#cw-review-replacement'))
+   el.querySelector('#cw-review-replacement').onclick=()=>void cwOpenPostCanonReview(id);
  if(!isOpen)return;
  el.querySelector('#cw-replacement-postpone').onclick=()=>{
   cwReplacementChoice=null;selected=null;render();
@@ -4548,9 +4573,10 @@ function cwOpenReplacementHistory(){
   const resolved=(r.edgeResolutions||[]).length;
   return '<li><button type="button" data-cw-history-id="'+esc(r.id)+'">'+
    '<strong>'+esc(titles.join(', '))+'</strong> · '+
-   (r.state==='completed'?'Завершена':'На замене')+
+   (r.state==='restored'?'Восстановлена':r.state==='completed'?'Завершена':'На замене')+
    '<small>Прежние связи: '+resolved+' из '+(r.suspendedEdgeIds||[]).length+
-   ' решены. Оригинал и исходные отношения сохранены.</small></button></li>';
+   ' решены. Пересмотров: '+(r.postCanonReviews||[]).length+
+   '. Оригинал и исходные отношения сохранены.</small></button></li>';
  }).join('');
  $('modal-host').innerHTML='<div class="backdrop"><section class="modal" role="dialog" aria-modal="true" id="cw-replacement-history-dialog" aria-labelledby="cw-history-title">'+
   '<h2 id="cw-history-title">История замен</h2>'+
@@ -5062,6 +5088,10 @@ function renderInspector(){const el=$('inspector');if(!selected||
   (selected.type==='node'&&suppressInspectorForNode===selected.id)){
   el.hidden=true;return}
  if(selected.type==='node'&&groupIds().length>1){el.hidden=false;el.innerHTML=`<div class="inspect-head"><b>Выделено ${groupIds().length} событий</b><button id="close-inspect">×</button></div><p class="muted">Перетаскивайте любую выбранную карточку, чтобы переместить группу. Ctrl/⌘+клик — добавить или исключить. Shift+рамка — расширить выбор.</p><p class="muted">При выходе из смыслового поля предлагается сохранить его тег.</p><div class="inspect-actions"><button id="group-editorial">▨ Поле переработки</button>${editorialInView().length?'<button id="group-add-existing">Добавить в задание…</button>':''}<button id="group-clear">Снять выделение</button><button id="group-delete">Удалить выбранные…</button></div>`;$('close-inspect').onclick=$('group-clear').onclick=()=>setNodeSelection([]);$('group-delete').onclick=deleteSelectedGroup;$('group-editorial').onclick=createEditorialFieldFromSelection;if($('group-add-existing'))$('group-add-existing').onclick=addSelectedToEditorialField;return}
+if(selected.type==='node'){
+  const returned=cwRestoredOriginal(selected.id);
+  if(returned){selected={type:'replacement',id:returned.id};return cwRenderReplacementInspector(el,returned.id)}
+ }
 if(selected.type==='replacement')return cwRenderReplacementInspector(el,selected.id);
 if(selected.type==='gapNote'){const n=gnby(selected.id);if(!n){el.hidden=true;return}return renderGapInspector(el,n)}
  if(selected.type==='gapLink'){const l=state.gapLinks.find(x=>x.id===selected.id);if(!l){el.hidden=true;return}el.hidden=false;el.innerHTML=`<div class="inspect-head"><b>Связь заметки</b><button id="close-inspect">×</button></div><p class="muted">Редакторский контекст, не причинная связь истории.</p><button id="gap-link-delete">Удалить связь</button>`;$('close-inspect').onclick=()=>{selected=null;render()};$('gap-link-delete').onclick=()=>{commit(()=>{state.gapLinks=state.gapLinks.filter(x=>x.id!==l.id)},'Связь удалена');selected=null;render()};return}
