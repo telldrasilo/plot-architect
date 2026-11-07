@@ -119,7 +119,10 @@ def main():
   top=page.locator(".canvas-text-edge-move")
   top.hover()
   assert top.evaluate("(e)=>getComputedStyle(e).cursor")=="grab"
-  assert float(top.evaluate("(e)=>getComputedStyle(e,'::after').opacity"))>0
+  page.wait_for_function("()=>parseFloat(getComputedStyle(document.querySelector('.canvas-text-edge-move'),'::after').opacity)>0")
+  assert page.locator(".canvas-text-edge-left").evaluate("(e)=>getComputedStyle(e).cursor")=="ew-resize"
+  assert page.locator(".canvas-text-edge-bottom").evaluate("(e)=>getComputedStyle(e).cursor")=="ns-resize"
+  assert page.locator(".canvas-text-edge-bottom-right").evaluate("(e)=>getComputedStyle(e).cursor")=="nwse-resize"
   assert page.locator(".canvas-text-editor").evaluate("(e)=>getComputedStyle(e).cursor")=="text"
   def box():return page.evaluate("()=>structuredClone(__graphite.getState().canvasTexts[0])")
   def drag(name,dx,dy):
@@ -164,6 +167,23 @@ def main():
   page.locator("#add-canvas-text").click()
   second=page.locator("[data-canvas-text-editor]").last
   second.type("Свободное пояснение внутри поля")
+  for i in range(6):
+   second.press("Enter")
+   second.type("Пункт "+str(i+1)+" — инструкция")
+  page.wait_for_function("()=>__graphite.getState().canvasTexts.length===2&&__graphite.getState().canvasTexts[1].height>100")
+  # Extra lines expand the block automatically; an upward drag must not clip them.
+  min_height=page.locator("[data-canvas-text]").last.evaluate(
+   "(e)=>Math.ceil(e.querySelector('[data-canvas-text-editor]').scrollHeight+28)")
+  bottom=page.locator("[data-canvas-text]").last.locator(".canvas-text-edge-bottom")
+  rect=bottom.bounding_box()
+  page.mouse.move(rect["x"]+rect["width"]/2,rect["y"]+rect["height"]/2)
+  page.mouse.down()
+  page.mouse.move(rect["x"]+rect["width"]/2,rect["y"]+rect["height"]/2-250,steps=10)
+  page.mouse.up()
+  content_box=page.evaluate("()=>structuredClone(__graphite.getState().canvasTexts[1])")
+  assert content_box["height"]>=min_height
+  assert page.locator("[data-canvas-text]").last.evaluate(
+   "(e)=>e.getBoundingClientRect().height >= e.querySelector('[data-canvas-text-editor]').getBoundingClientRect().height")
   second.press("Tab")
   page.wait_for_timeout(1400)
   ready()
