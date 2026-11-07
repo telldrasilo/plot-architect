@@ -158,7 +158,7 @@ def main():
         assert "Причина" in inspector.inner_text()
         assert "Препятствует" in inspector.inner_text()
         assert page.locator("#cw-reconnect-confirm").count()==0
-        assert page.locator("#cw-complete-replacement").count()==0
+        assert page.locator("#cw-complete-replacement").is_disabled()
 
         # Deferral is an explicit nonmutating choice: replacement stays open.
         inspector.locator('[data-cw-defer="e1"]').click()
@@ -259,7 +259,7 @@ def main():
         assert db["graph"]["replacements"][0]["state"]=="open"
         assert len(db["graph"]["edges"])==6
         assert db["graph"]["edges"][:4]==original["edges"]
-        assert page.locator("#cw-complete-replacement").count()==0
+        assert page.locator("#cw-complete-replacement").is_enabled()
         assert page.locator('[data-cw-original="b"]').count()==1
 
         page.reload()
