@@ -270,15 +270,35 @@ body.pa-multi-modifier .inspector{pointer-events:none;opacity:.35}/* allows Ctrl
 .pa-semantic-item:focus-visible .pa-semantic-dot{box-shadow:0 0 0 3px #f2d498}
 .pa-semantic-item:focus-visible .pa-semantic-label{text-decoration:underline;text-decoration-color:#f2d498}
 @media(prefers-reduced-motion:reduce){.pa-semantic-item,.pa-semantic-dot,.pa-semantic-label{transition:none}}
+
+/* UX-126: quiet independent canvas annotation; never a plot node */
+.canvas-text-layer{position:absolute;inset:0;pointer-events:none;z-index:9}
+.canvas-text{position:absolute;pointer-events:auto;padding:13px 14px;border:1px solid #ffffff24;border-radius:12px;background:#302f3238;color:#e9e7e5;min-height:76px;box-shadow:0 6px 24px #00000014}
+.canvas-text:hover,.canvas-text:focus-within{border-color:#e8ddc16e;background:#33323755}
+.canvas-text-editor{min-height:44px;max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;outline:none;font-size:13px;line-height:1.6;cursor:text}
+.canvas-text-editor p,.canvas-text-editor h3,.canvas-text-editor blockquote{margin:0 0 8px}
+.canvas-text-editor p:last-child,.canvas-text-editor h3:last-child,.canvas-text-editor blockquote:last-child{margin-bottom:0}
+.canvas-text-editor h3{font-size:15px;line-height:1.42;font-weight:700}
+.canvas-text-editor blockquote{padding:3px 0 3px 12px;border-left:2px solid #bdab86;color:#d4ccbd}
+.canvas-text-editor:focus{caret-color:#f3dfb4}
+.canvas-text-grab,.canvas-text-resize{position:absolute;padding:0;border:0;background:transparent;opacity:0;touch-action:none}
+.canvas-text:hover .canvas-text-grab,.canvas-text:focus-within .canvas-text-grab,.canvas-text:hover .canvas-text-resize,.canvas-text:focus-within .canvas-text-resize{opacity:.8}
+.canvas-text-grab{left:8px;top:2px;width:42px;height:8px;cursor:grab;border-radius:8px;background:#aaa39c;pointer-events:auto}
+.canvas-text-resize{right:2px;bottom:2px;width:16px;height:16px;cursor:ew-resize}
+.canvas-text-resize::after{content:'⌟';display:block;color:#c1bab0;font-size:15px;line-height:16px}
+.canvas-text-format{position:fixed;z-index:1000;display:flex;gap:2px;padding:4px;border:1px solid #5c5855;border-radius:10px;background:#27272bef;box-shadow:0 10px 28px #0008;white-space:nowrap}
+.canvas-text-format[hidden]{display:none}
+.canvas-text-format button{border:0;border-radius:6px;background:transparent;padding:6px 9px;font-size:11px}
+.canvas-text-format button:hover{background:#49464b}
 </style></head>
 <body>
 <header><div class="logo" aria-hidden="true">✦</div><div class="project-label"><b>Plot Architect</b><span id="project-current">Кризис наследования</span></div><button id="projects-open" title="Список историй, создание и импорт">▤ Проекты <span id="project-mode">Локально</span></button><div class="spacer"></div><div class="saved" id="saved">● Сохранено локально</div><div class="top-actions"><button class="opt" id="search" data-tip="Найти событие или поле (Ctrl+K)" title="Поиск (Ctrl+K)">⌕ Поиск</button><button class="opt" id="undo" data-tip="Отменить последнее изменение (Ctrl+Z)" title="Отменить (Ctrl+Z)">↶ Отменить</button><button class="opt" id="export">⇩ Экспорт</button><button id="more" title="Сбросить демо">⋯</button></div></header>
-<main id="canvas"><div class="viewport" id="viewport"><div class="world" id="world"><div id="fields" class="fields-layer"></div><div id="editorial-fields" class="editorial-layer" aria-label="Редакторские задания"></div><div id="cw-workspace-preview" class="cw-preview-layer" aria-label="Рабочие области: локальный предпросмотр"></div><svg class="edges" id="edges"></svg><div id="lanes"></div><div id="nodes"></div><div id="gap-notes" class="gap-note-layer"></div></div></div>
+<main id="canvas"><div class="viewport" id="viewport"><div class="world" id="world"><div id="fields" class="fields-layer"></div><div id="editorial-fields" class="editorial-layer" aria-label="Редакторские задания"></div><div id="cw-workspace-preview" class="cw-preview-layer" aria-label="Рабочие области: локальный предпросмотр"></div><svg class="edges" id="edges"></svg><div id="lanes"></div><div id="nodes"></div><div id="gap-notes" class="gap-note-layer"></div><div id="canvas-text-layer" class="canvas-text-layer"></div></div></div>
  <div class="overview-titles" id="overview-titles" hidden aria-label="События на обзорном масштабе"></div><div class="direction"><strong>Развитие сюжета</strong><span class="arrow">⟶</span></div><div class="edge-display-pill" id="edge-display" role="status">События · точные связи</div>
  <div class="breadcrumbs" id="breadcrumbs"></div><div class="footer-version">GRAPHITE / LOCAL 0.13.5-alpha · UX-016</div>
  <div id="selection-summary" class="pa-selection-summary" hidden></div><div class="notice hide" id="notice"></div><aside class="inspector" id="inspector" hidden></aside><div id="pa-context-menu" class="pa-context-menu" role="menu" aria-label="Действия с сюжетом" hidden></div>
  <div class="nav-mini" role="toolbar" aria-label="Навигация по полотну"><button id="fit" data-tip="Показать весь граф на экране" title="Показать всё содержимое">⊡ Вместить</button><button id="guides" data-tip="Показать или скрыть смысловые поля" title="Показать или скрыть поля">▧ Поля: вкл.</button><button id="focus" data-tip="Приглушить всё кроме выбранной ноды и её связей (F)" aria-pressed="false" title="Подсветить связанные события, клавиша F">◎ Фокус</button><button id="overview-toggle" data-tip="Открыть или закрыть миникарту" aria-pressed="false" title="Показать или скрыть миникарту">⊞ Обзор</button><div class="zoom-group" aria-label="Масштаб"><button id="zoom-out" data-tip="Отдалить полотно" aria-label="Уменьшить масштаб" title="Уменьшить">−</button><button id="zoom-home" aria-label="Масштаб 100%" title="Масштаб 100%"><span id="zoom-label">100%</span></button><button id="zoom-in" data-tip="Приблизить полотно" aria-label="Увеличить масштаб" title="Увеличить">+</button></div></div><div class="overview-panel" id="overview" hidden><div class="overview-head"><span>Вся история <small id="overview-count"></small></span><button id="overview-close" data-tip="Закрыть миникарту" aria-label="Закрыть миникарту">×</button></div><svg id="overview-map" role="img" aria-label="Миникарта; нажмите для перехода к области" preserveAspectRatio="none"></svg></div>
- <div class="float-toolbar" id="action-toolbar" role="toolbar" aria-label="Создание сюжета"><button class="highlight" id="create" data-tip="Новый элемент сюжетного каркаса. (N)">□ Событие</button><button id="add-field" data-tip="Смысловая область для группировки событий и назначения тегов.">▧ Поле</button><button id="add-gap-note" data-tip="Задание ChatGPT: придумать новый сюжетный фрагмент.">▤ Заметка</button><button id="add-editorial-field" data-tip="Задание ChatGPT: переработать существующие события.">▨ Переработка</button><button id="tools-more" data-tip="Дополнительные действия с графом" class="tool-icon" aria-label="Дополнительные действия" aria-expanded="false" aria-controls="tools-menu" title="Дополнительные действия">⋯</button><button id="tools-collapse" data-tip="Свернуть панель создания" class="tool-icon" aria-label="Свернуть панель создания" title="Свернуть панель">−</button><div id="tools-menu" class="tools-menu" hidden><button id="arrange" title="Расположить узлы в порядке стрелок «Следом»">⇥ Упорядочить по стрелкам<small>Автоматически расположить события слева направо по связям «Следом». Не меняет связи и даты; если порядок уже верный — карточки могут остаться на месте.</small></button><button id="toggle-all-edges" data-tip="Показать все настоящие связи, даже на общем масштабе">◎ Показать все связи<small>Диагностическое отображение; исходные связи остаются без изменений.</small></button><button id="toggle-routing" data-tip="Сравнить прямые стрелки и обход препятствий">↝ Маршруты: прямые<small>Обход препятствий экспериментальный; может создавать длинные трассы. Сравните варианты.</small></button><button id="cw-replacement-history" type="button" title="Сохранённые исходные события и прежние связи">▤ История замен<small>Просмотреть завершённые и открытые замены без изменения сюжета.</small></button></div></div><button id="toolbar-restore" data-tip="Показать инструменты создания" class="toolbar-restore" hidden title="Показать инструменты создания" aria-label="Развернуть панель создания">＋ Инструменты</button>
+ <div class="float-toolbar" id="action-toolbar" role="toolbar" aria-label="Создание сюжета"><button class="highlight" id="create" data-tip="Новый элемент сюжетного каркаса. (N)">□ Событие</button><button id="add-field" data-tip="Смысловая область для группировки событий и назначения тегов.">▧ Поле</button><button id="add-gap-note" data-tip="Задание ChatGPT: придумать новый сюжетный фрагмент.">▤ Заметка</button><button id="add-editorial-field" data-tip="Задание ChatGPT: переработать существующие события.">▨ Переработка</button><button id="add-canvas-text" data-tip="Свободный текст прямо на холсте, без настроек." title="Текст">T Текст</button><button id="tools-more" data-tip="Дополнительные действия с графом" class="tool-icon" aria-label="Дополнительные действия" aria-expanded="false" aria-controls="tools-menu" title="Дополнительные действия">⋯</button><button id="tools-collapse" data-tip="Свернуть панель создания" class="tool-icon" aria-label="Свернуть панель создания" title="Свернуть панель">−</button><div id="tools-menu" class="tools-menu" hidden><button id="arrange" title="Расположить узлы в порядке стрелок «Следом»">⇥ Упорядочить по стрелкам<small>Автоматически расположить события слева направо по связям «Следом». Не меняет связи и даты; если порядок уже верный — карточки могут остаться на месте.</small></button><button id="toggle-all-edges" data-tip="Показать все настоящие связи, даже на общем масштабе">◎ Показать все связи<small>Диагностическое отображение; исходные связи остаются без изменений.</small></button><button id="toggle-routing" data-tip="Сравнить прямые стрелки и обход препятствий">↝ Маршруты: прямые<small>Обход препятствий экспериментальный; может создавать длинные трассы. Сравните варианты.</small></button><button id="cw-replacement-history" type="button" title="Сохранённые исходные события и прежние связи">▤ История замен<small>Просмотреть завершённые и открытые замены без изменения сюжета.</small></button></div></div><button id="toolbar-restore" data-tip="Показать инструменты создания" class="toolbar-restore" hidden title="Показать инструменты создания" aria-label="Развернуть панель создания">＋ Инструменты</button>
  <div class="hint hide">Перетаскивание не меняет порядок · Ctrl+K — поиск · F — фокус</div><div class="toast" id="toast"></div></main><div id="modal-host"></div>
 <style>
 #projects-open{border-color:#5c513f;background:#302d28;color:#e5dbc7;white-space:nowrap}#project-mode{font-size:10px;opacity:.6;padding-left:7px}.project-manager{width:min(620px,calc(100vw - 24px));max-height:90vh;overflow:auto}.project-modal-head{display:flex;justify-content:space-between;align-items:center}.project-modal-head h2{margin:0}.project-modal-head button{padding:3px 9px;font-size:20px}.project-list{display:flex;flex-direction:column;max-height:260px;overflow:auto;gap:7px;margin:16px 0}.project-entry{text-align:left;display:flex;justify-content:space-between;align-items:center;gap:14px;padding:12px 15px}.project-entry b{font-size:14px}.project-entry small{font-size:11px;color:#b5ac9e;white-space:nowrap}.project-entry.active{border-color:#a18b65;background:#40392c}.project-controls{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}.project-controls.secondary button{background:#242424;color:#bdb5aa}.pm-error{color:#f0afa7;min-height:15px;font-size:12px}@media(max-width:720px){#projects-open{font-size:11px;padding:7px}#project-mode{display:none}.project-entry{flex-direction:column;align-items:start}}
@@ -3950,6 +3970,222 @@ function cwRenderReplacementOriginals(host){
  }
 }
 
+
+/* UX-126: independent canvas text. Editing happens IN PLACE; never a plot node. */
+const ctLayer=$('canvas-text-layer');
+const ctToolbar=document.createElement('div');
+ctToolbar.className='canvas-text-format';ctToolbar.hidden=true;
+ctToolbar.setAttribute('role','toolbar');
+ctToolbar.setAttribute('aria-label','Форматирование выделенного текста');
+ctToolbar.innerHTML=[
+ ['heading','Сделать заголовком'],['italic','Курсив'],
+ ['underline','Подчеркнуть'],['quote','Цитата']
+].map(([action,label])=>'<button type="button" data-ct-format="'+action+'">'+label+'</button>').join('');
+document.body.append(ctToolbar);
+let ctEditingId=null;
+const ctItem=id=>(state.canvasTexts||[]).find(x=>x.id===id);
+const ctVisible=()=> (state.canvasTexts||[]).filter(x=>(x.parent??null)===(state.view??null));
+function ctHtml(blocks){
+ return blocks.map(block=>{
+  const tag={paragraph:'p',heading:'h3',quote:'blockquote'}[block.type]||'p';
+  const inner=block.runs.map(run=>{
+   let part=esc(run.text);
+   if(run.italic)part='<em>'+part+'</em>';
+   if(run.underline)part='<u>'+part+'</u>';
+   return part;
+  }).join('');
+  return '<'+tag+'>'+(inner||'<br>')+'</'+tag+'>';
+ }).join('');
+}
+function ctParse(editor){
+ const blocks=[];
+ const parseRuns=root=>{
+  const runs=[];
+  const put=(text,italic,underline)=>{
+   if(!text)return;
+   const last=runs[runs.length-1],flags={...(italic?{italic:true}:{}),...(underline?{underline:true}:{})};
+   if(last&&!!last.italic===italic&&!!last.underline===underline)last.text+=text;
+   else runs.push({text,...flags});
+  };
+  const walk=(n,italic=false,underline=false)=>{
+   if(n.nodeType===Node.TEXT_NODE){put(n.nodeValue||'',italic,underline);return}
+   if(n.nodeType!==Node.ELEMENT_NODE)return;
+   const tag=n.tagName.toLowerCase();
+   if(tag==='br'){put('\n',italic,underline);return}
+   const nextItalic=italic||['em','i'].includes(tag)||n.style?.fontStyle==='italic';
+   const nextUnderline=underline||tag==='u'||(n.style?.textDecorationLine||'').includes('underline');
+   for(const child of n.childNodes)walk(child,nextItalic,nextUnderline);
+  };
+  walk(root);if(!runs.length)runs.push({text:''});
+  return runs;
+ };
+ for(const n of editor.childNodes){
+  if(n.nodeType===Node.TEXT_NODE){
+   if(n.nodeValue?.trim())blocks.push({type:'paragraph',runs:parseRuns(n)});
+  }else if(n.nodeType===Node.ELEMENT_NODE){
+   const tag=n.tagName.toLowerCase();
+   blocks.push({type:tag==='h3'?'heading':tag==='blockquote'?'quote':'paragraph',runs:parseRuns(n)});
+  }
+ }
+ if(!blocks.length)blocks.push({type:'paragraph',runs:[{text:''}]});
+ return blocks;
+}
+function ctHideToolbar(){ctToolbar.hidden=true}
+function ctShowToolbar(){
+ const sel=window.getSelection();
+ if(!sel||sel.isCollapsed||!sel.rangeCount||modalOpen){ctHideToolbar();return}
+ const start=sel.anchorNode?.parentElement,end=sel.focusNode?.parentElement;
+ const editor=start?.closest('[data-canvas-text-editor]');
+ if(!editor||!end?.closest('[data-canvas-text-editor]')||
+  editor!==end.closest('[data-canvas-text-editor]')){ctHideToolbar();return}
+ const rect=sel.getRangeAt(0).getBoundingClientRect();
+ if(!rect.width&&!rect.height){ctHideToolbar();return}
+ ctToolbar.hidden=false;
+ const w=ctToolbar.offsetWidth,h=ctToolbar.offsetHeight,margin=8;
+ const x=Math.min(innerWidth-w-margin,Math.max(margin,rect.left+rect.width/2-w/2));
+ const y=rect.top-h-10>=margin?rect.top-h-10:rect.bottom+10;
+ ctToolbar.style.left=Math.round(x)+'px';ctToolbar.style.top=Math.round(y)+'px';
+}
+function ctSaveEditor(editor){
+ const item=ctItem(editor?.dataset.canvasTextEditor);
+ if(!item)return;
+ const blocks=ctParse(editor);
+ const count=blocks.reduce((n,b)=>n+b.runs.reduce((m,r)=>m+r.text.length,0),0);
+ if(count>20000||blocks.length>300||blocks.some(b=>b.runs.length>200)){
+  $('saved').textContent='! Текст не сохранён: превышен размер';return;
+ }
+ if(JSON.stringify(item.blocks)===JSON.stringify(blocks))return;
+ item.blocks=blocks;state.revision++;save();
+}
+function ctFocusEditor(id){
+ const editor=ctLayer.querySelector('[data-canvas-text-editor="'+id+'"]');
+ editor?.focus();
+ if(editor){const range=document.createRange();range.selectNodeContents(editor);range.collapse(false);
+  const sel=window.getSelection();sel.removeAllRanges();sel.addRange(range)}
+}
+function ctCreate(at){
+ if(cwAcceptanceBusy||remote.blocked)return note('Проект сейчас недоступен для редактирования');
+ if((state.canvasTexts||[]).length>=160)return note('Достигнут предел текстовых блоков');
+ const r=canvasRect(),point=at||pointerToWorld(r.left+r.width/2,r.top+r.height/2);
+ const id='ct-'+crypto.randomUUID();
+ commit(()=>{
+  state.canvasTexts??=[];
+  state.canvasTexts.push({id,x:Math.round(point.x),y:Math.round(point.y),width:420,
+   parent:state.view??null,blocks:[{type:'paragraph',runs:[{text:''}]}]});
+ });
+ ctFocusEditor(id);
+}
+function ctDelete(id){
+ if(!ctItem(id))return;
+ ctHideToolbar();
+ commit(()=>{state.canvasTexts=state.canvasTexts.filter(x=>x.id!==id)},'Текстовый блок удалён · Ctrl+Z отменяет');
+}
+function ctDragHandle(handle,el,id,mode){
+ handle.addEventListener('pointerdown',event=>{
+  if(event.button!==0)return;
+  event.preventDefault();event.stopPropagation();
+  ctHideToolbar();
+  const item=ctItem(id);if(!item)return;
+  const x0=event.clientX,y0=event.clientY,start={x:item.x,y:item.y,width:item.width};
+  let changed=false,last={...start};
+  const move=e=>{
+   const dx=(e.clientX-x0)/pan.scale,dy=(e.clientY-y0)/pan.scale;
+   const candidate=mode==='move'
+    ?{...start,x:Math.round(start.x+dx),y:Math.round(start.y+dy)}
+    :{...start,width:Math.round(Math.max(200,Math.min(1200,start.width+dx)))};
+   if(Math.abs(dx)+Math.abs(dy)>3)changed=true;
+   last=candidate;
+   if(mode==='move'){el.style.left=candidate.x+'px';el.style.top=candidate.y+'px'}
+   else el.style.width=candidate.width+'px';
+  };
+  const done=e=>{
+   handle.releasePointerCapture?.(event.pointerId);
+   handle.removeEventListener('pointermove',move);
+   handle.removeEventListener('pointerup',done);
+   handle.removeEventListener('pointercancel',cancel);
+   if(changed&&ctItem(id))commit(()=>Object.assign(ctItem(id),last));
+  };
+  const cancel=()=>{
+   handle.removeEventListener('pointermove',move);
+   handle.removeEventListener('pointerup',done);
+   handle.removeEventListener('pointercancel',cancel);
+   renderCanvasTexts();
+  };
+  handle.setPointerCapture(event.pointerId);
+  handle.addEventListener('pointermove',move);
+  handle.addEventListener('pointerup',done);
+  handle.addEventListener('pointercancel',cancel);
+ });
+}
+function renderCanvasTexts(){
+ const prior=document.activeElement?.closest('[data-canvas-text-editor]');
+ if(prior)ctSaveEditor(prior);
+ ctLayer.innerHTML='';
+ ctHideToolbar();
+ for(const item of ctVisible()){
+  const outer=document.createElement('section');
+  outer.className='canvas-text';outer.dataset.canvasText=item.id;
+  outer.style.left=item.x+'px';outer.style.top=item.y+'px';outer.style.width=item.width+'px';
+  const grab=document.createElement('button');
+  grab.type='button';grab.className='canvas-text-grab';grab.title='Переместить текст';
+  grab.setAttribute('aria-label','Переместить текстовый блок');
+  const editor=document.createElement('div');
+  editor.className='canvas-text-editor';editor.dataset.canvasTextEditor=item.id;
+  editor.contentEditable='true';editor.spellcheck=true;
+  editor.setAttribute('role','textbox');editor.setAttribute('aria-multiline','true');
+  editor.setAttribute('aria-label','Текст на холсте');
+  editor.innerHTML=ctHtml(item.blocks);
+  const grip=document.createElement('button');
+  grip.type='button';grip.className='canvas-text-resize';
+  grip.title='Изменить ширину';grip.setAttribute('aria-label','Изменить ширину текстового блока');
+  outer.append(grab,editor,grip);ctLayer.append(outer);
+  outer.addEventListener('pointerdown',e=>e.stopPropagation());
+  outer.addEventListener('contextmenu',e=>{
+   e.preventDefault();e.stopPropagation();showPlotContextMenu(e.clientX,e.clientY,outer);
+  });
+  editor.addEventListener('focus',()=>{ctEditingId=item.id});
+  editor.addEventListener('input',()=>{ctSaveEditor(editor);ctShowToolbar()});
+  editor.addEventListener('blur',()=>{
+   ctSaveEditor(editor);if(ctEditingId===item.id)ctEditingId=null;ctHideToolbar();
+  });
+  editor.addEventListener('paste',e=>{
+   e.preventDefault();
+   const plain=e.clipboardData?.getData('text/plain')||'';
+   if(plain.length>20000)return note('Текст слишком длинный');
+   document.execCommand('insertText',false,plain);
+  });
+  editor.addEventListener('keydown',e=>{
+   e.stopPropagation();
+   if(e.key==='Escape'){e.preventDefault();ctHideToolbar();editor.blur()}
+  });
+  editor.addEventListener('pointerup',()=>requestAnimationFrame(ctShowToolbar));
+  editor.addEventListener('keyup',()=>requestAnimationFrame(ctShowToolbar));
+  ctDragHandle(grab,outer,item.id,'move');
+  ctDragHandle(grip,outer,item.id,'resize');
+ }
+}
+ctToolbar.addEventListener('pointerdown',e=>e.preventDefault());
+ctToolbar.addEventListener('click',event=>{
+ const action=event.target.closest('[data-ct-format]')?.dataset.ctFormat;
+ if(!action)return;
+ const selection=window.getSelection();
+ if(!selection||selection.isCollapsed)return;
+ const editor=selection.anchorNode?.parentElement?.closest('[data-canvas-text-editor]');
+ if(!editor)return;
+ editor.focus();
+ if(action==='italic'||action==='underline'){
+  document.execCommand(action,false,null);
+ }else{
+  const block=selection.anchorNode?.parentElement?.closest('h3,blockquote,p,div');
+  const current=block?.tagName.toLowerCase();
+  const tag=action==='heading'?(current==='h3'?'p':'h3')
+   :(current==='blockquote'?'p':'blockquote');
+  document.execCommand('formatBlock',false,tag);
+ }
+ ctSaveEditor(editor);ctShowToolbar();
+});
+document.addEventListener('selectionchange',()=>requestAnimationFrame(ctShowToolbar));
+
 let cwReplacementChoice=null; // purely local, one relation at a time; never story data
 let cwReplacementDecisionReview=null; // exact preview + stable receipt ID through retry
 
@@ -5151,6 +5387,7 @@ function showNotice(){if(useOverview()&&!forceAllEdges&&!linkFrom){$('notice').c
 function canvasRect(){return $('canvas').getBoundingClientRect()}
 function contentBounds(){
  const nodes=visible(),fields=[...fieldInView(),...editorialInView()],items=[];
+ for(const t of ctVisible())items.push({x:t.x,y:t.y,w:t.width,h:Math.max(100,ctLayer.querySelector('[data-canvas-text="'+t.id+'"]')?.offsetHeight||120)});
  for(const n of gapInView())items.push({x:n.x,y:n.y,w:252,h:Math.max(115,document.querySelector(`[data-gap-note="${n.id}"]`)?.offsetHeight||115)});
  for(const n of nodes)items.push({x:n.x,y:n.y,w:widthOf(n),h:heightOf(n)|| (n.size==='mini'?75:n.size==='expanded'?220:170)});
  for(const {node:n} of cwOpenReplacementOriginals())items.push({x:n.x,y:n.y,w:widthOf(n),h:heightOf(n)||170});
@@ -5326,6 +5563,7 @@ function renderOverview(){
 }
 function render(){
  ensureEditorialState(state);
+ if(document.activeElement?.closest('[data-canvas-text-editor]'))ctSaveEditor(document.activeElement);
  const start=performance.now();
  if(selected?.type!=='node')selectedNodeIds.clear();
  else{const active=new Set(visible().map(n=>n.id));for(const id of [...selectedNodeIds])if(!active.has(id))selectedNodeIds.delete(id);if(!selectedNodeIds.has(selected.id)){selectedNodeIds.clear();if(active.has(selected.id))selectedNodeIds.add(selected.id)}}
@@ -5334,7 +5572,7 @@ function render(){
  $('guides').textContent='▧ Поля: '+(guide?'вкл.':'выкл.');
  $('focus').textContent=focusMode?'◎ Фокус: вкл.':'◎ Фокус';$('focus').setAttribute('aria-pressed',String(focusMode));
  $('overview-toggle').setAttribute('aria-pressed',String(overviewOn));
- renderGuides();renderFields();renderEditorialFields();renderNodes();renderGapNotes();renderEdges();renderCreativeWorkspacePreview();renderInspector();positionInspector();renderOverviewTitles();showNotice();
+ renderGuides();renderFields();renderEditorialFields();renderNodes();renderGapNotes();renderCanvasTexts();renderEdges();renderCreativeWorkspacePreview();renderInspector();positionInspector();renderOverviewTitles();showNotice();
  $('breadcrumbs').innerHTML=state.view?`<button id="back">← Вся история</button><span style="align-self:center;color:#aaa">/ ${esc(nby(state.view)?.title||'Детали')}</span>`:'';
  if(state.view)$('back').onclick=()=>{state.view=null;selected=null;pan={x:105,y:45,scale:.82};render()};
  perfStats.lastNodes=visible().length;perfStats.lastEdges=currentEdges().length;perfStats.lastFields=fieldInView().length;
@@ -5366,6 +5604,7 @@ function plotContextActions(kind,id,at){
  {label:'Удалить выделенные…',icon:'×',danger:true,run:deleteSelectedGroup}
  ];
  const commonAddNode={label:'Событие',icon:'□',tip:'Новый элемент сюжетного каркаса.',run:()=>createNode(at)};
+ const commonAddText={label:'Текст',icon:'T',tip:'Свободный комментарий прямо на полотне.',run:()=>ctCreate(at)};
  const commonAddGap={label:'Заметка',icon:'▤',tip:'Задание ChatGPT: придумать новый сюжетный фрагмент.',run:()=>newGapNote(at)};
  if(kind==='node')return [
  {label:'Редактировать',icon:'✎',run:()=>selectAndShow('node',id)},
@@ -5380,11 +5619,12 @@ function plotContextActions(kind,id,at){
  ];
  if(kind==='field')return [
  {label:'Настроить',icon:'✎',run:()=>selectAndShow('field',id)},
- commonAddNode,
+ commonAddNode,commonAddText,
  {label:'Вместить поле',icon:'⊞',run:()=>jumpToField(id)},
  {divider:true},
  {label:'Удалить поле…',icon:'×',danger:true,run:()=>deleteField(id)}
  ];
+ if(kind==='canvasText')return [{label:'Удалить текст',icon:'×',danger:true,run:()=>ctDelete(id)}];
  if(kind==='gapLink')return [{label:'Удалить связь заметки',icon:'×',danger:true,run:()=>{commit(()=>{state.gapLinks=state.gapLinks.filter(l=>l.id!==id)},'Связь заметки удалена');selected=null;render()}}];
  if(kind==='edge')return [
  {label:'Настроить связь',icon:'✎',run:()=>selectAndShow('edge',id)},
@@ -5402,6 +5642,8 @@ function plotContextActions(kind,id,at){
  commonAddGap,
  {label:'Переработка',icon:'▨',tip:'Задание ChatGPT: переработать существующие события.',run:()=>createEditorialField(at)},
  {divider:true},
+ commonAddText,
+ {divider:true},
  {label:'Вместить всё',icon:'⊞',tip:'Показать весь граф в пределах экрана.',run:()=>fit()},
  {label:'Поиск',icon:'⌕',tip:'Найти событие или поле по названию.',run:()=>$('search').click()}];
 }
@@ -5410,9 +5652,11 @@ function showPlotContextMenu(clientX,clientY,sourceTarget=null){
  const r=canvasRect();const point=pointerToWorld(clientX,clientY);
  let kind='canvas',id=null;
  if(sourceTarget?.closest){
+  const canvasTextEl=sourceTarget.closest('[data-canvas-text]');
   const gapEl=sourceTarget.closest('[data-gap-note]');const nodeEl=sourceTarget.closest('[data-node],[data-zoom-node]');const fieldEl=sourceTarget.closest('[data-field]');const editorialEl=sourceTarget.closest('[data-editorial-field]');
   const gapLinkEl=sourceTarget.closest('[data-gap-link-target]');const edgeEl=sourceTarget.closest('[data-edge-target]');const bridgeEl=sourceTarget.closest('[data-bridge-target]');
-  if(gapEl){id=gapEl.dataset.gapNote;kind='gapNote'}
+  if(canvasTextEl){id=canvasTextEl.dataset.canvasText;kind='canvasText'}
+  else if(gapEl){id=gapEl.dataset.gapNote;kind='gapNote'}
   else if(nodeEl){id=nodeEl.dataset.node||nodeEl.dataset.zoomNode;kind='node'}
   else if(gapLinkEl){id=gapLinkEl.dataset.gapLinkTarget;kind='gapLink'}
   else if(edgeEl){id=edgeEl.dataset.edgeTarget;kind='edge'}
@@ -5451,7 +5695,7 @@ document.addEventListener('keydown',e=>{if(plotContextMenu.hidden)return;
  else if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();const list=[...plotContextMenu.querySelectorAll('[role="menuitem"]')];const idx=list.indexOf(document.activeElement);list[(idx+(e.key==='ArrowDown'?1:-1)+list.length)%list.length]?.focus()}
 },true);
 $('canvas').addEventListener('keydown',e=>{if(e.key!=='ContextMenu'&&!(e.shiftKey&&e.key==='F10'))return;
- if(e.target.closest('input,textarea,select,.inspector'))return;
+ if(e.target.closest('input,textarea,select,[contenteditable],.inspector'))return;
  e.preventDefault();const r=e.target.getBoundingClientRect();showPlotContextMenu(r.left+Math.min(28,r.width/2),r.top+Math.min(28,r.height/2),e.target);
 });
 $('canvas').addEventListener('wheel',()=>closePlotContextMenu(),{passive:true});
@@ -5470,7 +5714,7 @@ function cancelGesture(){const i=interaction;if(!i)return false;interaction=null
 $('canvas').addEventListener('pointerdown',e=>{
  const semanticTarget=e.target.closest('.pa-semantic-item');
  const panMode=e.button===1||spacePan||e.pointerType==='touch';
- const blocked=e.target.closest('.node,.gap-note,.editorial-inline-note,.field-head,.field-grip,.float-toolbar,.nav-mini,.overview-panel,.inspector,.notice,.breadcrumbs,.toolbar-restore,.pa-context-menu,[data-edge-target],[data-bridge-target],[data-cw-edge-hit],[data-cw-boundary-hit]');
+ const blocked=e.target.closest('.node,.gap-note,.canvas-text,.editorial-inline-note,.field-head,.field-grip,.float-toolbar,.nav-mini,.overview-panel,.inspector,.notice,.breadcrumbs,.toolbar-restore,.pa-context-menu,[data-edge-target],[data-bridge-target],[data-cw-edge-hit],[data-cw-boundary-hit]');
  // Space+drag or middle drag pans even when the pointer starts on an overview label.
  if(![0,1].includes(e.button)||blocked||(semanticTarget&&!panMode))return;
  if(e.button===1)e.preventDefault();
@@ -5499,7 +5743,7 @@ $('canvas').addEventListener('pointercancel',()=>{if(interaction?.type==='marque
 $('canvas').addEventListener('auxclick',e=>{if(e.button===1)e.preventDefault()});
 $('inspector').addEventListener('wheel',e=>e.stopPropagation(),{passive:true});
 $('canvas').addEventListener('wheel',e=>{if(e.target.closest('.inspector,.editorial-inline-note'))return;e.preventDefault();let rect=$('canvas').getBoundingClientRect();if(e.ctrlKey||e.metaKey){setZoom(pan.scale*Math.exp(-e.deltaY*.002),e.clientX-rect.left,e.clientY-rect.top)}else{pan.x-=e.deltaX;pan.y-=e.deltaY;updateCamera()}},{passive:false});
-$('create').onclick=()=>createNode();$('add-field').onclick=()=>createField();$('add-gap-note').onclick=()=>newGapNote();$('add-editorial-field').onclick=()=>groupIds().length?createEditorialFieldFromSelection():createEditorialField();$('arrange').onclick=arrange;$('undo').onclick=undo;$('zoom-in').onclick=()=>setZoom(pan.scale*1.18);$('zoom-out').onclick=()=>setZoom(pan.scale/1.18);$('zoom-home').onclick=()=>setZoom(1);$('fit').onclick=fit;$('guides').onclick=()=>{guide=!guide;render()};$('more').onclick=()=>{if(confirm('Вернуть демонстрационный граф? Ваши текущие локальные правки будут сброшены.')){state=seed();recomputeFieldTags();selected=null;history=[];save();fit()}};
+$('create').onclick=()=>createNode();$('add-canvas-text').onclick=()=>ctCreate();$('add-field').onclick=()=>createField();$('add-gap-note').onclick=()=>newGapNote();$('add-editorial-field').onclick=()=>groupIds().length?createEditorialFieldFromSelection():createEditorialField();$('arrange').onclick=arrange;$('undo').onclick=undo;$('zoom-in').onclick=()=>setZoom(pan.scale*1.18);$('zoom-out').onclick=()=>setZoom(pan.scale/1.18);$('zoom-home').onclick=()=>setZoom(1);$('fit').onclick=fit;$('guides').onclick=()=>{guide=!guide;render()};$('more').onclick=()=>{if(confirm('Вернуть демонстрационный граф? Ваши текущие локальные правки будут сброшены.')){state=seed();recomputeFieldTags();selected=null;history=[];save();fit()}};
 $('search').onclick=()=>{modalOpen=true;
  $('modal-host').innerHTML=`<div class="backdrop"><div class="modal" role="dialog" aria-label="Поиск"><h2>Найти на полотне</h2><p>События и поля. Выбор откроет нужный уровень и перенесёт камеру.</p><input id="search-entry" placeholder="Название события или поля"><div class="results" id="search-results"></div><div class="buttons"><button id="search-close">Закрыть</button></div></div></div>`;
  const close=()=>{$('modal-host').innerHTML='';modalOpen=false};$('search-close').onclick=close;
@@ -5531,7 +5775,7 @@ $('overview-map').addEventListener('click',e=>{
 });
 $('export').onclick=()=>exportProject();
 document.addEventListener('keydown',e=>{
- if(e.code==='Space'&&!modalOpen&&!e.target.closest('input,textarea,select,button')){spacePan=true;e.preventDefault()}
+ if(e.code==='Space'&&!modalOpen&&!e.target.closest('input,textarea,select,button,[contenteditable]')){spacePan=true;e.preventDefault()}
  if(e.key==='Escape'){
   if(cwActiveDraftLinkGesture){
    e.preventDefault();cwActiveDraftLinkGesture.cancel();return;
@@ -5571,7 +5815,7 @@ document.addEventListener('keydown',e=>{
   if(!modalOpen&&selected?.type==='node'){setNodeSelection([]);return}
   return;
  }
- if(!plotContextMenu.hidden||modalOpen||e.target.closest('input,textarea,select'))return;
+ if(!plotContextMenu.hidden||modalOpen||e.target.closest('input,textarea,select,[contenteditable]'))return;
  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();undo()}
  else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='a'){e.preventDefault();setNodeSelection(visible().map(n=>n.id))}
  else if(e.key.toLowerCase()==='f'&&!e.ctrlKey&&!e.metaKey){focusToggle()}
@@ -5723,9 +5967,10 @@ function showProjectManager(){
  $('pm-connect').onclick=async()=>{try{if(remote.connected){await flushRemote();remote.connected=false;remote.token=null;remote.blocked=false;cwLocalWorkflowEnabled=false;cwClearDraftSelection();cwClearDraftMoves();activeRegistryStorage=REGISTRY_KEY;registry=readLocalRegistry();const id=registry.activeId;activeProjectId=id;KEY=KEY_PREFIX+id;state=JSON.parse(localStorage.getItem(KEY)||'null')||(id===STARTER_LOCAL_ID?structuredClone(STARTER_GRAPH):seed());history=[];selected=null;save();render();fit();close();note('Локальный режим')}else{await connectSite();close()}}catch(err){fail(err)}};
 }
 function readLocalRegistry(){try{const v=JSON.parse(localStorage.getItem(REGISTRY_KEY));if(Array.isArray(v.projects)&&v.activeId)return v}catch{}return {activeId:STARTER_LOCAL_ID,projects:[{id:STARTER_LOCAL_ID,name:STARTER_NAME,revision:STARTER_GRAPH.revision,origin:STARTER_ORIGIN}]}}
-function blankGraph(){return {version:1,revision:0,nextNode:1,nextEdge:1,nextField:1,nextLine:2,view:null,nodes:[],edges:[],fields:[],lanes:[{id:'l1',title:'Основная линия',color:COLORS[0],y:200}]}}
+function blankGraph(){return {version:1,revision:0,nextNode:1,nextEdge:1,nextField:1,nextLine:2,view:null,nodes:[],edges:[],fields:[],canvasTexts:[],lanes:[{id:'l1',title:'Основная линия',color:COLORS[0],y:200}]}}
 function validateImported(g){if(!g||!Array.isArray(g.nodes)||!Array.isArray(g.edges)||!Array.isArray(g.fields)||!Array.isArray(g.lanes))throw Error('В JSON должны быть nodes, edges, fields и lanes');
  const out=structuredClone(g),ids=new Set(),fids=new Set(out.fields.map(f=>f.id)),lids=new Set(out.lanes.map(l=>l.id));if(out.nodes.length>5000||out.edges.length>15000)throw Error('Слишком много элементов');
+ if(out.canvasTexts!==undefined){if(!Array.isArray(out.canvasTexts)||out.canvasTexts.length>160)throw Error('Некорректные текстовые блоки');for(const t of out.canvasTexts){if(!t||typeof t.id!=='string'||!Number.isFinite(t.x)||!Number.isFinite(t.y)||!Number.isFinite(t.width)||t.width<200||t.width>1200||!Array.isArray(t.blocks))throw Error('Некорректный текстовый блок')}}else out.canvasTexts=[];
  for(const n of out.nodes){if(!n.id||ids.has(n.id)||!Number.isFinite(n.x)||!Number.isFinite(n.y))throw Error('Ошибка ID/координат ноды');ids.add(n.id);n.lineIds=n.lineIds||[];n.manualFieldIds=n.manualFieldIds||[];n.manualTags=n.manualTags||[];n.parent=n.parent??null;n.size=n.size||'normal';n.description=n.description||'';if(n.width!==undefined&&(!Number.isFinite(n.width)||n.width<180||n.width>780))throw Error('Некорректная ширина карточки');if(n.height!==undefined&&(!Number.isFinite(n.height)||n.height<95||n.height>640))throw Error('Некорректная высота карточки');if(n.color!==undefined&&!COLORS.includes(n.color))throw Error('Некорректный цвет карточки');if(n.lineIds.some(id=>!lids.has(id))||n.manualFieldIds.some(id=>!fids.has(id)))throw Error('Неизвестное поле или линия')}
  const eids=new Set();for(const e of out.edges){if(!ids.has(e.from)||!ids.has(e.to)||eids.has(e.id))throw Error('Невалидная связь');eids.add(e.id)}
  for(const f of out.fields){if(!f.id||!Number.isFinite(f.x)||!Number.isFinite(f.y)||!Number.isFinite(f.width)||!Number.isFinite(f.height))throw Error('Неверные границы поля');f.comment=f.comment||'';f.parent=f.parent??null}
