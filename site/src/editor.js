@@ -3400,7 +3400,7 @@ function cwRenderReplacementInspector(el,id){
       ?'<p class="muted">Завершение недоступно: решите все '+(suspended.length-resolved.size)+
        ' оставшиеся связи. Отложить можно в любой момент.</p>'
       :'<p class="muted">Все прежние связи разобраны. Завершение скроет исходник с полотна, но сохранит его для пересмотра.</p>'):
-    '<p class="muted">Оригинал скрыт с полотна, но сохранён. История и пересмотр доступны отдельно.</p>')+
+    '<p class="muted">Исходник доступен через «Историю замен». Пересмотр после изменения канона требует отдельной защищённой процедуры.</p>')+
   '</div>';
  el.querySelector('#close-inspect').onclick=()=>{
   cwReplacementChoice=null;selected=null;render();
@@ -3556,6 +3556,45 @@ async function cwConfirmReplacementDecision(){
   cwAcceptanceBusy=false;
   if($('cw-reconnect-confirm'))$('cw-reconnect-confirm').disabled=false;
  }
+}
+
+
+let cwReplacementHistoryDialog=false;
+function cwCloseReplacementHistory(){
+ if(!cwReplacementHistoryDialog)return;
+ cwReplacementHistoryDialog=false;modalOpen=false;$('modal-host').innerHTML='';
+ $('tools-more')?.focus();
+}
+function cwOpenReplacementHistory(){
+ const items=state.replacements||[];
+ if(!items.length)return note('В этом проекте ещё нет замен событий');
+ if(modalOpen||cwAcceptanceBusy)return;
+ cwReplacementHistoryDialog=true;modalOpen=true;
+ const records=[...items].reverse().map(r=>{
+  const titles=(r.sourceNodeIds||[]).map(id=>nby(id)?.title||id);
+  const resolved=(r.edgeResolutions||[]).length;
+  return '<li><button type="button" data-cw-history-id="'+esc(r.id)+'">'+
+   '<strong>'+esc(titles.join(', '))+'</strong> · '+
+   (r.state==='completed'?'Завершена':'На замене')+
+   '<small>Прежние связи: '+resolved+' из '+(r.suspendedEdgeIds||[]).length+
+   ' решены. Оригинал и исходные отношения сохранены.</small></button></li>';
+ }).join('');
+ $('modal-host').innerHTML='<div class="backdrop"><section class="modal" role="dialog" aria-modal="true" id="cw-replacement-history-dialog" aria-labelledby="cw-history-title">'+
+  '<h2 id="cw-history-title">История замен</h2>'+
+  '<p>Исходные события не удаляются. Завершённые оригиналы скрыты с сюжетного полотна, но здесь доступны для чтения.</p>'+
+  '<ol class="cw-relations-list">'+records+'</ol>'+
+  '<p class="muted">Просмотр не восстанавливает события и не изменяет прежние решения о связях.</p>'+
+  '<div class="buttons"><button type="button" id="cw-history-close">Закрыть</button></div></section></div>';
+ $('cw-history-close').onclick=cwCloseReplacementHistory;
+ $('cw-replacement-history-dialog').querySelectorAll('[data-cw-history-id]').forEach(button=>
+  button.onclick=()=>{
+   const id=button.dataset.cwHistoryId;
+   cwReplacementHistoryDialog=false;modalOpen=false;$('modal-host').innerHTML='';
+   cwReplacementChoice=null;selectedNodeIds.clear();
+   selected={type:'replacement',id};render();
+   $('close-inspect')?.focus();
+  });
+ $('cw-replacement-history-dialog').querySelector('[data-cw-history-id]')?.focus();
 }
 
 let cwReplacementLifecycleReview=null; // server preview + stable operationId; never plot data
@@ -4720,6 +4759,7 @@ document.addEventListener('keydown',e=>{
   }
   if(!$('tools-menu').hidden){$('tools-menu').hidden=true;$('tools-more').setAttribute('aria-expanded','false')}
   if(gapLinkFrom){gapLinkFrom=null;note('Редакторская связь отменена');return}if(linkFrom){linkFrom=null;render();return}
+  if(cwReplacementHistoryDialog){e.preventDefault();cwCloseReplacementHistory();return;}
   if(cwReplacementLifecycleReview&&!cwAcceptanceBusy){
    e.preventDefault();cwCloseReplacementLifecycleReview();return;
   }
@@ -5024,6 +5064,10 @@ async function connectSite(silent=false){
  else{let last;try{last=JSON.parse(localStorage.getItem(SITE_REGISTRY_KEY)||'null')?.activeId}catch{};registry={activeId:data.projects.some(p=>p.id===last)?last:data.projects[0].id,projects:data.projects.map(p=>({id:p.id,name:p.name,revision:p.revision}))};remote.revision=0;await openProject(registry.activeId);note(cwLocalWorkflowEnabled?'Подключён Graphite Local':'Подключено к Site')}
 }
 $('projects-open').onclick=showProjectManager;
+$('cw-replacement-history').onclick=()=>{
+ $('tools-menu').hidden=true;$('tools-more').setAttribute('aria-expanded','false');
+ cwOpenReplacementHistory();
+};
 updateProjectLabel();
 if(location.protocol==='http:'||location.protocol==='https:')setTimeout(()=>connectSite(true).catch(e=>{
  cwLocalWorkflowEnabled=false;
