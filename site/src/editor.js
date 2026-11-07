@@ -3489,6 +3489,7 @@ function renderNodes(){const host=$('nodes');host.innerHTML='';const keep=focusI
  el.addEventListener('pointercancel',()=>{const i=interaction;if(i?.type==='node'&&i.id===n.id){interaction=null;restoreMove(i);render()}});
  el.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();if(e.ctrlKey||e.metaKey)toggleNodeSelection(n.id);else setNodeSelection([n.id],n.id)}if(e.key==='Delete'){e.preventDefault();if(groupIds().length>1&&groupIds().includes(n.id))deleteSelectedGroup();else{selected={type:'node',id:n.id};selectedNodeIds.clear();deleteSelected()}}};
  }
+ cwRenderReplacementOriginals(host);
  renderEdges()}
 function renderSingleEventRewriteInspector(el,n,d){
  el.hidden=false;
@@ -3498,10 +3499,10 @@ function renderSingleEventRewriteInspector(el,n,d){
  <div class="field"><label for="ux014-task">Что изменить?</label><textarea id="ux014-task" class="ux014-task" maxlength="20000" placeholder="Опишите задачу для ChatGPT">${esc(d.taskText)}</textarea></div>
  <p class="ux014-quiet-note">Исходное содержание не изменяется. Подготовка и применение вариантов появятся после P5/P6.</p>
  <button class="ux014-generate" type="button" disabled title="Генерация вариантов пока не подключена">Подготовить решение</button>
- <div class="ux014-rewrite-actions"><button id="ux014-cancel" type="button">← Отменить переработку</button></div>`;
+ <div class="ux014-rewrite-actions"><button id="ux014-cancel" type="button">← Отменить переработку</button>${cwWorkflowEnabled()?'<button id="ux014-start-replacement" type="button">Начать замену…</button>':''}</div>`;
  $('pin-inspect').onclick=()=>{inspectorPinned=!inspectorPinned;renderInspector();positionInspector()};
  $('close-inspect').onclick=()=>{selected=null;render()};
- $('ux014-cancel').onclick=()=>cancelEventRewrite(n.id);
+ $('ux014-cancel').onclick=()=>cancelEventRewrite(n.id);if($('ux014-start-replacement'))$('ux014-start-replacement').onclick=()=>void cwPrepareStartReplacement(n.id);
  const editor=$('ux014-task');let editing=false;
  editor.onfocus=()=>{editing=false};
  editor.oninput=e=>{
@@ -3517,10 +3518,11 @@ function renderInspector(){const el=$('inspector');if(!selected||
   (selected.type==='node'&&suppressInspectorForNode===selected.id)){
   el.hidden=true;return}
  if(selected.type==='node'&&groupIds().length>1){el.hidden=false;el.innerHTML=`<div class="inspect-head"><b>Выделено ${groupIds().length} событий</b><button id="close-inspect">×</button></div><p class="muted">Перетаскивайте любую выбранную карточку, чтобы переместить группу. Ctrl/⌘+клик — добавить или исключить. Shift+рамка — расширить выбор.</p><p class="muted">При выходе из смыслового поля предлагается сохранить его тег.</p><div class="inspect-actions"><button id="group-editorial">▨ Поле переработки</button>${editorialInView().length?'<button id="group-add-existing">Добавить в задание…</button>':''}<button id="group-clear">Снять выделение</button><button id="group-delete">Удалить выбранные…</button></div>`;$('close-inspect').onclick=$('group-clear').onclick=()=>setNodeSelection([]);$('group-delete').onclick=deleteSelectedGroup;$('group-editorial').onclick=createEditorialFieldFromSelection;if($('group-add-existing'))$('group-add-existing').onclick=addSelectedToEditorialField;return}
+if(selected.type==='replacement')return cwRenderReplacementInspector(el,selected.id);
 if(selected.type==='gapNote'){const n=gnby(selected.id);if(!n){el.hidden=true;return}return renderGapInspector(el,n)}
  if(selected.type==='gapLink'){const l=state.gapLinks.find(x=>x.id===selected.id);if(!l){el.hidden=true;return}el.hidden=false;el.innerHTML=`<div class="inspect-head"><b>Связь заметки</b><button id="close-inspect">×</button></div><p class="muted">Редакторский контекст, не причинная связь истории.</p><button id="gap-link-delete">Удалить связь</button>`;$('close-inspect').onclick=()=>{selected=null;render()};$('gap-link-delete').onclick=()=>{commit(()=>{state.gapLinks=state.gapLinks.filter(x=>x.id!==l.id)},'Связь удалена');selected=null;render()};return}
  if(selected.type==='editorialField'){const ef=efby(selected.id);if(!ef){el.hidden=true;return}return renderEditorialInspector(el,ef)}
-if(selected.type==='bridge')return renderBridgeInspector(el);if(selected.type==='field'){const f=fby(selected.id);if(!f){el.hidden=true;return}return renderFieldInspector(el,f)}if(selected.type==='node'){const n=nby(selected.id);if(!n){el.hidden=true;return}const existingDraft=rewriteBy(n.id);if(existingDraft)return renderSingleEventRewriteInspector(el,n,existingDraft);el.hidden=false;el.innerHTML=`<div class="inspect-head"><b>Событие</b><span class="inspect-top-tools"><button id="pin-inspect" title="${inspectorPinned?'Вернуть окно к событию':'Закрепить окно справа'}">${inspectorPinned?'↗ Рядом':'▣ Справа'}</button><button id="close-inspect" title="Закрыть">×</button></span></div><div class="field"><label>Название</label><input id="field-title" value="${esc(n.title)}"></div><div class="field"><label>Описание</label><textarea id="field-desc">${esc(n.description||'')}</textarea></div><div class="field"><label>Сюжетные линии</label>${state.lanes.map(l=>`<label class="check-row"><input type="checkbox" data-line-check="${l.id}" ${n.lineIds.includes(l.id)?'checked':''}><span style="color:${l.color}">●</span>${esc(l.title)}</label>`).join('')}</div><div class="field"><label>Смысловые поля</label><div class="field-list">${tagNames(n).map(t=>`<span class="field-badge" data-actual-tag="${esc(t.id)}">${esc(t.name)} ${t.manual?'<span class="tiny">закреплено</span>':'<span class="tiny">по расположению</span>'}</span>`).join('')||'<span class="muted">Вне смысловых полей</span>'}</div>${(n.manualFieldIds||[]).filter(id=>!!fby(id)).map(id=>`<div class="field-tag-row"><span>Закреплено: ${esc(fby(id).title)}</span><button data-unpin-field="${esc(id)}" title="Снять ручное закрепление. Принадлежность по расположению сохранится">Открепить</button></div>`).join('')}</div><div class="field"><label>Цвет карточки</label><div class="node-palette"><button type="button" class="node-palette-auto ${!n.color?'active':''}" data-node-color="auto" title="Цвет по сюжетной линии">Авто</button>${COLORS.map(c=>`<button type="button" class="node-palette-swatch ${n.color===c?'active':''}" data-node-color="${c}" title="Выбрать цвет" style="--swatch:${c}"><span></span></button>`).join('')}</div></div><hr><div class="ux014-main-action"><button id="i-rewrite" type="button">✎ Переработать событие</button></div><div class="ux014-delete-line"><button id="i-delete" type="button">Удалить…</button></div>`; $('pin-inspect').onclick=()=>{inspectorPinned=!inspectorPinned;renderInspector();positionInspector()};el.querySelectorAll('[data-node-color]').forEach(b=>b.onclick=()=>{const value=b.dataset.nodeColor;commit(()=>{const node=nby(n.id);if(value==='auto')delete node.color;else node.color=value},'Цвет карточки изменён')});$('field-title').onchange=e=>{let v=e.target.value.trim();if(v)commit(()=>nby(n.id).title=v,'Название обновлено')};$('field-desc').onchange=e=>commit(()=>nby(n.id).description=e.target.value,'Описание обновлено');el.querySelectorAll('[data-line-check]').forEach(cb=>cb.onchange=e=>{let line=cb.dataset.lineCheck;let nn=nby(n.id);let s=new Set(nn.lineIds);if(cb.checked)s.add(line);else s.delete(line);if(!s.size){cb.checked=true;note('У события должна остаться хотя бы одна линия');return}commit(()=>nn.lineIds=[...s],'Принадлежность линии обновлена')});el.querySelectorAll('[data-unpin-field]').forEach(b=>b.onclick=()=>{const id=b.dataset.unpinField;commit(()=>{const t=nby(n.id);t.manualFieldIds=(t.manualFieldIds||[]).filter(x=>x!==id)},'Закрепление метки снято')});$('i-rewrite').onclick=()=>beginEventRewrite(n.id);$('i-delete').onclick=()=>deletePlotNode(n.id);$('close-inspect').onclick=()=>{selected=null;render()}}
+if(selected.type==='bridge')return renderBridgeInspector(el);if(selected.type==='field'){const f=fby(selected.id);if(!f){el.hidden=true;return}return renderFieldInspector(el,f)}if(selected.type==='node'){const n=nby(selected.id);if(!n){el.hidden=true;return}const existingDraft=rewriteBy(n.id);if(existingDraft)return renderSingleEventRewriteInspector(el,n,existingDraft);el.hidden=false;el.innerHTML=`<div class="inspect-head"><b>Событие</b><span class="inspect-top-tools"><button id="pin-inspect" title="${inspectorPinned?'Вернуть окно к событию':'Закрепить окно справа'}">${inspectorPinned?'↗ Рядом':'▣ Справа'}</button><button id="close-inspect" title="Закрыть">×</button></span></div><div class="field"><label>Название</label><input id="field-title" value="${esc(n.title)}"></div><div class="field"><label>Описание</label><textarea id="field-desc">${esc(n.description||'')}</textarea></div><div class="field"><label>Сюжетные линии</label>${state.lanes.map(l=>`<label class="check-row"><input type="checkbox" data-line-check="${l.id}" ${n.lineIds.includes(l.id)?'checked':''}><span style="color:${l.color}">●</span>${esc(l.title)}</label>`).join('')}</div><div class="field"><label>Смысловые поля</label><div class="field-list">${tagNames(n).map(t=>`<span class="field-badge" data-actual-tag="${esc(t.id)}">${esc(t.name)} ${t.manual?'<span class="tiny">закреплено</span>':'<span class="tiny">по расположению</span>'}</span>`).join('')||'<span class="muted">Вне смысловых полей</span>'}</div>${(n.manualFieldIds||[]).filter(id=>!!fby(id)).map(id=>`<div class="field-tag-row"><span>Закреплено: ${esc(fby(id).title)}</span><button data-unpin-field="${esc(id)}" title="Снять ручное закрепление. Принадлежность по расположению сохранится">Открепить</button></div>`).join('')}</div><div class="field"><label>Цвет карточки</label><div class="node-palette"><button type="button" class="node-palette-auto ${!n.color?'active':''}" data-node-color="auto" title="Цвет по сюжетной линии">Авто</button>${COLORS.map(c=>`<button type="button" class="node-palette-swatch ${n.color===c?'active':''}" data-node-color="${c}" title="Выбрать цвет" style="--swatch:${c}"><span></span></button>`).join('')}</div></div><hr><div class="ux014-main-action"><button id="i-rewrite" type="button">✎ Переработать событие</button>${cwWorkflowEnabled()?'<button id="i-start-replacement" type="button">Начать замену…</button>':''}</div><div class="ux014-delete-line"><button id="i-delete" type="button">Удалить…</button></div>`; $('pin-inspect').onclick=()=>{inspectorPinned=!inspectorPinned;renderInspector();positionInspector()};el.querySelectorAll('[data-node-color]').forEach(b=>b.onclick=()=>{const value=b.dataset.nodeColor;commit(()=>{const node=nby(n.id);if(value==='auto')delete node.color;else node.color=value},'Цвет карточки изменён')});$('field-title').onchange=e=>{let v=e.target.value.trim();if(v)commit(()=>nby(n.id).title=v,'Название обновлено')};$('field-desc').onchange=e=>commit(()=>nby(n.id).description=e.target.value,'Описание обновлено');el.querySelectorAll('[data-line-check]').forEach(cb=>cb.onchange=e=>{let line=cb.dataset.lineCheck;let nn=nby(n.id);let s=new Set(nn.lineIds);if(cb.checked)s.add(line);else s.delete(line);if(!s.size){cb.checked=true;note('У события должна остаться хотя бы одна линия');return}commit(()=>nn.lineIds=[...s],'Принадлежность линии обновлена')});el.querySelectorAll('[data-unpin-field]').forEach(b=>b.onclick=()=>{const id=b.dataset.unpinField;commit(()=>{const t=nby(n.id);t.manualFieldIds=(t.manualFieldIds||[]).filter(x=>x!==id)},'Закрепление метки снято')});$('i-rewrite').onclick=()=>beginEventRewrite(n.id);if($('i-start-replacement'))$('i-start-replacement').onclick=()=>void cwPrepareStartReplacement(n.id);$('i-delete').onclick=()=>deletePlotNode(n.id);$('close-inspect').onclick=()=>{selected=null;render()}}
  else{const edge=eby(selected.id);if(!edge){el.hidden=true;return}el.hidden=false;const edgeNames={precedes:'Следом (порядок)',causes:'Из-за этого (причина)',enables:'Делает возможным',hinders:'Препятствует'};el.innerHTML=`<div class="inspect-head"><b>Связь событий</b><button id="close-inspect">×</button></div><div class="muted"><b>${esc(nby(edge.from)?.title)}</b><div style="margin:10px 0;color:#c4a77a">→</div><b>${esc(nby(edge.to)?.title)}</b></div><div class="field"><label>Смысл связи</label><select id="edge-type">${Object.entries(edgeNames).map(([id,t])=>`<option value="${id}" ${edge.type===id?'selected':''}>${t}</option>`).join('')}</select></div><div class="muted">«Следом» означает последовательность, но не доказывает причину.</div><hr><div class="inspect-actions"><button id="reconnect">Переподключить</button><button id="i-delete">Удалить связь</button></div>`;$('edge-type').onchange=e=>commit(()=>eby(edge.id).type=e.target.value,'Тип связи изменён');$('reconnect').onclick=()=>{selected={type:'edge',id:edge.id};render();
  note('Возьмите конечное гнездо стрелки и перенесите к другой карточке')};$('i-delete').onclick=deleteSelected;$('close-inspect').onclick=()=>{selected=null;render()}}
 }
@@ -3945,6 +3947,7 @@ function contentBounds(){
  const nodes=visible(),fields=[...fieldInView(),...editorialInView()],items=[];
  for(const n of gapInView())items.push({x:n.x,y:n.y,w:252,h:Math.max(115,document.querySelector(`[data-gap-note="${n.id}"]`)?.offsetHeight||115)});
  for(const n of nodes)items.push({x:n.x,y:n.y,w:widthOf(n),h:heightOf(n)|| (n.size==='mini'?75:n.size==='expanded'?220:170)});
+ for(const {node:n} of cwOpenReplacementOriginals())items.push({x:n.x,y:n.y,w:widthOf(n),h:heightOf(n)||170});
  for(const f of fields)items.push({x:f.x,y:f.y-25,w:f.width,h:f.height+25});
  for(const a of (creativeWorkspacePreview||cwPersistedWorkspaceScene())?.workspaces||[])items.push({x:a.x,y:a.y,w:a.width,h:a.height});
  if(!items.length)return {x:0,y:0,w:1000,h:600};
@@ -3965,7 +3968,7 @@ function renderOverviewTitles(){
  const keep=focusIds();
  // From real node centers, NOT from a transformed compact DOM box.
  // Item bounds remain in the original world layout throughout semantic zoom.
- const candidates=visible().map(n=>{
+ const candidates=[...visible(),...cwOpenReplacementOriginals().map(x=>x.node)].map(n=>{
   const dim=itemDims(n);
   return {n,x:pan.x+(n.x+dim.w/2)*pan.scale,y:pan.y+(n.y+dim.h/2)*pan.scale};
  }).filter(p=>p.x>=-10&&p.x<=viewport.width+10&&p.y>=-10&&p.y<=viewport.height+10)
@@ -3977,11 +3980,12 @@ function renderOverviewTitles(){
   const item=document.createElement('div');
   item.className='pa-semantic-item'+(active?' selected':'')+(keep&&!keep.has(n.id)?' focus-muted':'');
   item.dataset.zoomNode=n.id;
+  if(cwRetiredNodeIds().has(n.id))item.classList.add('cw-original-overview');
   item.style.left=x+'px';item.style.top=y+'px';item.style.setProperty('--color',colorOf(n));
   item.tabIndex=0;item.setAttribute('role','button');item.setAttribute('aria-label',(rewriteBy(n.id)?'Заметка переработки: ':'Событие: ')+n.title);
   item.title=n.title+' · '+(mode==='map'?'нажмите для приближения':'нажмите для выбора, повторно — приблизить');
   item.innerHTML='<span class="pa-semantic-dot" aria-hidden="true"></span><span class="pa-semantic-label"></span>';
-  item.querySelector('.pa-semantic-label').textContent=n.title;
+  item.querySelector('.pa-semantic-label').textContent=(cwRetiredNodeIds().has(n.id)?'На замене · ':'')+n.title;
   host.append(item);
   // The dot is ALWAYS anchored and visible, even if this label has no free room.
   // Use real, rendered text size to avoid estimating line breaks from character count.
@@ -4145,6 +4149,7 @@ function plotContextActions(kind,id,at){
  if(kind==='node')return [
  {label:'Редактировать',icon:'✎',run:()=>selectAndShow('node',id)},
  {label:rewriteBy(id)?'Отменить переработку':'Переработать событие',icon:'▤',run:()=>rewriteBy(id)?cancelEventRewrite(id):beginEventRewrite(id)},
+ ...(cwWorkflowEnabled()?[{label:'Начать замену…',icon:'↻',run:()=>void cwPrepareStartReplacement(id)}]:[]),
  {label:'Продолжить',icon:'↗',run:()=>addAfter(id)},
  {label:'Связать с заметкой',icon:'▤',run:()=>beginGapLink('plot_node',id)},
   {label:'Связать событие',icon:'⇢',run:()=>{linkFrom=id;selected={type:'node',id};render();note('Выберите карточку назначения · Esc — отменить')}},
@@ -4329,6 +4334,9 @@ document.addEventListener('keydown',e=>{
   }
   if(!$('tools-menu').hidden){$('tools-menu').hidden=true;$('tools-more').setAttribute('aria-expanded','false')}
   if(gapLinkFrom){gapLinkFrom=null;note('Редакторская связь отменена');return}if(linkFrom){linkFrom=null;render();return}
+  if(cwReplacementStartReview&&!cwAcceptanceBusy){
+   e.preventDefault();cwCloseReplacementStartReview();return;
+  }
   if(!modalOpen&&selected?.type==='node'){setNodeSelection([]);return}
   return;
  }
