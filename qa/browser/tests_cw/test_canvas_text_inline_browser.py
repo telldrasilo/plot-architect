@@ -125,12 +125,6 @@ def main():
   grab=page.locator(".canvas-text-grab").first
   before=page.evaluate("()=>structuredClone(__graphite.getState().canvasTexts[0])")
   box=grab.bounding_box()
-  print("UX126 GRAB",page.evaluate("""()=>{
-   const g=document.querySelector('.canvas-text-grab'),r=g.getBoundingClientRect();
-   const target=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
-   return {rect:{x:r.x,y:r.y,width:r.width,height:r.height},target:target?.outerHTML?.slice(0,180),
-    opacity:getComputedStyle(g).opacity};
-  }"""),flush=True)
   page.mouse.move(box["x"]+box["width"]/2,box["y"]+box["height"]/2)
   page.mouse.down()
   page.mouse.move(box["x"]+box["width"]/2+480,box["y"]+box["height"]/2+380,steps=8)
@@ -153,6 +147,7 @@ def main():
   assert len(db["graph"]["canvasTexts"])==2
   # Save and reopen — all editor-only data and formatting must survive.
   page.reload();ready()
+  page.wait_for_function("()=>Array.isArray(__graphite.getState().canvasTexts)&&__graphite.getState().canvasTexts.length===2")
   new=page.evaluate("()=>structuredClone(__graphite.getState().canvasTexts[0])")
   assert new["blocks"]==db["graph"]["canvasTexts"][0]["blocks"]
   assert new["width"]>420
