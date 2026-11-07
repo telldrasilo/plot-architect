@@ -997,7 +997,7 @@ const cwDraftRelationOptions=[
  ['enables','Создаёт условия','А делает Б возможным'],
  ['hinders','Препятствует','А мешает Б']
 ];
-function cwSelectBoundaryEdge(workspaceId,edgeId){
+function cwSelectBoundaryEdge(workspaceId,edgeId,pointer=null){
  if(!cwWorkflowEnabled()||cwAcceptanceBusy||cwDragDropReview)return;
  const e=state.edges.find(e=>e.id===edgeId&&e.workspaceId===workspaceId);
  if(!e||!['internal','boundary-proposal'].includes(e.draftRelation))return;
@@ -1006,7 +1006,9 @@ function cwSelectBoundaryEdge(workspaceId,edgeId){
  const old=cwSelectedBoundaryEdge;
  cwBoundaryDropReview=null;
  cwSelectedBoundaryEdge=old?.workspaceId===workspaceId&&old.edgeId===edgeId
-  ?null:{workspaceId,edgeId};
+  ?null:{workspaceId,edgeId,anchorWorld:pointer&&
+   Number.isFinite(pointer.clientX)&&Number.isFinite(pointer.clientY)
+   ?pointerToWorld(pointer.clientX,pointer.clientY):null};
  cwSelectedDraftEdge=null;
  renderCreativeWorkspacePreview();
 }
@@ -2195,7 +2197,7 @@ function renderCreativeWorkspacePreview(){
     hit.setAttribute('aria-label','Нерешённая редакторская связь: '+
       from.title+' — '+to.title+'. Показать подробности');
     hit.addEventListener('click',event=>{
-     event.stopPropagation();cwSelectBoundaryEdge(area.id,edge.id);
+     event.stopPropagation();cwSelectBoundaryEdge(area.id,edge.id,event);
     });
     hit.addEventListener('keydown',event=>{
      if(event.key==='Enter'||event.key===' '){
@@ -2455,7 +2457,6 @@ function renderCreativeWorkspacePreview(){
    });
    panel.append(approve,cancel);box.append(panel);
   }
-  let boundaryPanel=null,boundaryAnchor=null;
   if(persisted&&cwWorkflowEnabled()&&cwSelectedBoundaryEdge?.workspaceId===area.id){
    const edge=boundaryRelations.find(e=>e.id===cwSelectedBoundaryEdge.edgeId);
    const from=edge&&allEndpoints.get(edge.from),to=edge&&allEndpoints.get(edge.to);
@@ -2490,7 +2491,6 @@ function renderCreativeWorkspacePreview(){
      });
      actions.append(yes,no);
      p.append(title,relation,meaning,actions);box.append(p);
-     boundaryPanel=p;
     }else{
     const drop=document.createElement('button');drop.type='button';
     drop.dataset.cwBoundaryDrop=edge.id;
@@ -2514,20 +2514,17 @@ function renderCreativeWorkspacePreview(){
       void cwPrepareDiscard([draft.id],area.id);
      });
      actions.append(accept,remove);
-     boundaryAnchor=draft.id;
     }
     const close=document.createElement('button');close.type='button';
     close.textContent='Закрыть';close.addEventListener('click',event=>{
      event.stopPropagation();cwSelectedBoundaryEdge=null;renderCreativeWorkspacePreview();
     });
     actions.append(close);p.append(title,relation,meaning,actions);
-    box.append(p);boundaryPanel=p;
+    box.append(p);
     }
    }
   }
   host.append(box);
-  if(boundaryPanel&&boundaryAnchor)
-   cwPositionDropReview(boundaryPanel,box,[boundaryAnchor]);
   // Measure cards only after attaching to DOM: descriptions can make each
   // draft taller than the old fixed 105px/56px assumptions.
   const socketBounds=Object.fromEntries(nodes.map(n=>{
@@ -2624,6 +2621,16 @@ function renderCreativeWorkspacePreview(){
   if(dropReviewPanel)cwPositionDropReview(dropReviewPanel,box,dropReviewIds);
  }
  cwRefreshBoundaryRoutes(data,host);
+ if(cwSelectedBoundaryEdge){
+  const {workspaceId,edgeId,anchorWorld}=cwSelectedBoundaryEdge;
+  const box=[...host.querySelectorAll('[data-cw-workspace]')]
+   .find(el=>el.dataset.cwWorkspace===workspaceId);
+  const panel=[...(box?.querySelectorAll('[data-cw-boundary-details]')||[])]
+   .find(el=>el.dataset.cwBoundaryDetails===edgeId);
+  const line=[...(box?.querySelectorAll('[data-cw-boundary-edge]')||[])]
+   .find(el=>el.dataset.cwBoundaryEdge===edgeId);
+  if(panel&&line)cwPositionBoundaryPanel(panel,box,line,anchorWorld);
+ }
  cwRefreshSocketVisuals();
 }
 
