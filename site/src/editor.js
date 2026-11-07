@@ -3285,6 +3285,163 @@ function renderFieldInspector(el,f){el.hidden=false;
  $('f-zoom').onclick=()=>jumpToField(f.id);$('f-delete').onclick=()=>deleteField(f.id);$('close-inspect').onclick=()=>{selected=null;render()};
 }
 
+
+function cwOpenReplacementOriginals(){
+ const found=[];
+ for(const replacement of state.replacements||[]){
+  if(replacement.state!=='open')continue;
+  for(const id of replacement.sourceNodeIds||[]){
+   const node=nby(id);
+   if(node&&node.parent===state.view)found.push({replacement,node});
+  }
+ }
+ return found;
+}
+function cwRenderReplacementOriginals(host){
+ for(const {replacement:r,node:n} of cwOpenReplacementOriginals()){
+  const el=document.createElement('article');
+  el.className='node cw-original-on-replacement'+
+   (selected?.type==='replacement'&&selected.id===r.id?' cw-original-selected':'');
+  el.dataset.cwOriginal=n.id;el.dataset.cwReplacement=r.id;
+  el.style.left=n.x+'px';el.style.top=n.y+'px';
+  el.style.width=widthOf(n)+'px';
+  if(Number.isFinite(n.height))el.style.minHeight=heightOf(n)+'px';
+  el.tabIndex=0;el.setAttribute('role','button');
+  el.setAttribute('aria-label','На замене: '+n.title);
+  el.innerHTML='<div class="cw-original-kind">На замене</div>'+
+   '<div class="node-header"><div class="node-marker"></div><div class="node-title">'+esc(n.title)+'</div></div>'+
+   '<div class="node-note">'+esc(n.description||'Описание отсутствует')+'</div>'+
+   '<div class="node-foot"><span>Исходник сохранён · связи приостановлены</span></div>';
+  const inspect=()=>{suppressInspectorForNode=null;selectedNodeIds.clear();
+   selected={type:'replacement',id:r.id};render()};
+  el.addEventListener('click',event=>{event.stopPropagation();inspect()});
+  el.addEventListener('keydown',event=>{
+   if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();inspect()}
+  });
+  el.addEventListener('contextmenu',event=>{event.preventDefault();event.stopPropagation();inspect()});
+  host.append(el);
+ }
+}
+function cwRenderReplacementInspector(el,id){
+ const r=(state.replacements||[]).find(item=>item.id===id);
+ if(!r){el.hidden=true;return}
+ const original=(r.sourceNodeIds||[]).map(id=>nby(id)).filter(Boolean);
+ el.hidden=false;
+ el.innerHTML='<div class="inspect-head"><b>Замена события</b><button id="close-inspect" title="Закрыть">×</button></div>'+
+  '<p class="cw-replacement-status">На замене · исходный сюжет сохранён</p>'+
+  original.map(n=>'<div class="ux014-original"><strong>'+esc(n.title)+'</strong>'+
+   '<p>'+esc(n.description||'Описание отсутствует')+'</p></div>').join('')+
+  '<p class="muted">Приостановлено связей: '+(r.suspendedEdgeIds||[]).length+
+  '. Они не участвуют в действующем сюжете и не переподключаются автоматически.</p>'+
+  '<p class="muted">Разбор прежних отношений и завершение будут доступны на следующем этапе #97.</p>';
+ el.querySelector('#close-inspect').onclick=()=>{selected=null;render()};
+}
+let cwReplacementStartReview=null;
+const cwReplacementEdgeLabels={precedes:'Следом',causes:'Причина',enables:'Делает возможным',hinders:'Препятствует'};
+function cwCloseReplacementStartReview(){
+ if(cwAcceptanceBusy)return;
+ cwReplacementStartReview=null;modalOpen=false;$('modal-host').innerHTML='';
+}
+function cwShowReplacementStartReview(){
+ const r=cwReplacementStartReview;if(!r)return;
+ modalOpen=true;
+ const edges=(r.plan.suspendedEdges||[]).map(e=>
+  '<li>'+esc(nby(e.from)?.title||e.from)+' → '+esc(nby(e.to)?.title||e.to)+
+  ' · '+esc(cwReplacementEdgeLabels[e.type]||e.type)+'</li>').join('');
+ $('modal-host').innerHTML='<div class="backdrop"><form class="modal" id="cw-start-replacement-dialog">'+
+  '<h2>Начать замену события?</h2>'+
+  '<p><strong>'+esc(r.plan.originalNodes[0].title)+'</strong> останется на старом месте, но временно выйдет из действующего сюжета. Текст и координаты сохраняются.</p>'+
+  '<p>Приостановленные связи ('+r.plan.suspendedEdges.length+'). Они не подключатся автоматически:</p>'+
+  (edges?'<ul class="cw-replacement-review-edges">'+edges+'</ul>':'')+
+  '<p class="muted">Позднее каждую прежнюю связь потребуется разобрать отдельно.</p>'+
+  '<div class="buttons"><button type="button" id="cw-start-replacement-cancel">Отмена</button>'+
+  '<button type="submit" class="primary" id="cw-start-replacement-confirm">Начать замену</button></div></form></div>';
+ $('cw-start-replacement-cancel').onclick=cwCloseReplacementStartReview;
+ $('cw-start-replacement-dialog').onsubmit=e=>{e.preventDefault();void cwConfirmStartReplacement()};
+ $('cw-start-replacement-confirm').focus();
+}
+async function cwPrepareStartReplacement(nodeId){
+ const n=nby(nodeId);
+ if(!n||!visible().some(node=>node.id===nodeId))
+  return note('Заменять можно только действующее сюжетное событие');
+ if(!cwCleanForOperation())return note('Дождитесь синхронизации Graphite Local');
+ if(cwReplacementStartReview||cwAcceptanceBusy)return;
+ const projectId=activeProjectId,revision=remote.revision;
+ const command={kind:'start_replacement',replacementId:crypto.randomUUID(),sourceNodeIds:[nodeId]};
+ cwAcceptanceBusy=true;
+ try{
+  const response=await cwWorkflowRequest(projectId,'preview',{expectedRevision:revision,command});
+  if(activeProjectId!==projectId||remote.revision!==revision||remote.dirty||remote.blocked)
+   throw Error('Проект изменился во время проверки');
+  const p=response.preview;
+  if(!p||JSON.stringify(p.sourceNodeIds)!==JSON.stringify([nodeId])||
+   p.originalNodes?.length!==1||p.originalNodes[0].id!==n.id||
+   p.originalNodes[0].title!==n.title||p.originalNodes[0].description!==n.description||
+   p.originalNodes[0].x!==n.x||p.originalNodes[0].y!==n.y||
+   !Array.isArray(p.suspendedEdges)||!Array.isArray(p.suspendedEdgeIds)||
+   p.suspendedEdges.length!==p.suspendedEdgeIds.length||
+   p.autoRewiredEdgeIds?.length)
+    throw Error('Неожиданное содержимое предпросмотра');
+  if(p.affectedDraftEdgeIds?.length)
+   throw Error('У события есть связи с черновиками; сначала разрешите их');
+  for(const edge of p.suspendedEdges){
+   const old=eby(edge.id);
+   if(!old||old.from!==edge.from||old.to!==edge.to||old.type!==edge.type)
+    throw Error('Исходная связь изменилась');
+  }
+  cwReplacementStartReview={projectId,revision,command,plan:p,operationId:crypto.randomUUID()};
+  cwShowReplacementStartReview();
+ }catch(error){
+  cwReplacementStartReview=null;note('Начало замены не подготовлено: '+error.message);
+ }finally{cwAcceptanceBusy=false}
+}
+async function cwConfirmStartReplacement(){
+ const r=cwReplacementStartReview;
+ if(!r||cwAcceptanceBusy||!cwCleanForOperation()||
+  activeProjectId!==r.projectId||remote.revision!==r.revision)
+  return note('Проект изменился. Повторите проверку');
+ cwAcceptanceBusy=true;
+ if($('cw-start-replacement-confirm'))$('cw-start-replacement-confirm').disabled=true;
+ try{
+  const saved=await cwWorkflowRequest(r.projectId,'apply',{
+   expectedRevision:r.revision,operationId:r.operationId,
+   command:{...r.command,expectedPreview:r.plan}
+  });
+  if(saved.kind!=='start_replacement'||!Number.isSafeInteger(saved.revision))
+   throw Error('Сервер не подтвердил операцию');
+  const latest=await apiRequest('/api/projects/'+encodeURIComponent(r.projectId));
+  if(activeProjectId!==r.projectId||remote.dirty||remote.blocked||
+   latest.revision<saved.revision)throw Error('Повторное чтение не подтвердило состояние');
+  const target=latest.graph?.replacements?.find(x=>x.id===r.command.replacementId);
+  const source=latest.graph?.nodes?.find(x=>x.id===r.command.sourceNodeIds[0]);
+  const original=r.plan.originalNodes[0];
+  if(target?.state!=='open'||JSON.stringify(target.sourceNodeIds)!==
+   JSON.stringify(r.command.sourceNodeIds)||
+   JSON.stringify(target.suspendedEdgeIds)!==JSON.stringify(r.plan.suspendedEdgeIds)||
+   !source||source.title!==original.title||source.description!==original.description||
+   source.x!==original.x||source.y!==original.y||
+   r.plan.suspendedEdges.some(old=>{
+    const edge=latest.graph?.edges?.find(e=>e.id===old.id);
+    return !edge||edge.from!==old.from||edge.to!==old.to||edge.type!==old.type;
+   }))throw Error('Исходник или его стрелки не совпадают с предпросмотром');
+  state=validateImported(latest.graph);remote.revision=latest.revision;remote.dirty=false;
+  history=[];selectedNodeIds.clear();linkFrom=null;
+  selected={type:'replacement',id:r.command.replacementId};
+  cwReplacementStartReview=null;modalOpen=false;$('modal-host').innerHTML='';
+  recomputeFieldTags();save(false);render();
+  $('saved').textContent='✓ Сохранено локально · '+remote.revision;
+  note('Замена начата. Оригинал сохранён, прежние связи приостановлены');
+ }catch(err){
+  // Ambiguous result: keep operationId so a retry cannot create another change.
+  if(['REVISION_CONFLICT','PREVIEW_STALE','OPERATION_ID_REUSED'].includes(err.code)){
+   cwReplacementStartReview=null;modalOpen=false;$('modal-host').innerHTML='';
+   note('Проверка устарела. Обновите проект и повторите попытку');
+  }else note('Замена не подтверждена: '+err.message);
+ }finally{
+  cwAcceptanceBusy=false;
+  if($('cw-start-replacement-confirm'))$('cw-start-replacement-confirm').disabled=false;
+ }
+}
 function renderNodes(){const host=$('nodes');host.innerHTML='';const keep=focusIds(),chosen=new Set(groupIds()),parentsWithChildren=new Set(state.nodes.filter(k=>k.parent).map(k=>k.parent));for(const n of visible()){const rewrite=rewriteBy(n.id);const el=document.createElement('article');el.className='node '+(n.size||'normal')+(rewrite?' rewrite-draft':'')+(chosen.has(n.id)?' selected':'')+(n.status==='proposed'?' node-proposed':'')+(keep&&!keep.has(n.id)?' focus-muted':'');el.dataset.node=n.id;el.style.left=n.x+'px';el.style.top=n.y+'px';if(Number.isFinite(n.width)||Number.isFinite(n.height))el.classList.add('node-custom-size');if(Number.isFinite(n.width))el.style.width=widthOf(n)+'px';if(Number.isFinite(n.height))el.style.minHeight=heightOf(n)+'px';el.style.setProperty('--color',colorOf(n));el.tabIndex=0;el.setAttribute('aria-label',(rewrite?'Заметка переработки: ':'Событие: ')+n.title);el.innerHTML=`${chosen.size===1&&chosen.has(n.id)?`<div class="node-actions">${!rewrite?'<button data-command="inside" title="Открыть детали">↗ Внутрь</button><button data-command="link" title="Соединить с другим событием">↗ Связать</button><button data-command="after" title="Продолжить сюжет" aria-label="Продолжить сюжет">＋</button>':''}<button data-command="edit" title="Редактировать">⋯</button></div>`:''}${rewrite?'<div class="ux014-node-kind">▤ Заметка · переработка</div>':''}<div class="node-header"><div class="node-marker"></div><div class="node-title">${esc(n.title)}</div></div><div class="node-note">${esc(rewrite?(rewrite.taskText||'Что изменить?'):(n.description||'Добавьте короткое описание события'))}</div><div class="node-foot">${rewrite?`<span class="ux014-rewrite-status">Исходник сохранён · задание на переработку</span>`:tagNames(n).map(tag=>`<span class="field-chip ${tag.manual?'manual-chip':''}" title="${tag.manual?'Закреплённый тег':'Назначен полем'}">${esc(tag.name)}</span>`).join('')}${!rewrite&&!tagNames(n).length?'<span>Без поля</span>':''}${!rewrite?editorialInView().filter(ef=>ef.memberIds.includes(n.id)).map(ef=>`<span class="editorial-chip" title="Редакторское задание, не смысловой тег">▨ ${esc(ef.title)}</span>`).join(''):''}${!rewrite&&parentsWithChildren.has(n.id)?'<span class="tag">Есть детали</span>':''}</div>${chosen.size===1&&chosen.has(n.id)?'<button class="node-resize-grip" title="Изменить ширину и высоту карточки" aria-label="Изменить размер ноды">⤡</button>':''}`;if(!rewrite){
   const socket=document.createElement('button');
   socket.type='button';socket.className='cw-free-source';
