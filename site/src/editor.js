@@ -3917,7 +3917,7 @@ function cwOpenReplacementHistory(){
  }).join('');
  $('modal-host').innerHTML='<div class="backdrop"><section class="modal" role="dialog" aria-modal="true" id="cw-replacement-history-dialog" aria-labelledby="cw-history-title">'+
   '<h2 id="cw-history-title">История замен</h2>'+
-  '<p>Исходные события не удаляются. Завершённые оригиналы скрыты с сюжетного полотна, но здесь доступны для чтения.</p>'+
+  '<p>Исходники не удаляются. Завершённые скрыты с полотна; явно восстановленные видны в каноне, но защищены от обычного редактирования.</p>'+
   '<ol class="cw-relations-list">'+records+'</ol>'+
   '<p class="muted">Просмотр не восстанавливает события и не изменяет прежние решения о связях.</p>'+
   '<div class="buttons"><button type="button" id="cw-history-close">Закрыть</button></div></section></div>';
@@ -3972,7 +3972,7 @@ function cwShowPostCanonChoices(){
     ],value)+'</label>';
  }).join('');
  modalOpen=true;
- $('modal-host').innerHTML='<div class="backdrop"><form class="modal" id="cw-postcanon-choices" role="dialog" aria-modal="true"'+
+ $('modal-host').innerHTML='<div class="backdrop"><form class="modal cw-postcanon-modal" id="cw-postcanon-choices" role="dialog" aria-modal="true"'+
   ' aria-label="Пересмотреть замену">'+
   '<h2>Пересмотреть замену</h2>'+
   '<p>Сохранённый оригинал:</p><ul class="cw-replacement-review-edges">'+orig+'</ul>'+
@@ -4043,7 +4043,7 @@ function cwShowPostCanonReview(){
   p.possibleTitleConflicts.some(id=>!ack.has(id));
  const canApply=blockedOther.length===0&&!needConfirm;
  modalOpen=true;
- $('modal-host').innerHTML='<div class="backdrop"><form class="modal" id="cw-postcanon-review" role="dialog" aria-modal="true"'+
+ $('modal-host').innerHTML='<div class="backdrop"><form class="modal cw-postcanon-modal" id="cw-postcanon-review" role="dialog" aria-modal="true"'+
   ' aria-label="Проверить последствия пересмотра">'+
   '<h2>Подтвердить пересмотр?</h2>'+
   '<p>Это изменит действующую проекцию сюжета только согласно выбранным решениям. '+
