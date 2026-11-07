@@ -3465,6 +3465,14 @@ function newGapNote(at=null){const r=canvasRect();const start={x:Math.round((r.w
  commit(()=>{state.nextGapNote++;state.gapNotes.push({id,title:'Заметка',text:'',parent:state.view,x:Math.round(p.x),y:Math.round(p.y),offerVariants:true,status:'pending'})},'Заметка создана');
  selected={type:'gapNote',id};render();return id;
 }
+function setGapNoteTitle(id,title){
+ const n=gnby(id),next=String(title||'').trim().slice(0,160);
+ if(!n||!next||n.title===next)return;
+ // Renaming a pending task invalidates any source-note snapshot under review.
+ cwPreparedNoteAlternatives.delete(id);cwStageReview=null;
+ commit(()=>{gnby(id).title=next},'Название заметки сохранено');
+ selected={type:'gapNote',id};render();
+}
 function setGapNoteText(id,text){const n=gnby(id),v=String(text).slice(0,8000);if(!n||n.text===v)return;
  cwPreparedNoteAlternatives.delete(id);cwStageReview=null;cwHandoffClear();
  commit(()=>{const rec=gnby(id);rec.text=v;rec.status='pending'},'Заметка сохранена');selected={type:'gapNote',id};render();
@@ -3479,11 +3487,22 @@ function completeGapLink(kind,id){if(!gapLinkFrom)return false;const source=gapL
 function deleteGapNote(id){if(!gnby(id))return; if(!confirm('Удалить заметку и её контекстные связи? Сюжетные события останутся.'))return;
  commit(()=>{state.gapNotes=state.gapNotes.filter(n=>n.id!==id);state.gapLinks=state.gapLinks.filter(l=>!(l.from.kind==='gap_note'&&l.from.id===id)&&!(l.to.kind==='gap_note'&&l.to.id===id))},'Заметка удалена');selected=null;render();
 }
+// The user has not named a legacy/default note yet. Distinguish active tasks
+// by a short visible excerpt; never rewrite persisted titles behind their back.
+function gapNoteDisplayTitle(n){
+ const title=String(n.title||'Заметка').trim()||'Заметка';
+ if(title!=='Заметка')return title;
+ const task=String(n.text||'').replace(/\s+/g,' ').trim();
+ if(!task)return title;
+ const chars=Array.from(task),excerpt=chars.slice(0,52).join('');
+ return title+' · '+excerpt+(chars.length>52?'…':'');
+}
 function renderGapNotes(){const host=$('gap-notes');host.innerHTML='';
  for(const n of gapInView()){
   const el=document.createElement('article');el.className='gap-note'+(selected?.type==='gapNote'&&selected.id===n.id?' selected':'');
   el.dataset.gapNote=n.id;el.style.left=n.x+'px';el.style.top=n.y+'px';el.tabIndex=0;
-  el.innerHTML=`<div class="gap-note-head">▤ ${esc(n.title||'Заметка')}</div><div class="gap-note-body ${!n.text?'gap-note-empty':''}">${esc(n.text||'Напишите, что нужно придумать здесь…')}</div><div class="gap-note-foot">${cwWorkflowEnabled()?(cwNoteHasWorkspace(n.id)?'Варианты в рабочей области':cwPreparedNoteAlternatives.has(n.id)?'Подготовлено '+cwPreparedNoteAlternatives.get(n.id).branches.length+' ветвей':'Редакторское задание') :'Редакторское задание'} · не сюжетное событие</div>`;
+  el.setAttribute('aria-label',gapNoteDisplayTitle(n));
+  el.innerHTML=`<div class="gap-note-head">▤ ${esc(gapNoteDisplayTitle(n))}</div><div class="gap-note-body ${!n.text?'gap-note-empty':''}">${esc(n.text||'Напишите, что нужно придумать здесь…')}</div><div class="gap-note-foot">${cwWorkflowEnabled()?(cwNoteHasWorkspace(n.id)?'Варианты в рабочей области':cwPreparedNoteAlternatives.has(n.id)?'Подготовлено '+cwPreparedNoteAlternatives.get(n.id).branches.length+' ветвей':'Редакторское задание') :'Редакторское задание'} · не сюжетное событие</div>`;
   host.append(el);
   el.onclick=e=>{e.stopPropagation();if(dragCompletedFor===n.id){dragCompletedFor=null;return}if(completeGapLink('gap_note',n.id))return;selected={type:'gapNote',id:n.id};render()};
   el.addEventListener('pointerdown',e=>{if(e.button!==0||e.target.closest('input,textarea')||e.ctrlKey)return;interaction={type:'gap-note-move',id:n.id,px:e.clientX,py:e.clientY,x:n.x,y:n.y,moved:false};el.setPointerCapture(e.pointerId)});
@@ -3521,6 +3540,7 @@ function renderGapInspector(el,n){
  el.innerHTML='<div class="inspect-head"><b>▤ Заметка · придумать новое</b><span class="inspect-top-tools">'+
   '<button id="pin-inspect" type="button" title="'+(inspectorPinned?'Вернуть окно к заметке':'Закрепить окно справа')+'">'+
   (inspectorPinned?'↗ Рядом':'▣ Справа')+'</button><button id="close-inspect">×</button></span></div>'+
+ '<div class="field"><label for="gap-title">Название заметки</label><input id="gap-title" maxlength="160" value="'+esc(n.title||'Заметка')+'"></div>'+
  '<div class="field"><label>Задание ChatGPT</label><textarea id="gap-text" class="gap-note-editor" placeholder="Что нужно придумать?">'+esc(n.text)+'</textarea></div>'+
  '<div class="muted">Отдельная временная нода. Не событие и не канонический факт. Стрелки к ней задают редакторский контекст.</div>'+
  existing+handoff+'<hr><div class="inspect-actions">'+stageButton+
@@ -3529,6 +3549,7 @@ function renderGapInspector(el,n){
  $('pin-inspect').onclick=()=>{
   inspectorPinned=!inspectorPinned;renderInspector();positionInspector();
  };
+ $('gap-title').onchange=e=>setGapNoteTitle(n.id,e.target.value);
  $('gap-text').onchange=e=>setGapNoteText(n.id,e.target.value);
  $('gap-link').onclick=()=>beginGapLink('gap_note',n.id);
  $('gap-delete').onclick=()=>deleteGapNote(n.id);

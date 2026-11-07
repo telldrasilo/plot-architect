@@ -160,6 +160,47 @@ def main():
         note.click()
         assert_note_inspector_adjacent(page, note_id)
         assert len(db["graph"]["nodes"]) == 2
+
+        # CW-102: two pending tasks must be distinguishable without gn IDs.
+        # Legacy stored names remain exactly "Заметка" until an explicit rename.
+        second = page.evaluate("() => __graphite.newGapNote({x:780,y:390})")
+        page.wait_for_function("() => !__graphite.getRemote().busy && !__graphite.getRemote().dirty")
+        task2 = "Проверить мотивы свидетеля перед решением"
+        page.evaluate("([id,value])=>__graphite.setGapNoteText(id,value)", [second, task2])
+        page.wait_for_function(
+            "id => !__graphite.getRemote().busy && !__graphite.getRemote().dirty"
+            " && __graphite.getGapNotes().find(n=>n.id===id)?.text.startsWith('Проверить')",
+            arg=second)
+        first_head = page.locator(f'[data-gap-note="{note_id}"] .gap-note-head').inner_text()
+        second_head = page.locator(f'[data-gap-note="{second}"] .gap-note-head').inner_text()
+        assert first_head != second_head, (first_head,second_head)
+        assert "Предложи четыре" in first_head and "Проверить мотивы" in second_head
+        assert note_id not in first_head and second not in second_head
+        assert [n["title"] for n in db["graph"]["gapNotes"]] == ["Заметка", "Заметка"]
+        # A user-authored title overrides the excerpt, and persists after reload.
+        page.locator(f'[data-gap-note="{second}"]').click()
+        page.locator("#gap-title").fill("Проверка свидетельства")
+        page.locator("#gap-title").press("Tab")
+        page.wait_for_function(
+            "id => !__graphite.getRemote().busy && !__graphite.getRemote().dirty"
+            " && __graphite.getGapNotes().find(n=>n.id===id)?.title==='Проверка свидетельства'",
+            arg=second)
+        assert "Проверка свидетельства" in page.locator(
+            f'[data-gap-note="{second}"] .gap-note-head').inner_text()
+        assert db["graph"]["gapNotes"][0]["title"] == "Заметка"
+        assert len(db["graph"]["nodes"]) == 2
+        assert db["graph"]["edges"] == initial_graph()["edges"]
+        page.reload()
+        page.wait_for_function(
+            "id => __graphite.getRemote().connected &&"
+            " __graphite.getGapNotes().find(n=>n.id===id)?.title==='Проверка свидетельства'",
+            arg=second)
+        assert "Предложи четыре" in page.locator(
+            f'[data-gap-note="{note_id}"] .gap-note-head').inner_text()
+        assert "Проверка свидетельства" in page.locator(
+            f'[data-gap-note="{second}"] .gap-note-head').inner_text()
+        assert [n["title"] for n in db["graph"]["gapNotes"]] == [
+            "Заметка", "Проверка свидетельства"]
         assert not errors, errors
         context.close()
         browser.close()
