@@ -199,6 +199,7 @@ body.pa-multi-modifier .inspector{pointer-events:none;opacity:.35}/* allows Ctrl
 .node.cw-original-on-replacement:focus-visible{outline:2px solid #c9b493;outline-offset:3px}
 .cw-original-kind{font-size:11px;color:#e1caa6;font-weight:630;padding:10px 15px 0}
 .cw-replacement-status{font-size:12px;color:#d2b98b}
+.cw-replacement-original-preview{font-size:12px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;padding:9px 12px;background:#ffffff08;border-left:2px solid #ab9677;border-radius:4px;max-height:150px;overflow:auto}
 .cw-replacement-review-edges{padding-left:20px;max-height:185px;overflow:auto;font-size:12px;line-height:1.6;overflow-wrap:anywhere}
 .pa-semantic-item.cw-original-overview{opacity:.55}
 .pa-semantic-item.cw-original-overview .pa-semantic-label{border-left-color:#958979}
@@ -3960,6 +3961,7 @@ function cwShowReplacementStartReview(){
  $('modal-host').innerHTML='<div class="backdrop"><form class="modal" id="cw-start-replacement-dialog">'+
   '<h2>Начать замену события?</h2>'+
   '<p><strong>'+esc(r.plan.originalNodes[0].title)+'</strong> останется на старом месте, но временно выйдет из действующего сюжета. Текст и координаты сохраняются.</p>'+
+  '<p class="cw-replacement-original-preview">'+esc(r.plan.originalNodes[0].description||'Описание отсутствует')+'</p>'+
   '<p>Приостановленные связи ('+r.plan.suspendedEdges.length+'). Они не подключатся автоматически:</p>'+
   (edges?'<ul class="cw-replacement-review-edges">'+edges+'</ul>':'')+
   '<p class="muted">Позднее каждую прежнюю связь потребуется разобрать отдельно.</p>'+
