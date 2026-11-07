@@ -278,7 +278,7 @@ body.pa-multi-modifier .inspector{pointer-events:none;opacity:.35}/* allows Ctrl
  <div class="breadcrumbs" id="breadcrumbs"></div><div class="footer-version">GRAPHITE / LOCAL 0.13.5-alpha · UX-016</div>
  <div id="selection-summary" class="pa-selection-summary" hidden></div><div class="notice hide" id="notice"></div><aside class="inspector" id="inspector" hidden></aside><div id="pa-context-menu" class="pa-context-menu" role="menu" aria-label="Действия с сюжетом" hidden></div>
  <div class="nav-mini" role="toolbar" aria-label="Навигация по полотну"><button id="fit" data-tip="Показать весь граф на экране" title="Показать всё содержимое">⊡ Вместить</button><button id="guides" data-tip="Показать или скрыть смысловые поля" title="Показать или скрыть поля">▧ Поля: вкл.</button><button id="focus" data-tip="Приглушить всё кроме выбранной ноды и её связей (F)" aria-pressed="false" title="Подсветить связанные события, клавиша F">◎ Фокус</button><button id="overview-toggle" data-tip="Открыть или закрыть миникарту" aria-pressed="false" title="Показать или скрыть миникарту">⊞ Обзор</button><div class="zoom-group" aria-label="Масштаб"><button id="zoom-out" data-tip="Отдалить полотно" aria-label="Уменьшить масштаб" title="Уменьшить">−</button><button id="zoom-home" aria-label="Масштаб 100%" title="Масштаб 100%"><span id="zoom-label">100%</span></button><button id="zoom-in" data-tip="Приблизить полотно" aria-label="Увеличить масштаб" title="Увеличить">+</button></div></div><div class="overview-panel" id="overview" hidden><div class="overview-head"><span>Вся история <small id="overview-count"></small></span><button id="overview-close" data-tip="Закрыть миникарту" aria-label="Закрыть миникарту">×</button></div><svg id="overview-map" role="img" aria-label="Миникарта; нажмите для перехода к области" preserveAspectRatio="none"></svg></div>
- <div class="float-toolbar" id="action-toolbar" role="toolbar" aria-label="Создание сюжета"><button class="highlight" id="create" data-tip="Новый элемент сюжетного каркаса. (N)">□ Событие</button><button id="add-field" data-tip="Смысловая область для группировки событий и назначения тегов.">▧ Поле</button><button id="add-gap-note" data-tip="Задание ChatGPT: придумать новый сюжетный фрагмент.">▤ Заметка</button><button id="add-editorial-field" data-tip="Задание ChatGPT: переработать существующие события.">▨ Переработка</button><button id="tools-more" data-tip="Дополнительные действия с графом" class="tool-icon" aria-label="Дополнительные действия" aria-expanded="false" aria-controls="tools-menu" title="Дополнительные действия">⋯</button><button id="tools-collapse" data-tip="Свернуть панель создания" class="tool-icon" aria-label="Свернуть панель создания" title="Свернуть панель">−</button><div id="tools-menu" class="tools-menu" hidden><button id="arrange" title="Расположить узлы в порядке стрелок «Следом»">⇥ Упорядочить по стрелкам<small>Автоматически расположить события слева направо по связям «Следом». Не меняет связи и даты; если порядок уже верный — карточки могут остаться на месте.</small></button><button id="toggle-all-edges" data-tip="Показать все настоящие связи, даже на общем масштабе">◎ Показать все связи<small>Диагностическое отображение; исходные связи остаются без изменений.</small></button><button id="toggle-routing" data-tip="Сравнить прямые стрелки и обход препятствий">↝ Маршруты: прямые<small>Обход препятствий экспериментальный; может создавать длинные трассы. Сравните варианты.</small></button></div></div><button id="toolbar-restore" data-tip="Показать инструменты создания" class="toolbar-restore" hidden title="Показать инструменты создания" aria-label="Развернуть панель создания">＋ Инструменты</button>
+ <div class="float-toolbar" id="action-toolbar" role="toolbar" aria-label="Создание сюжета"><button class="highlight" id="create" data-tip="Новый элемент сюжетного каркаса. (N)">□ Событие</button><button id="add-field" data-tip="Смысловая область для группировки событий и назначения тегов.">▧ Поле</button><button id="add-gap-note" data-tip="Задание ChatGPT: придумать новый сюжетный фрагмент.">▤ Заметка</button><button id="add-editorial-field" data-tip="Задание ChatGPT: переработать существующие события.">▨ Переработка</button><button id="tools-more" data-tip="Дополнительные действия с графом" class="tool-icon" aria-label="Дополнительные действия" aria-expanded="false" aria-controls="tools-menu" title="Дополнительные действия">⋯</button><button id="tools-collapse" data-tip="Свернуть панель создания" class="tool-icon" aria-label="Свернуть панель создания" title="Свернуть панель">−</button><div id="tools-menu" class="tools-menu" hidden><button id="arrange" title="Расположить узлы в порядке стрелок «Следом»">⇥ Упорядочить по стрелкам<small>Автоматически расположить события слева направо по связям «Следом». Не меняет связи и даты; если порядок уже верный — карточки могут остаться на месте.</small></button><button id="toggle-all-edges" data-tip="Показать все настоящие связи, даже на общем масштабе">◎ Показать все связи<small>Диагностическое отображение; исходные связи остаются без изменений.</small></button><button id="toggle-routing" data-tip="Сравнить прямые стрелки и обход препятствий">↝ Маршруты: прямые<small>Обход препятствий экспериментальный; может создавать длинные трассы. Сравните варианты.</small></button><button id="cw-replacement-history" type="button" title="Сохранённые исходные события и прежние связи">▤ История замен<small>Просмотреть завершённые и открытые замены без изменения сюжета.</small></button></div></div><button id="toolbar-restore" data-tip="Показать инструменты создания" class="toolbar-restore" hidden title="Показать инструменты создания" aria-label="Развернуть панель создания">＋ Инструменты</button>
  <div class="hint hide">Перетаскивание не меняет порядок · Ctrl+K — поиск · F — фокус</div><div class="toast" id="toast"></div></main><div id="modal-host"></div>
 <style>
 #projects-open{border-color:#5c513f;background:#302d28;color:#e5dbc7;white-space:nowrap}#project-mode{font-size:10px;opacity:.6;padding-left:7px}.project-manager{width:min(620px,calc(100vw - 24px));max-height:90vh;overflow:auto}.project-modal-head{display:flex;justify-content:space-between;align-items:center}.project-modal-head h2{margin:0}.project-modal-head button{padding:3px 9px;font-size:20px}.project-list{display:flex;flex-direction:column;max-height:260px;overflow:auto;gap:7px;margin:16px 0}.project-entry{text-align:left;display:flex;justify-content:space-between;align-items:center;gap:14px;padding:12px 15px}.project-entry b{font-size:14px}.project-entry small{font-size:11px;color:#b5ac9e;white-space:nowrap}.project-entry.active{border-color:#a18b65;background:#40392c}.project-controls{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}.project-controls.secondary button{background:#242424;color:#bdb5aa}.pm-error{color:#f0afa7;min-height:15px;font-size:12px}@media(max-width:720px){#projects-open{font-size:11px;padding:7px}#project-mode{display:none}.project-entry{flex-direction:column;align-items:start}}
@@ -4027,7 +4027,7 @@ function cwRenderReplacementInspector(el,id){
       ?'<p class="muted">Завершение недоступно: решите все '+(suspended.length-resolved.size)+
        ' оставшиеся связи. Отложить можно в любой момент.</p>'
       :'<p class="muted">Все прежние связи разобраны. Завершение скроет исходник с полотна, но сохранит его для пересмотра.</p>'):
-    '<p class="muted">Оригинал скрыт с полотна, но сохранён. История и пересмотр доступны отдельно.</p>')+
+    '<p class="muted">Исходник доступен через «Историю замен». Пересмотр после изменения канона требует отдельной защищённой процедуры.</p>')+
   '</div>';
  el.querySelector('#close-inspect').onclick=()=>{
   cwReplacementChoice=null;selected=null;render();
@@ -4183,6 +4183,45 @@ async function cwConfirmReplacementDecision(){
   cwAcceptanceBusy=false;
   if($('cw-reconnect-confirm'))$('cw-reconnect-confirm').disabled=false;
  }
+}
+
+
+let cwReplacementHistoryDialog=false;
+function cwCloseReplacementHistory(){
+ if(!cwReplacementHistoryDialog)return;
+ cwReplacementHistoryDialog=false;modalOpen=false;$('modal-host').innerHTML='';
+ $('tools-more')?.focus();
+}
+function cwOpenReplacementHistory(){
+ const items=state.replacements||[];
+ if(!items.length)return note('В этом проекте ещё нет замен событий');
+ if(modalOpen||cwAcceptanceBusy)return;
+ cwReplacementHistoryDialog=true;modalOpen=true;
+ const records=[...items].reverse().map(r=>{
+  const titles=(r.sourceNodeIds||[]).map(id=>nby(id)?.title||id);
+  const resolved=(r.edgeResolutions||[]).length;
+  return '<li><button type="button" data-cw-history-id="'+esc(r.id)+'">'+
+   '<strong>'+esc(titles.join(', '))+'</strong> · '+
+   (r.state==='completed'?'Завершена':'На замене')+
+   '<small>Прежние связи: '+resolved+' из '+(r.suspendedEdgeIds||[]).length+
+   ' решены. Оригинал и исходные отношения сохранены.</small></button></li>';
+ }).join('');
+ $('modal-host').innerHTML='<div class="backdrop"><section class="modal" role="dialog" aria-modal="true" id="cw-replacement-history-dialog" aria-labelledby="cw-history-title">'+
+  '<h2 id="cw-history-title">История замен</h2>'+
+  '<p>Исходные события не удаляются. Завершённые оригиналы скрыты с сюжетного полотна, но здесь доступны для чтения.</p>'+
+  '<ol class="cw-relations-list">'+records+'</ol>'+
+  '<p class="muted">Просмотр не восстанавливает события и не изменяет прежние решения о связях.</p>'+
+  '<div class="buttons"><button type="button" id="cw-history-close">Закрыть</button></div></section></div>';
+ $('cw-history-close').onclick=cwCloseReplacementHistory;
+ $('cw-replacement-history-dialog').querySelectorAll('[data-cw-history-id]').forEach(button=>
+  button.onclick=()=>{
+   const id=button.dataset.cwHistoryId;
+   cwReplacementHistoryDialog=false;modalOpen=false;$('modal-host').innerHTML='';
+   cwReplacementChoice=null;selectedNodeIds.clear();
+   selected={type:'replacement',id};render();
+   $('close-inspect')?.focus();
+  });
+ $('cw-replacement-history-dialog').querySelector('[data-cw-history-id]')?.focus();
 }
 
 let cwReplacementLifecycleReview=null; // server preview + stable operationId; never plot data
@@ -5347,6 +5386,7 @@ document.addEventListener('keydown',e=>{
   }
   if(!$('tools-menu').hidden){$('tools-menu').hidden=true;$('tools-more').setAttribute('aria-expanded','false')}
   if(gapLinkFrom){gapLinkFrom=null;note('Редакторская связь отменена');return}if(linkFrom){linkFrom=null;render();return}
+  if(cwReplacementHistoryDialog){e.preventDefault();cwCloseReplacementHistory();return;}
   if(cwReplacementLifecycleReview&&!cwAcceptanceBusy){
    e.preventDefault();cwCloseReplacementLifecycleReview();return;
   }
@@ -5651,6 +5691,10 @@ async function connectSite(silent=false){
  else{let last;try{last=JSON.parse(localStorage.getItem(SITE_REGISTRY_KEY)||'null')?.activeId}catch{};registry={activeId:data.projects.some(p=>p.id===last)?last:data.projects[0].id,projects:data.projects.map(p=>({id:p.id,name:p.name,revision:p.revision}))};remote.revision=0;await openProject(registry.activeId);note(cwLocalWorkflowEnabled?'Подключён Graphite Local':'Подключено к Site')}
 }
 $('projects-open').onclick=showProjectManager;
+$('cw-replacement-history').onclick=()=>{
+ $('tools-menu').hidden=true;$('tools-more').setAttribute('aria-expanded','false');
+ cwOpenReplacementHistory();
+};
 updateProjectLabel();
 if(location.protocol==='http:'||location.protocol==='https:')setTimeout(()=>connectSite(true).catch(e=>{
  cwLocalWorkflowEnabled=false;
