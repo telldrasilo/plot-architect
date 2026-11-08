@@ -2287,6 +2287,15 @@ function renderCreativeWorkspacePreview(){
     });
     actions.append(count,accept,discard,all,clear);
    }else actions.append(count,accept,discard,clear);
+   if((state.replacementPreparations||[]).some(p=>p.state==='open')){
+    const prep=document.createElement('button');prep.type='button';
+    prep.textContent='Использовать в замене';
+    prep.disabled=remote.blocked||cwAcceptanceBusy;
+    prep.addEventListener('click',e=>{
+     e.stopPropagation();cwOpenPrepCandidateDialog(null,[...cwSelectedDraftIds]);
+    });
+    actions.insertBefore(prep,clear);
+   }
    box.append(actions);
   }
   const names=[...new Set(nodes.map(n=>n.draftBranchId||'single'))];
