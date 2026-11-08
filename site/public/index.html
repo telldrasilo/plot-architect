@@ -311,6 +311,17 @@ body.pa-multi-modifier .inspector{pointer-events:none;opacity:.35}/* allows Ctrl
 .canvas-text-format button{border:0;border-radius:6px;background:transparent;padding:6px 9px;font-size:11px}
 .canvas-text-format button:hover{background:#49464b}
 .modal.cw-postcanon-modal{width:min(650px,calc(100vw - 28px));max-height:min(88vh,900px);overflow-y:auto;overscroll-behavior:contain}
+
+/* UX-134: readable replacement history at narrow widths, with no change to workflow. */
+#cw-replacement-history-dialog{max-height:min(88vh,900px);overflow-y:auto;overscroll-behavior:contain}
+#cw-replacement-history-dialog .cw-history-list [data-cw-history-id]{
+ display:flex;flex-direction:column;align-items:flex-start;gap:5px;
+ width:100%;min-width:0;text-align:left;white-space:normal;
+ overflow-wrap:anywhere;line-height:1.45}
+#cw-replacement-history-dialog .cw-history-title{display:block;font-size:12px}
+#cw-replacement-history-dialog .cw-history-state{display:block;color:var(--accent);font-size:11px}
+#cw-replacement-history-dialog .cw-history-meta{
+ display:block;color:var(--sub);font-size:11px;line-height:1.5}
 .node.cw-restored-readonly{border-style:solid;cursor:default}
 
 /* CW-010 C3b: distinct, readable decisions in the post-canon review.
@@ -4598,16 +4609,17 @@ function cwOpenReplacementHistory(){
   const titles=(r.sourceNodeIds||[]).map(id=>nby(id)?.title||id);
   const resolved=(r.edgeResolutions||[]).length;
   return '<li><button type="button" data-cw-history-id="'+esc(r.id)+'">'+
-   '<strong>'+esc(titles.join(', '))+'</strong> · '+
+   '<strong class="cw-history-title">'+esc(titles.join(', '))+'</strong>'+
+   '<span class="cw-history-state">'+
    (r.state==='restored'?'Восстановлена':r.state==='completed'?'Завершена':'На замене')+
-   '<small>Прежние связи: '+resolved+' из '+(r.suspendedEdgeIds||[]).length+
+   '</span><small class="cw-history-meta">Прежние связи: '+resolved+' из '+(r.suspendedEdgeIds||[]).length+
    ' решены. Пересмотров: '+(r.postCanonReviews||[]).length+
    '. Оригинал и исходные отношения сохранены.</small></button></li>';
  }).join('');
  $('modal-host').innerHTML='<div class="backdrop"><section class="modal" role="dialog" aria-modal="true" id="cw-replacement-history-dialog" aria-labelledby="cw-history-title">'+
   '<h2 id="cw-history-title">История замен</h2>'+
   '<p>Исходники не удаляются. Завершённые скрыты с полотна; явно восстановленные видны в каноне, но защищены от обычного редактирования.</p>'+
-  '<ol class="cw-relations-list">'+records+'</ol>'+
+  '<ol class="cw-relations-list cw-history-list">'+records+'</ol>'+
   '<p class="muted">Просмотр не восстанавливает события и не изменяет прежние решения о связях.</p>'+
   '<div class="buttons"><button type="button" id="cw-history-close">Закрыть</button></div></section></div>';
  $('cw-history-close').onclick=cwCloseReplacementHistory;
