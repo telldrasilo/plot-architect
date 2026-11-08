@@ -6,6 +6,7 @@
 import {validateGraph} from './graph_contract.mjs';
 import {canonicalReadGraph,assertOrdinaryGraphWrite} from './creative_workflow_server_boundary.mjs';
 import {noteTools,isNoteTool,callNoteTool} from './mcp_note_tools.mjs';
+import {draftIterationTools,isDraftIterationTool,callDraftIterationTool} from './mcp_draft_iteration_tools.mjs';
 const VERSION='2025-06-18';
 const DATA_LIMIT=1250000;
 const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','MCP-Protocol-Version':VERSION}});
@@ -28,7 +29,8 @@ const tools=[
  {name:'get_changes',title:'Изменения проекта после ревизии',description:'Сопоставить актуальный граф с конкретной ранее сохранённой ревизией; показать изменённые идентификаторы нод, полей и связей.',inputSchema:{...shape,properties:{project_id:{type:'string',minLength:1,maxLength:80},since_revision:{type:'integer',minimum:0}},required:['project_id','since_revision']},annotations:{readOnlyHint:true,openWorldHint:false}},
  {name:'preview_patch',title:'Предпросмотр предложенных сюжетных изменений',description:'Рассчитать добавление/редактирование событий, полей и связей БЕЗ записи. Возвращает preview_token для точного применения после согласия пользователя.',inputSchema:{...shape,properties:{project_id:{type:'string',minLength:1,maxLength:80},expected_revision:{type:'integer',minimum:0},operations:{type:'array',items:operationSchema,minItems:1,maxItems:40}},required:['project_id','expected_revision','operations']},annotations:{readOnlyHint:true,openWorldHint:false}},
  {name:'apply_patch',title:'Применить проверенный сюжетный пакет',description:'Изменить граф атомарно при совпадении ревизии и preview_token. Нельзя применять несогласованные изменения. Не удаляет ноды и проекты.',inputSchema:{...shape,properties:{project_id:{type:'string',minLength:1,maxLength:80},expected_revision:{type:'integer',minimum:0},operations:{type:'array',items:operationSchema,minItems:1,maxItems:40},preview_token:{type:'string',pattern:'^[0-9a-f]{64}$'}},required:['project_id','expected_revision','operations','preview_token']},annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:false}},
- ...noteTools
+ ...noteTools,
+ ...draftIterationTools
 ];
 for(const tool of tools){
  if(tool.outputSchema)continue; // Note tools declare their precise output contract.
@@ -137,6 +139,7 @@ async function callTool(name,args,request,env,internalApi){
  }
  validateArgs(args,['project_id']);
  if(isNoteTool(name))return callNoteTool(name,args,request,env,{getCurrent,rest,digest},internalApi);
+ if(isDraftIterationTool(name))return callDraftIterationTool(name,args,request,env,{getCurrent,rest,digest},internalApi);
  if(name==='get_project'){
   if(args.detail!==undefined&&!['summary','full'].includes(args.detail))throw new Error('Неверный detail');
   const p=await getCurrent(request,internalApi,args.project_id),g=canonicalReadGraph(p.graph);
