@@ -4618,7 +4618,8 @@ function cwCloseReplacementHistory(){
 }
 function cwOpenReplacementHistory(){
  const items=state.replacements||[];
- if(!items.length)return note('В этом проекте ещё нет замен событий');
+ const preparations=state.replacementPreparations||[];
+ if(!items.length&&!preparations.length)return note('В этом проекте ещё нет замен событий');
  if(modalOpen||cwAcceptanceBusy)return;
  cwReplacementHistoryDialog=true;modalOpen=true;
  const records=[...items].reverse().map(r=>{
@@ -4631,10 +4632,21 @@ function cwOpenReplacementHistory(){
    '</span><small class="cw-history-meta">Прежние связи: '+resolved+' из '+(r.suspendedEdgeIds||[]).length+
    ' решены. Пересмотров: '+(r.postCanonReviews||[]).length+
    '. Оригинал и исходные отношения сохранены.</small></button></li>';
+ }).join('')+
+ [...preparations].reverse().map(p=>{
+  const title=p.sourceSnapshot?.title||nby(p.sourceNodeId)?.title||p.sourceNodeId;
+  return '<li><button type="button" data-cw-prep-history-id="'+esc(p.id)+'">'+
+   '<strong class="cw-history-title">'+esc(title)+'</strong>'+
+   '<span class="cw-history-state">'+
+   (p.state==='applied'?'Применена':p.state==='cancelled'?'Отменена':'Подготовка продолжается')+
+   '</span><small class="cw-history-meta">Локальная замена · выбрано новых событий: '+
+   p.candidateSelections.length+'. Решений по старым связям: '+
+   p.edgeDecisions.length+' из '+p.incidentEdges.length+
+   '. Исходник и стрелки сохраняются в истории.</small></button></li>';
  }).join('');
  $('modal-host').innerHTML='<div class="backdrop"><section class="modal" role="dialog" aria-modal="true" id="cw-replacement-history-dialog" aria-labelledby="cw-history-title">'+
   '<h2 id="cw-history-title">История замен</h2>'+
-  '<p>Исходники не удаляются. Завершённые скрыты с полотна; явно восстановленные видны в каноне, но защищены от обычного редактирования.</p>'+
+  '<p>Исходники и прежние стрелки не удаляются. Новая подготовка не меняет канон до применения; старые замены CW-010 работают по прежнему контракту.</p>'+
   '<ol class="cw-relations-list cw-history-list">'+records+'</ol>'+
   '<p class="muted">Просмотр не восстанавливает события и не изменяет прежние решения о связях.</p>'+
   '<div class="buttons"><button type="button" id="cw-history-close">Закрыть</button></div></section></div>';
@@ -4647,7 +4659,14 @@ function cwOpenReplacementHistory(){
    selected={type:'replacement',id};render();
    $('close-inspect')?.focus();
   });
- $('cw-replacement-history-dialog').querySelector('[data-cw-history-id]')?.focus();
+ $('cw-replacement-history-dialog').querySelectorAll('[data-cw-prep-history-id]').forEach(button=>
+  button.onclick=()=>{
+   cwReplacementHistoryDialog=false;modalOpen=false;$('modal-host').innerHTML='';
+   selectedNodeIds.clear();
+   selected={type:'preparation',id:button.dataset.cwPrepHistoryId};
+   render();$('close-inspect')?.focus();
+  });
+ $('cw-replacement-history-dialog').querySelector('[data-cw-history-id],[data-cw-prep-history-id]')?.focus();
 }
 
 
@@ -5241,14 +5260,45 @@ function cwOpenPrep(id){if(!cwPrepById(id))return note('Подготовка н�
 function cwClosePrepReview(){if(cwAcceptanceBusy)return;cwPrepReview=null;modalOpen=false;$('modal-host').innerHTML=''}
 function cwPrepReviewDescription(r){
  const p=r.plan,k=r.command.kind;
- if(k==='create_preparation')return 'Исходное событие «'+esc(p.sourceNode.title)+'» и '+p.incidentEdges.length+' стрелок останутся действующими.';
- if(k==='set_preparation_candidates')return 'Выбрано черновиков: '+p.candidates.length+'. Добавить '+p.addedNodeIds.length+', исключить '+p.removedNodeIds.length+'. Канон останется прежним.';
- if(k==='set_preparation_decisions')return 'Решений: '+p.decisions.length+'. Нерешённых старых связей: '+p.unresolvedOldEdgeIds.length+'.';
- if(k==='cancel_preparation')return 'Подготовка будет отменена. Исходник и черновики сохранятся.';
- if(k==='apply_preparation')return 'Принять '+p.acceptedNodeIds.length+' событий и '+p.promoteEdgeIds.length+
-  ' внутренних стрелок. Старые связи: переподключить '+p.rewiredEdges.length+', отказаться от '+p.droppedEdgeIds.length+
-  '. Неиспользованных черновиков останется '+p.retainedDraftIds.length+'. Исходник сохранится в истории.';
- return 'Только явное подтверждение изменяет сюжет.';
+ if(k==='create_preparation')
+  return '<p>Исходное событие «'+esc(p.sourceNode.title)+'» и '+p.incidentEdges.length+
+   ' стрелок останутся действующими. Новая заметка ChatGPT не создаётся.</p>';
+ if(k==='set_preparation_candidates')
+  return '<p>Выбрано черновиков: '+p.candidates.length+'. Добавить '+p.addedNodeIds.length+
+   ', исключить '+p.removedNodeIds.length+'. Канон останется прежним.</p>'+
+   '<ul>'+p.candidates.map(c=>'<li>'+esc(nby(c.nodeId)?.title||c.nodeId)+
+   ' · '+esc(c.workspaceId)+'</li>').join('')+'</ul>';
+ if(k==='set_preparation_decisions')
+  return '<p>Решений: '+p.decisions.length+'. Нерешённых старых связей: '+
+    p.unresolvedOldEdgeIds.length+'. Сюжет до применения не меняется.</p>';
+ if(k==='cancel_preparation')return '<p>Подготовка будет отменена. Исходник и черновики сохранятся.</p>';
+ if(k==='apply_preparation'){
+  const source=cwPrepById(p.preparationId);
+  const oldEdges=source?.incidentEdges||[];
+  const label=e=>esc(nby(e.from)?.title||e.from)+' → '+esc(nby(e.to)?.title||e.to)+
+   ' · '+esc(cwReplacementEdgeLabels[e.type]||e.type);
+  const candidates=p.acceptedNodeIds.map(id=>'<li>'+esc(nby(id)?.title||id)+'</li>').join('');
+  const oldList=oldEdges.map(e=>'<li>'+label(e)+'</li>').join('');
+  const rewires=p.rewiredEdges.map(e=>'<li>'+label(e)+'</li>').join('');
+  const internal=p.promoteEdgeIds.map(id=>{
+   const e=state.edges.find(e=>e.id===id);return e?'<li>'+label(e)+'</li>':'';
+  }).join('');
+  const drops=p.droppedEdgeIds.map(id=>{
+   const e=oldEdges.find(e=>e.id===id);return e?'<li>'+label(e)+'</li>':'';
+  }).join('');
+  return '<h3>Сейчас</h3><p>Исходное событие «'+esc(nby(p.sourceNodeId)?.title||p.sourceNodeId)+
+   '» остаётся действующим до подтверждения. Прежние связи:</p>'+
+   (oldList?'<ul>'+oldList+'</ul>':'<p>Связей нет.</p>')+
+   '<h3>После</h3><p>Принять '+p.acceptedNodeIds.length+' событий и '+
+   p.promoteEdgeIds.length+' внутренних стрелок. Исходник будет сохранён в истории.</p>'+
+   '<ul>'+candidates+'</ul>'+
+   (rewires?'<p>Явно переподключённые связи:</p><ul>'+rewires+'</ul>':'')+
+   (internal?'<p>Внутренние связи новых событий:</p><ul>'+internal+'</ul>':'')+
+   (drops?'<p>Прежние связи, от которых отказываемся:</p><ul>'+drops+'</ul>':'')+
+   '<p>Неиспользованных черновиков останется '+p.retainedDraftIds.length+
+   '; они не становятся каноном. Предпросмотр только для чтения.</p>';
+ }
+ return '<p>Подготовка не меняет сюжет без подтверждения.</p>';
 }
 function cwShowPrepReview(){
  const r=cwPrepReview;if(!r)return;
@@ -5257,7 +5307,7 @@ function cwShowPrepReview(){
   cancel_preparation:'Отменить подготовку?'};
  modalOpen=true;
  $('modal-host').innerHTML='<div class="backdrop"><form class="modal" id="cw-prep-review">'+
-  '<h2>'+esc(titles[r.command.kind])+'</h2><p>'+cwPrepReviewDescription(r)+'</p>'+
+  '<h2>'+esc(titles[r.command.kind])+'</h2>'+cwPrepReviewDescription(r)+
   '<p class="muted">Проверено для ревизии '+r.revision+'. При изменении проекта потребуется новая проверка.</p>'+
   '<div class="buttons"><button type="button" id="cw-prep-back">Назад</button>'+
   '<button class="primary" type="submit" id="cw-prep-confirm">'+
@@ -5443,7 +5493,18 @@ function cwRenderPrepInspector(el,id){
    '<div class="cw-relations-panel"><b>Прежние стрелки · '+solved+' из '+
    p.incidentEdges.length+' решены</b>'+
    (isOpen?'<ol class="cw-relations-list">'+oldRows+'</ol>':
-    '<p class="muted">Исходные связи сохранены в истории.</p>')+
+    '<ol class="cw-relations-list">'+p.incidentEdges.map(e=>{
+      const d=decisions.get(e.id);
+      const prev=esc(nby(e.from)?.title||e.from)+' → '+esc(nby(e.to)?.title||e.to);
+      const result=d?.decision==='drop'?'Не использовать':
+       d?.decision==='rewire'?'Переподключено: '+
+        esc(nby(d.newEdge.from)?.title||d.newEdge.from)+' → '+
+        esc(nby(d.newEdge.to)?.title||d.newEdge.to)+' · '+
+        esc(cwReplacementEdgeLabels[d.newEdge.type]||d.newEdge.type):
+       'Осталось нерешённым';
+      return '<li>'+prev+' · '+esc(cwReplacementEdgeLabels[e.type]||e.type)+
+        '<p class="muted">'+result+'</p></li>';
+    }).join('')+'</ol>')+
    (isOpen?'<button id="cw-prep-save-decisions" type="button">Проверить решения</button>':'')+'</div>'+
    (isOpen?'<div class="inspect-actions"><button id="cw-prep-apply" type="button"'+
      (solved!==p.incidentEdges.length||!p.candidateSelections.length?' disabled':'')+
