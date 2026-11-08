@@ -312,6 +312,26 @@ body.pa-multi-modifier .inspector{pointer-events:none;opacity:.35}/* allows Ctrl
 .canvas-text-format button:hover{background:#49464b}
 .modal.cw-postcanon-modal{width:min(650px,calc(100vw - 28px));max-height:min(88vh,900px);overflow-y:auto;overscroll-behavior:contain}
 .node.cw-restored-readonly{border-style:solid;cursor:default}
+
+/* CW-010 C3b: distinct, readable decisions in the post-canon review.
+   Scoped intentionally: other inspectors and relation panels are unchanged. */
+.cw-postcanon-modal .cw-postcanon-explanation{line-height:1.55;margin:12px 0 0}
+.cw-postcanon-modal .cw-postcanon-section{display:block;margin:18px 0 0;padding:16px 0 0;border-top:1px solid #494541}
+.cw-postcanon-modal .cw-postcanon-section>h3{display:block;margin:0 0 12px;font-size:13px;font-weight:700;line-height:1.45;color:#e9ded0}
+.cw-postcanon-modal .cw-postcanon-items{display:grid;grid-template-columns:minmax(0,1fr);gap:12px}
+.cw-postcanon-modal .cw-postcanon-item{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;min-width:0;margin:0;padding:12px 14px;
+ border:1px solid #48443f;border-radius:10px;background:#2d2b2a;line-height:1.5}
+.cw-postcanon-modal .cw-postcanon-item:focus-within{border-color:#a28f6d}
+.cw-postcanon-modal .cw-postcanon-item-title{display:block;font-size:13px;line-height:1.5;color:#efebe4;overflow-wrap:anywhere}
+.cw-postcanon-modal .cw-postcanon-item>.muted{display:block;margin:0;font-size:12px;line-height:1.5}
+.cw-postcanon-modal .cw-postcanon-item select{display:block;box-sizing:border-box;width:100%;min-width:0;
+ background:#1e1e1e;border:1px solid #55514e;border-radius:9px;color:#eee;padding:10px 11px;font-size:13px;line-height:1.4}
+.cw-postcanon-modal .cw-postcanon-footnote{margin:16px 0 6px}
+.cw-postcanon-modal .cw-postcanon-actions{position:sticky;bottom:-1px;z-index:2;padding:12px 0 4px;
+ background:#292929;border-top:1px solid #48443f}
+@media (max-width:640px){.cw-postcanon-modal .cw-postcanon-item{padding:10px 11px}
+ .cw-postcanon-modal .cw-postcanon-actions{gap:8px;flex-wrap:wrap}}
+
 </style></head>
 <body>
 <header><div class="logo" aria-hidden="true">✦</div><div class="project-label"><b>Plot Architect</b><span id="project-current">Кризис наследования</span></div><button id="projects-open" title="Список историй, создание и импорт">▤ Проекты <span id="project-mode">Локально</span></button><div class="spacer"></div><div class="saved" id="saved">● Сохранено локально</div><div class="top-actions"><button class="opt" id="search" data-tip="Найти событие или поле (Ctrl+K)" title="Поиск (Ctrl+K)">⌕ Поиск</button><button class="opt" id="undo" data-tip="Отменить последнее изменение (Ctrl+Z)" title="Отменить (Ctrl+Z)">↶ Отменить</button><button class="opt" id="export">⇩ Экспорт</button><button id="more" title="Сбросить демо">⋯</button></div></header>
@@ -4623,8 +4643,9 @@ function cwShowPostCanonChoices(){
   esc(n.description||'Без описания')+'</li>').join('');
  const candidates=r.initial.candidateNodes.map(n=>{
   const value=prior?.candidateDecisions?.find(x=>x.nodeId===n.id)?.decision||'';
-  return '<label class="field">Новое событие: <b>'+esc(n.title)+'</b>'+
-   '<p class="muted">'+esc(n.description||'Без описания')+'</p>'+
+  return '<label class="cw-postcanon-item" data-cw-post-choice="candidate">'+
+   '<span class="cw-postcanon-item-title"><b>'+esc(n.title)+'</b></span>'+
+   '<span class="muted">'+esc(n.description||'Без описания')+'</span>'+
    select('data-cw-post-candidate',n.id,[
     ['keep','Оставить в действующем каноне'],
     ['archive','Исключить из канона, но сохранить в истории']
@@ -4632,9 +4653,10 @@ function cwShowPostCanonChoices(){
  }).join('');
  const relations=r.initial.suspendedEdges.map(e=>{
   const value=prior?.edgeDecisions?.find(x=>x.edgeId===e.id)?.decision||'';
-  return '<label class="field">Исходная связь: <b>'+
-    esc(cwReplacementRelationLabel(e))+'</b> · '+
-    esc(cwReplacementEdgeLabels[e.type]||e.type)+
+  return '<label class="cw-postcanon-item" data-cw-post-choice="edge">'+
+    '<span class="cw-postcanon-item-title"><b>'+
+    esc(cwReplacementRelationLabel(e))+'</b></span>'+
+    '<span class="muted">Тип связи: '+esc(cwReplacementEdgeLabels[e.type]||e.type)+'</span>'+
     select('data-cw-post-edge',e.id,[
       ['keep_suspended','Оставить приостановленной'],
       ['restore','Восстановить эту исходную связь (только с оригиналом)']
@@ -4645,18 +4667,25 @@ function cwShowPostCanonChoices(){
   ' aria-label="Пересмотреть замену">'+
   '<h2>Пересмотреть замену</h2>'+
   '<p>Сохранённый оригинал:</p><ul class="cw-replacement-review-edges">'+orig+'</ul>'+
-  '<p>Выберите судьбу оригинала, каждой связанной новой сцены и каждой прежней стрелки. '+
+  '<p class="cw-postcanon-explanation">Выберите судьбу оригинала, каждой новой сцены и каждой прежней стрелки. '+
   'Ничего не выбирается автоматически.</p>'+
-  '<label class="field">Оригинал'+
+  '<section class="cw-postcanon-section" aria-label="Решение по оригиналу">'+
+  '<h3>1 · Оригинал</h3>'+
+  '<label class="cw-postcanon-item" data-cw-post-choice="original">'+
+  '<span class="cw-postcanon-item-title">Судьба исходного события</span>'+
   select('data-cw-post-original','original',[
     ['keep_replaced','Оставить на замене / в истории'],
     ['restore','Вернуть исходное событие в канон (сохранив историю)']
-  ],current('original'))+'</label>'+
-  '<div class="cw-relations-panel"><b>Каждое новое событие</b>'+candidates+'</div>'+
-  '<div class="cw-relations-panel"><b>Каждая исходная связь</b>'+relations+'</div>'+
-  '<p class="muted">Архивирование сцены с действующими связями блокируется. '+
+  ],current('original'))+'</label></section>'+
+  '<section class="cw-postcanon-section" aria-label="Решения по новым событиям">'+
+  '<h3>2 · Новые события ('+r.initial.candidateNodes.length+')</h3>'+
+  '<div class="cw-postcanon-items">'+candidates+'</div></section>'+
+  '<section class="cw-postcanon-section" aria-label="Решения по исходным связям">'+
+  '<h3>3 · Исходные связи ('+r.initial.suspendedEdges.length+')</h3>'+
+  '<div class="cw-postcanon-items">'+relations+'</div></section>'+
+  '<p class="muted cw-postcanon-footnote">Архивирование сцены с действующими связями блокируется. '+
   'Ни одна карточка и стрелка физически не удаляется. Старые стрелки не переподключаются автоматически.</p>'+
-  '<div class="buttons"><button id="cw-postcanon-cancel" type="button">Отмена</button>'+
+  '<div class="buttons cw-postcanon-actions"><button id="cw-postcanon-cancel" type="button">Отмена</button>'+
   '<button id="cw-postcanon-check" type="submit" class="primary">Проверить последствия</button></div>'+
   '</form></div>';
  $('cw-postcanon-cancel').onclick=cwClosePostCanonReview;
