@@ -48,6 +48,8 @@ jobs:
         run: python qa/browser/tests_cw/test_cw_replacement_candidate_link_browser.py
       - name: Verify guarded post-canon review of original, candidates and relations
         run: python qa/browser/tests_cw/test_cw_postcanon_review_browser.py
+      - name: Verify non-destructive prepared replacement through real Chromium inspector
+        run: python qa/browser/tests_cw/test_cw_preparation_browser.py
       - name: Verify inline canvas text editor, formatting and reload
         run: python qa/browser/tests_cw/test_canvas_text_inline_browser.py
       - name: Review and stage prepared alternatives from standalone note

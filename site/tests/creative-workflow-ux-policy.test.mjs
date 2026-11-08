@@ -31,3 +31,25 @@ test('CW local drafts: direct manipulation has no per-card checkbox or move revi
   assert.match(editor,/cwToggleDraftSelection/);
   assert.match(editor,/cwEnsureDraftsSynced/);
 });
+
+test('RPL: prepared replacement uses existing node inspector and workspace selections',()=>{
+  const html=readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
+  assert.ok(html.includes(editor),'embedded UI must exactly match source editor');
+  assert.match(editor,/function cwStartPrep\(nodeId\)/);
+  assert.match(editor,/function cwRenderPrepInspector\(el,id\)/);
+  assert.match(editor,/function cwOpenPrepCandidateDialog\(/);
+  assert.match(editor,/function cwSavePrepDecisions\(/);
+  assert.match(editor,/function cwConfirmPrepReview\(/);
+  assert.match(editor,/kind:'create_preparation'/);
+  assert.match(editor,/kind:'set_preparation_candidates'/);
+  assert.match(editor,/kind:'set_preparation_decisions'/);
+  assert.match(editor,/kind:'apply_preparation'/);
+  assert.match(editor,/Подготовить замену…/);
+  assert.match(editor,/Использовать в замене/);
+  assert.match(editor,/if\(selected\.type==='preparation'\)return cwRenderPrepInspector/);
+  assert.match(editor,/state\.replacementPreparations\|\|\[\]/);
+  // Legacy CW-010 and UX-014 editorial rewrite retain their own controls.
+  assert.match(editor,/Начать замену…/);
+  assert.match(editor,/Переработать событие/);
+  assert.doesNotMatch(editor,/data-prep-candidate[^\n]*cw-preview-card/);
+});
