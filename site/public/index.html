@@ -314,7 +314,8 @@ body.pa-multi-modifier .inspector{pointer-events:none;opacity:.35}/* allows Ctrl
 
 /* UX-134: readable replacement history at narrow widths, with no change to workflow. */
 #cw-replacement-history-dialog{max-height:min(88vh,900px);overflow-y:auto;overscroll-behavior:contain}
-#cw-replacement-history-dialog .cw-history-list [data-cw-history-id]{
+#cw-replacement-history-dialog .cw-history-list [data-cw-history-id],
+#cw-replacement-history-dialog .cw-history-list [data-cw-prep-history-id]{
  display:flex;flex-direction:column;align-items:flex-start;gap:5px;
  width:100%;min-width:0;text-align:left;white-space:normal;
  overflow-wrap:anywhere;line-height:1.45}
