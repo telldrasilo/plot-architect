@@ -149,7 +149,7 @@ export function validateCreativeWorkflowGraph(graph){
   const preparations=graph.replacementPreparations??[];
   if(!Array.isArray(preparations)||preparations.length>100)
     fail('PREPARATIONS_INVALID','bounded preparation array required');
-  const pids=new Set(),openSources=new Set(),openOldEdges=new Set();
+  const pids=new Set(),openSources=new Set(),openOldEdges=new Set(),openCandidates=new Set();
   for(const p of preparations){
     if(!obj(p)||!id(p.id)||pids.has(p.id)||
       !['open','cancelled','applied'].includes(p.state)||
@@ -178,6 +178,14 @@ export function validateCreativeWorkflowGraph(graph){
          !id(c.workspaceId)||!id(c.nodeId)||candidateIds.has(c.nodeId))
         fail('PREPARATIONS_INVALID',p.id+' invalid candidate');
       candidateIds.add(c.nodeId);
+      if(p.state==='open'){
+        const node=nodes.get(c.nodeId);
+        if(!areaIds.has(c.workspaceId)||!node||workspaceOf(node)!==c.workspaceId)
+          fail('PREPARATION_CANDIDATE_STALE',c.nodeId);
+        if(openCandidates.has(c.nodeId))
+          fail('PREPARATION_CANDIDATE_CONFLICT',c.nodeId);
+        openCandidates.add(c.nodeId);
+      }
     }
     const decided=new Set();
     for(const d of p.edgeDecisions){
@@ -259,6 +267,10 @@ export function previewDraftAcceptance(graph,{workspaceId,nodeIds,placements}={}
   if(!id(workspaceId)||!(graph.workspaces??[]).some(a=>a.id===workspaceId))fail('WORKSPACE_NOT_FOUND',String(workspaceId));
   if(!Array.isArray(nodeIds)||!nodeIds.length||new Set(nodeIds).size!==nodeIds.length)fail('SELECTION_INVALID','nonempty unique selection required');
   const selected=new Set(nodeIds),{nodes}=indexes(graph);
+  if((graph.replacementPreparations??[]).some(p=>p.state==='open'&&
+     p.candidateSelections.some(c=>selected.has(c.nodeId))))
+    fail('PREPARATION_CANDIDATE_RESERVED','explicit preparation apply required');
+
   for(const n of selected)if(!nodes.has(n)||workspaceOf(nodes.get(n))!==workspaceId)fail('SELECTION_INVALID',n);
   const retired=new Set((graph.replacements??[]).flatMap(r=>r.sourceNodeIds));
   const becomesCanon=n=>selected.has(n)||(workspaceOf(nodes.get(n))===null&&!retired.has(n));
