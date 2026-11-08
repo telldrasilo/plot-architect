@@ -138,3 +138,102 @@ test('failed receipt insertion rolls back preparation and history together',asyn
  assert.deepEqual(counts(sqlite),{revision:0,history:1,receipts:0});
  assert.equal(stored(sqlite).replacementPreparations,undefined);
 });
+
+import {previewApplyPreparation,applyPreparation} from '../src/creative_workflow_preparation_apply.mjs';
+
+function readyGraph({selectAll=false}={}){
+ const original=story();
+ original.workspaces=[{id:'w1',taskId:'old-task',x:50,y:200,width:750,height:270}];
+ original.nodes.push(
+  {id:'X',title:'Новый X',x:120,y:260,workspaceId:'w1'},
+  {id:'Y',title:'Новый Y',x:390,y:260,workspaceId:'w1'},
+  {id:'Z',title:'Невыбранный Z',x:650,y:260,workspaceId:'w1'});
+ original.edges.push(
+  {id:'xy',from:'X',to:'Y',type:'precedes',workspaceId:'w1',draftRelation:'internal'},
+  {id:'yz',from:'Y',to:'Z',type:'causes',workspaceId:'w1',draftRelation:'internal'});
+ const g=begin(validateServerGraph(original)).graph;
+ const p=g.replacementPreparations[0];
+ p.candidateSelections=(selectAll?['X','Y','Z']:['X','Y']).map(nodeId=>({nodeId,workspaceId:'w1'}));
+ p.edgeDecisions=[
+  {edgeId:'in',decision:'rewire',newEdge:{id:'new-in',from:'A',to:'X',type:'precedes'}},
+  {edgeId:'out',decision:'drop'}
+ ];
+ return validateServerGraph(g);
+}
+test('pure full-graph apply retires B only at commit, preserves history and unresolved Y→Z draft edge',()=>{
+ const g=readyGraph(),before=canonicalProjection(g);
+ assert.deepEqual(before.nodes.map(n=>n.id),['A','B','C']);
+ const preview=previewApplyPreparation(g,{preparationId:'p1'});
+ assert.deepEqual(preview.promoteEdgeIds,['xy']);
+ assert.deepEqual(preview.editorialBoundaryEdgeIds,['yz']);
+ assert.deepEqual(preview.retainedDraftIds,['Z']);
+ const applied=applyPreparation(g,{preparationId:'p1',expectedRevision:0,expectedPreview:preview});
+ assert.equal(g.replacementPreparations[0].state,'open');
+ assert.equal(applied.graph.replacementPreparations[0].state,'applied');
+ const now=canonicalProjection(applied.graph);
+ assert.deepEqual(now.nodes.map(n=>n.id),['A','C','X','Y']);
+ assert.deepEqual(now.edges.map(e=>e.id),['xy','new-in']);
+ assert.equal(applied.graph.nodes.find(n=>n.id==='B').title,'Поворот');
+ assert.deepEqual(applied.graph.edges.filter(e=>['in','out'].includes(e.id)),g.edges.slice(0,2));
+ assert.equal(applied.graph.edges.find(e=>e.id==='yz').draftRelation,'boundary-proposal');
+ assert.equal(applied.graph.workspaces[0].id,'w1');
+ assert.deepEqual(applied.graph.replacementPreparations[0].sourceSnapshot,g.nodes.find(n=>n.id==='B'));
+ reject(()=>assertOrdinaryGraphWrite(applied.graph,{...applied.graph,
+   nodes:applied.graph.nodes.map(n=>n.id==='B'?{...n,title:'Подделка'}:n)}),'PROTECTED_NODE_CHANGED');
+});
+test('all candidates selected promotes all internal edges and removes only emptied workspace',()=>{
+ const g=readyGraph({selectAll:true});
+ const p=previewApplyPreparation(g,{preparationId:'p1'});
+ assert.deepEqual(p.promoteEdgeIds,['xy','yz']);
+ assert.deepEqual(p.removedWorkspaceIds,['w1']);
+ const next=applyPreparation(g,{preparationId:'p1',expectedRevision:0,expectedPreview:p}).graph;
+ assert.deepEqual(next.workspaces,[]);
+ assert.equal(next.nodes.find(n=>n.id==='Z').workspaceId,undefined);
+ assert.deepEqual(canonicalProjection(next).edges.map(e=>e.id),['xy','yz','new-in']);
+});
+test('apply requires full resolution, correct source snapshot and exact approved preview',()=>{
+ const g=readyGraph(),p=g.replacementPreparations[0];
+ const incomplete=structuredClone(g);incomplete.replacementPreparations[0].edgeDecisions.pop();
+ reject(()=>previewApplyPreparation(incomplete,{preparationId:'p1'}),'PREPARATION_UNRESOLVED');
+ const staleB=structuredClone(g);staleB.nodes.find(n=>n.id==='B').description='Смена смысла';
+ reject(()=>previewApplyPreparation(staleB,{preparationId:'p1'}),'PREPARATION_STALE');
+ const addedEdge=structuredClone(g);addedEdge.edges.push({id:'fresh',from:'A',to:'B',type:'enables'});
+ reject(()=>previewApplyPreparation(addedEdge,{preparationId:'p1'}),'PREPARATION_STALE');
+ const plan=previewApplyPreparation(g,{preparationId:'p1'});
+ reject(()=>applyPreparation(g,{preparationId:'p1',expectedRevision:0,
+  expectedPreview:{...plan,acceptedNodeIds:['X']}}),'PREVIEW_STALE');
+ const invalid=structuredClone(g);invalid.replacementPreparations[0].edgeDecisions[0].newEdge.to='C';
+ reject(()=>previewApplyPreparation(invalid,{preparationId:'p1'}),'PREPARATION_REWIRE_ENDPOINT');
+});
+test('discarding or keeping a draft relation to retired B must be explicit',()=>{
+ const g=readyGraph();
+ g.edges.push({id:'to-B',from:'X',to:'B',type:'precedes',workspaceId:'w1',draftRelation:'boundary-proposal'});
+ reject(()=>previewApplyPreparation(g,{preparationId:'p1'}),'PREPARATION_DRAFT_REFERENCE');
+});
+test('guarded SQLite apply writes one atomic graph, history and receipt; replay is idempotent',async()=>{
+ const {db,sqlite}=sqliteDb(),g=readyGraph();
+ sqlite.prepare('UPDATE plot_projects SET graph_json=? WHERE id=?').run(JSON.stringify(g),'project-1');
+ const command={kind:'apply_preparation',preparationId:'p1'};
+ const preview=await previewWorkflowCommand(db,{projectId:'project-1',expectedRevision:0,command});
+ const args={projectId:'project-1',expectedRevision:0,operationId:'apply-1',
+  command:{...command,expectedPreview:preview.preview}};
+ const first=await commitWorkflowCommand(db,args);
+ assert.equal(first.revision,1);
+ assert.deepEqual(counts(sqlite),{revision:1,history:2,receipts:1});
+ assert.equal(stored(sqlite).replacementPreparations[0].state,'applied');
+ assert.deepEqual(canonicalProjection(stored(sqlite)).nodes.map(n=>n.id),['A','C','X','Y']);
+ assert.deepEqual(first.changes.rewiredEdges.map(e=>e.id),['new-in']);
+ assert.equal((await commitWorkflowCommand(db,args)).replayed,true);
+ assert.deepEqual(counts(sqlite),{revision:1,history:2,receipts:1});
+});
+test('receipt insertion failure rolls back the entire preparation apply',async()=>{
+ const {db,sqlite}=sqliteDb(),g=readyGraph();
+ sqlite.prepare('UPDATE plot_projects SET graph_json=? WHERE id=?').run(JSON.stringify(g),'project-1');
+ sqlite.exec("CREATE TRIGGER fail_apply_receipt BEFORE INSERT ON cw_operation_receipts BEGIN SELECT RAISE(ABORT,'receipt blocked'); END");
+ const command={kind:'apply_preparation',preparationId:'p1'};
+ const p=await previewWorkflowCommand(db,{projectId:'project-1',expectedRevision:0,command});
+ await assert.rejects(()=>commitWorkflowCommand(db,{projectId:'project-1',expectedRevision:0,operationId:'apply-1',
+  command:{...command,expectedPreview:p.preview}}),/receipt blocked/);
+ assert.deepEqual(counts(sqlite),{revision:0,history:1,receipts:0});
+ assert.equal(stored(sqlite).replacementPreparations[0].state,'open');
+});

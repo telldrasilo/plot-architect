@@ -29,6 +29,7 @@ import {
 } from './creative_workflow_contract.mjs';
 import {previewReplacementReconnection,applyReplacementReconnection} from './creative_workflow_reconnection.mjs';
 import {previewCreatePreparation,applyCreatePreparation,previewCancelPreparation,applyCancelPreparation} from './creative_workflow_preparation.mjs';
+import {previewApplyPreparation,applyPreparation} from './creative_workflow_preparation_apply.mjs';
 import {previewLinkReplacementCandidates,applyLinkReplacementCandidates} from './creative_workflow_replacement_candidates.mjs';
 import {previewPostCanonReview,applyPostCanonReview} from './creative_workflow_postcanon_review.mjs';
 import {
@@ -55,6 +56,7 @@ const fields={
   accept_draft:['workspaceId','nodeIds','placements','expectedPreview'],
   create_preparation:['preparationId','sourceNodeId','expectedPreview'],
   cancel_preparation:['preparationId','expectedPreview'],
+  apply_preparation:['preparationId','expectedPreview'],
   start_replacement:['replacementId','sourceNodeIds','expectedPreview'],
   reconnect:['replacementId','decisions','expectedPreview'],
   link_replacement_candidates:['replacementId','nodeIds','expectedPreview'],
@@ -109,6 +111,7 @@ async function runDomain(db,projectId,graph,expectedRevision,command){
     case 'accept_draft':return applyDraftAcceptance(graph,args);
     case 'create_preparation':return applyCreatePreparation(graph,args);
     case 'cancel_preparation':return applyCancelPreparation(graph,args);
+    case 'apply_preparation':return applyPreparation(graph,args);
     case 'start_replacement':return applyStartReplacement(graph,args);
     case 'reconnect':return applyReplacementReconnection(graph,args);
     case 'link_replacement_candidates':{
@@ -195,6 +198,20 @@ export async function commitWorkflowCommand(db,{
   }
   if(results?.[1]?.meta?.changes!==1||results?.[2]?.meta?.changes!==1)
     fail('BATCH_INVARIANT','history and receipt must be written with graph');
+  // The new local replacement must not report success merely because CAS
+  // advanced the row. Confirm the EXACT persisted result and receipt.
+  // If this readback is interrupted, the same operationId safely replays.
+  if(command.kind==='apply_preparation'){
+    const saved=await db.prepare(
+      'SELECT revision,graph_json FROM plot_projects WHERE id=? AND deleted_at IS NULL'
+    ).bind(projectId).first();
+    const receipt=await readReceipt(db,projectId,operationId);
+    if(!saved||saved.revision!==nextRevision||
+       JSON.stringify(canonical(verifiedGraph(JSON.parse(saved.graph_json),nextRevision)))!==JSON.stringify(canonical(updated))||
+       !receipt||receipt.request_hash!==requestHash||
+       JSON.stringify(canonical(JSON.parse(receipt.response_json)))!==JSON.stringify(canonical(response)))
+      fail('WORKFLOW_READBACK_UNVERIFIED','atomic replacement result or receipt could not be confirmed');
+  }
   return {...response,replayed:false};
 }
 
@@ -252,6 +269,7 @@ export async function previewWorkflowCommand(db,{projectId,expectedRevision,comm
     case 'accept_draft': preview=previewDraftAcceptance(graph,command);break;
     case 'create_preparation': preview=previewCreatePreparation(graph,command);break;
     case 'cancel_preparation': preview=previewCancelPreparation(graph,command);break;
+    case 'apply_preparation': preview=previewApplyPreparation(graph,command);break;
     case 'start_replacement': preview=previewReplacementStart(graph,command.sourceNodeIds);break;
     case 'reconnect': preview=previewReplacementReconnection(graph,command);break;
     case 'link_replacement_candidates':{

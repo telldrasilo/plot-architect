@@ -99,6 +99,12 @@ export function assertOrdinaryGraphWrite(previousRaw,nextRaw){
     if(p.state==='open'&&!next.nodes.some(n=>n.id===p.sourceNodeId&&scopeOf(n)===null))
       fail('PREPARATION_SOURCE_REMOVED',p.sourceNodeId);
   }
+  const appliedPreparations=(previous.replacementPreparations??[]).filter(p=>p.state==='applied');
+  const retiredPreparations=new Set(appliedPreparations.map(p=>p.sourceNodeId));
+  for(const e of next.edges)
+    if(!previous.edges.some(old=>old.id===e.id)&&
+       (retiredPreparations.has(e.from)||retiredPreparations.has(e.to)))
+      fail('PREPARATION_HISTORICAL_EDGE','new plot edge cannot attach to retired original');
   const oldNodes=byId(previous.nodes),oldEdges=byId(previous.edges);
   const archivedCandidates=new Set((previous.replacements??[]).flatMap(r=>
     ((r.postCanonReviews??[]).at(-1)?.candidateDecisions??[])
@@ -106,11 +112,13 @@ export function assertOrdinaryGraphWrite(previousRaw,nextRaw){
   const frozenNodeIds=new Set([
     ...archivedCandidates,
     ...previous.nodes.filter(n=>scopeOf(n)!==null).map(n=>n.id),
-    ...(previous.replacements??[]).flatMap(r=>r.sourceNodeIds)
+    ...(previous.replacements??[]).flatMap(r=>r.sourceNodeIds),
+    ...retiredPreparations
   ]);
   const frozenEdgeIds=new Set([
     ...previous.edges.filter(e=>scopeOf(e)!==null).map(e=>e.id),
-    ...(previous.replacements??[]).flatMap(r=>r.suspendedEdgeIds)
+    ...(previous.replacements??[]).flatMap(r=>r.suspendedEdgeIds),
+    ...appliedPreparations.flatMap(p=>p.incidentEdges.map(e=>e.id))
   ]);
   const newNodes=byId(next.nodes),newEdges=byId(next.edges);
   // A generic editor PUT cannot quietly reattach an archived scene.
