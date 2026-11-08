@@ -4628,6 +4628,132 @@ function cwStartPrep(nodeId){
  void cwReviewPrep({kind:'create_preparation',preparationId:'prep-'+crypto.randomUUID(),sourceNodeId:nodeId});
 }
 
+
+function cwOpenPrepCandidateDialog(preparationId=null,extraIds=[]){
+ const active=(state.replacementPreparations||[]).filter(p=>p.state==='open');
+ if(!active.length)return note('Сначала подготовьте замену исходного события');
+ if(!cwCleanForOperation()||modalOpen)return note('Дождитесь синхронизации проекта');
+ const drafts=state.nodes.filter(n=>n.workspaceId&&
+  (state.workspaces||[]).some(w=>w.id===n.workspaceId));
+ if(!drafts.length)return note('Сначала сохраните черновики в рабочую область');
+ const selectedPlan=active.find(p=>p.id===preparationId)||active[0];
+ const extra=new Set(extraIds);
+ const otherOwners=new Set(active.filter(p=>p.id!==selectedPlan.id).flatMap(p=>p.candidateSelections.map(c=>c.nodeId)));
+ const options=active.map(p=>'<option value="'+esc(p.id)+'"'+(p.id===selectedPlan.id?' selected':'')+'>'+
+  esc(nby(p.sourceNodeId)?.title||p.sourceNodeId)+'</option>').join('');
+ const rows=drafts.map(n=>'<label class="check-row"><input type="checkbox" data-prep-candidate="'+esc(n.id)+
+  '" data-prep-workspace="'+esc(n.workspaceId)+'"'+
+  (otherOwners.has(n.id)?' disabled':'')+
+  ((!otherOwners.has(n.id)&&(extra.has(n.id)||selectedPlan.candidateSelections.some(c=>c.nodeId===n.id)))?' checked':'')+
+  '><span>'+esc(n.title)+' <small>· '+esc(n.workspaceId)+'</small></span></label>').join('');
+ modalOpen=true;
+ $('modal-host').innerHTML='<div class="backdrop"><form class="modal" id="cw-prep-candidate-form">'+
+  '<h2>Использовать черновики в замене</h2><p>Выбор не перемещает события и не изменяет канон.</p>'+
+  '<label>Исходное событие<select id="cw-prep-target">'+options+'</select></label>'+
+  '<div style="max-height:45vh;overflow:auto">'+rows+'</div>'+
+  '<div class="buttons"><button type="button" id="cw-prep-candidate-back">Назад</button>'+
+  '<button type="submit" class="primary">Проверить выбор</button></div></form></div>';
+ const close=()=>{modalOpen=false;$('modal-host').innerHTML=''};
+ $('cw-prep-candidate-back').onclick=close;
+ $('cw-prep-target').onchange=()=>{
+  const p=cwPrepById($('cw-prep-target').value);
+  const others=new Set(active.filter(x=>x.id!==p.id).flatMap(x=>x.candidateSelections.map(c=>c.nodeId)));
+  document.querySelectorAll('[data-prep-candidate]').forEach(el=>{
+   el.disabled=others.has(el.dataset.prepCandidate);
+   el.checked=!el.disabled&&(extra.has(el.dataset.prepCandidate)||
+     p.candidateSelections.some(c=>c.nodeId===el.dataset.prepCandidate));
+  });
+ };
+ $('cw-prep-candidate-form').onsubmit=e=>{
+  e.preventDefault();
+  const id=$('cw-prep-target').value;
+  const candidates=[...document.querySelectorAll('[data-prep-candidate]:checked')]
+   .map(el=>({workspaceId:el.dataset.prepWorkspace,nodeId:el.dataset.prepCandidate}));
+  if(candidates.length>80)return note('В одном плане допускается не более 80 событий');
+  close();void cwReviewPrep({kind:'set_preparation_candidates',preparationId:id,candidates});
+ };
+}
+function cwSavePrepDecisions(id){
+ const p=cwPrepById(id);if(!p||p.state!=='open')return;
+ const decisions=[];
+ for(const row of document.querySelectorAll('[data-prep-old-edge]')){
+  const edge=p.incidentEdges.find(e=>e.id===row.dataset.prepOldEdge);
+  const mode=row.querySelector('[data-prep-mode]').value;
+  if(mode==='later')continue;
+  if(mode==='drop'){decisions.push({edgeId:edge.id,decision:'drop'});continue}
+  const target=row.querySelector('[data-prep-target-node]').value;
+  const type=row.querySelector('[data-prep-target-type]').value;
+  if(!target||!type)return note('Укажите новый конец и смысл каждой переподключаемой связи');
+  const prior=p.edgeDecisions.find(d=>d.edgeId===edge.id&&d.decision==='rewire');
+  decisions.push({edgeId:edge.id,decision:'rewire',newEdge:{
+   id:prior?.newEdge?.id||'pre-'+crypto.randomUUID(),
+   from:edge.from===p.sourceNodeId?target:edge.from,
+   to:edge.to===p.sourceNodeId?target:edge.to,type}});
+ }
+ void cwReviewPrep({kind:'set_preparation_decisions',preparationId:id,decisions});
+}
+function cwRenderPrepInspector(el,id){
+ const p=cwPrepById(id);if(!p){el.hidden=true;return}
+ const isOpen=p.state==='open',source=nby(p.sourceNodeId);
+ const decisions=new Map(p.edgeDecisions.map(d=>[d.edgeId,d]));
+ const oldRows=p.incidentEdges.map(edge=>{
+  const d=decisions.get(edge.id),mode=d?.decision||'later';
+  const selectedTarget=d?.decision==='rewire'?
+    (edge.from===p.sourceNodeId?d.newEdge.from:d.newEdge.to):'';
+  const choices='<option value="">Выберите событие…</option>'+
+   p.candidateSelections.map(c=>'<option value="'+esc(c.nodeId)+'"'+
+    (selectedTarget===c.nodeId?' selected':'')+'>'+esc(nby(c.nodeId)?.title||c.nodeId)+'</option>').join('');
+  const types='<option value="">Выберите смысл связи…</option>'+
+   Object.entries(cwReplacementEdgeLabels).map(([type,label])=>
+    '<option value="'+esc(type)+'"'+(d?.newEdge?.type===type?' selected':'')+'>'+esc(label)+'</option>').join('');
+  return '<li class="cw-relation-row" data-prep-old-edge="'+esc(edge.id)+'">'+
+   '<b>'+esc(nby(edge.from)?.title||edge.from)+' → '+esc(nby(edge.to)?.title||edge.to)+'</b>'+
+   '<p class="muted">'+esc(cwReplacementEdgeLabels[edge.type]||edge.type)+' · исходная связь</p>'+
+   '<label>Решение<select data-prep-mode>'+
+   [['later','Позже'],['rewire','Переподключить'],['drop','Не использовать']].map(([key,label])=>
+    '<option value="'+key+'"'+(mode===key?' selected':'')+'>'+label+'</option>').join('')+
+   '</select></label>'+
+   '<div data-prep-rewire-fields'+(mode!=='rewire'?' hidden':'')+'>'+
+   '<label>Новое '+(edge.from===p.sourceNodeId?'начало':'окончание')+
+   '<select data-prep-target-node>'+choices+'</select></label>'+
+   '<label>Новый смысл<select data-prep-target-type>'+types+'</select></label></div></li>';
+ }).join('');
+ const list=p.candidateSelections.map(c=>'<li>'+esc(nby(c.nodeId)?.title||c.nodeId)+
+  ' · '+esc(c.workspaceId)+'</li>').join('');
+ const solved=p.incidentEdges.filter(e=>decisions.has(e.id)).length;
+ el.hidden=false;
+ el.innerHTML='<div class="inspect-head"><b>Подготовка замены</b>'+
+   '<button id="close-inspect" title="Закрыть">×</button></div>'+
+   '<p class="muted">'+(p.state==='applied'?'Применено · оригинал сохранён исторически':
+    p.state==='cancelled'?'Отменено · канон не изменён':'В работе · исходный сюжет действует')+'</p>'+
+   '<div class="ux014-original"><strong>'+esc(source?.title||p.sourceSnapshot.title)+'</strong>'+
+   '<p>'+esc(p.sourceSnapshot.description||'Описание отсутствует')+'</p></div>'+
+   '<div class="cw-relations-panel"><b>Выбранные черновики · '+p.candidateSelections.length+'</b>'+
+   (list?'<ul>'+list+'</ul>':'<p class="muted">Пока не выбраны.</p>')+
+   (isOpen?'<button id="cw-prep-pick" type="button">Использовать черновики…</button>':'')+'</div>'+
+   '<div class="cw-relations-panel"><b>Прежние стрелки · '+solved+' из '+
+   p.incidentEdges.length+' решены</b>'+
+   (isOpen?'<ol class="cw-relations-list">'+oldRows+'</ol>':
+    '<p class="muted">Исходные связи сохранены в истории.</p>')+
+   (isOpen?'<button id="cw-prep-save-decisions" type="button">Проверить решения</button>':'')+'</div>'+
+   (isOpen?'<div class="inspect-actions"><button id="cw-prep-apply" type="button"'+
+     (solved!==p.incidentEdges.length||!p.candidateSelections.length?' disabled':'')+
+     '>Проверить результат…</button><button id="cw-prep-postpone" type="button">Отложить</button>'+
+     '<button id="cw-prep-cancel" type="button">Отменить подготовку…</button></div>':'');
+ el.querySelector('#close-inspect').onclick=()=>{selected=null;render()};
+ if(!isOpen)return;
+ for(const row of el.querySelectorAll('[data-prep-old-edge]')){
+  row.querySelector('[data-prep-mode]').onchange=e=>{
+   row.querySelector('[data-prep-rewire-fields]').hidden=e.target.value!=='rewire';
+  };
+ }
+ el.querySelector('#cw-prep-pick').onclick=()=>cwOpenPrepCandidateDialog(id,[...cwSelectedDraftIds]);
+ el.querySelector('#cw-prep-save-decisions').onclick=()=>cwSavePrepDecisions(id);
+ el.querySelector('#cw-prep-apply').onclick=()=>void cwReviewPrep({kind:'apply_preparation',preparationId:id});
+ el.querySelector('#cw-prep-postpone').onclick=()=>{selected=null;render();note('Подготовка сохранена; сюжет не менялся')};
+ el.querySelector('#cw-prep-cancel').onclick=()=>void cwReviewPrep({kind:'cancel_preparation',preparationId:id});
+}
+
 let cwReplacementStartReview=null;
 const cwReplacementEdgeLabels={precedes:'Следом',causes:'Причина',enables:'Делает возможным',hinders:'Препятствует'};
 function cwCloseReplacementStartReview(){
