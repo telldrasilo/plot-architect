@@ -73,8 +73,10 @@ test('new MCP tools are visible; owner can find and read bounded notes without r
  const list=await call(env,'POST','/mcp',{jsonrpc:'2.0',id:2,method:'tools/list'});
  assert.equal(list.status,200);
  const names=list.data.result.tools.map(t=>t.name);
- for(const name of ['list_note_tasks','get_note_task','preview_note_drafts','save_note_drafts'])assert.ok(names.includes(name));
- assert.equal(names.length,11);
+ for(const name of ['list_note_tasks','get_note_task','preview_note_drafts','save_note_drafts',
+  'list_saved_drafts','get_saved_draft_task','preview_draft_iteration','save_draft_iteration'])
+   assert.ok(names.includes(name));
+ assert.equal(names.length,15);
  const found=await mcp(env,'list_note_tasks',{project_id:id,query:'наследника'});
  assert.deepEqual(found.data.notes.map(n=>n.id),['gn1']);
  assert.equal(found.data.revision,0);
