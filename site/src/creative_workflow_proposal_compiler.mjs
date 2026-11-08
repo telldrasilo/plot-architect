@@ -135,6 +135,10 @@ function validatedProposal(proposal){
  return {nodeCount:totalNodes,edgeCount:totalEdges};
 }
 
+// The same author-intent validation is reused by saved-draft iteration.
+// Exporting the pure validator does not alter existing note staging semantics.
+export {validatedProposal as validateCreativeProposal};
+
 /**
  * Compile model-authored meaning into a trusted, explicit stage_note command.
  * generationId must be stable for one requested generation. No extra external
