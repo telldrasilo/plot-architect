@@ -333,18 +333,25 @@ const editorialInView=()=>state.editorialFields.filter(f=>f.parent===state.view)
 const cwLatestPostCanonReview=r=>(r.postCanonReviews||[]).at(-1)||null;
 const cwRestoredOriginal=id=>(state.replacements||[]).find(r=>
   r.state==='restored'&&(r.sourceNodeIds||[]).includes(id));
-const cwRetiredNodeIds=()=>new Set((state.replacements||[]).flatMap(r=>{
+const cwRetiredNodeIds=()=>new Set([
+ ...(state.replacements||[]).flatMap(r=>{
   const sources=r.state==='restored'?[]:(r.sourceNodeIds||[]);
   const archived=(cwLatestPostCanonReview(r)?.candidateDecisions||[])
    .filter(d=>d.decision==='archive').map(d=>d.nodeId);
   return [...sources,...archived];
-}));
-const cwSuspendedEdgeIds=()=>new Set((state.replacements||[]).flatMap(r=>{
+ }),
+ ...(state.replacementPreparations||[]).filter(p=>p.state==='applied').map(p=>p.sourceNodeId)
+]);
+const cwSuspendedEdgeIds=()=>new Set([
+ ...(state.replacements||[]).flatMap(r=>{
   const restored=r.state==='restored'
-    ?new Set((cwLatestPostCanonReview(r)?.edgeDecisions||[])
-      .filter(d=>d.decision==='restore').map(d=>d.edgeId)):new Set();
+   ?new Set((cwLatestPostCanonReview(r)?.edgeDecisions||[])
+     .filter(d=>d.decision==='restore').map(d=>d.edgeId)):new Set();
   return (r.suspendedEdgeIds||[]).filter(id=>!restored.has(id));
-}));
+ }),
+ ...(state.replacementPreparations||[]).filter(p=>p.state==='applied')
+  .flatMap(p=>p.incidentEdges.map(e=>e.id))
+]);
 const cwActiveNodes=()=>{const retired=cwRetiredNodeIds();return state.nodes.filter(n=>!n.workspaceId&&!retired.has(n.id))};
 const visible=()=>cwActiveNodes().filter(n=>n.parent===state.view);
 const currentEdges=()=>{const ids=new Set(visible().map(n=>n.id)),suspended=cwSuspendedEdgeIds();return state.edges.filter(e=>!e.workspaceId&&!suspended.has(e.id)&&ids.has(e.from)&&ids.has(e.to))};
