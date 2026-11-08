@@ -4521,6 +4521,113 @@ async function cwConfirmReplacementLifecycle(){
  }
 }
 
+
+// UX-RPL-GESTURE-01: server-owned preparation of one event. This editor
+// performs no raw graph mutation for the protected replacement plan.
+let cwPrepReview=null;
+const cwPrepById=id=>(state.replacementPreparations||[]).find(p=>p.id===id);
+const cwPrepForSource=id=>(state.replacementPreparations||[]).find(p=>
+ p.state==='open'&&p.sourceNodeId===id);
+function cwOpenPrep(id){if(!cwPrepById(id))return note('Подготовка не найдена');selected={type:'preparation',id};render()}
+function cwClosePrepReview(){if(cwAcceptanceBusy)return;cwPrepReview=null;modalOpen=false;$('modal-host').innerHTML=''}
+function cwPrepReviewDescription(r){
+ const p=r.plan,k=r.command.kind;
+ if(k==='create_preparation')return 'Исходное событие «'+esc(p.sourceNode.title)+'» и '+p.incidentEdges.length+' стрелок останутся действующими.';
+ if(k==='set_preparation_candidates')return 'Выбрано черновиков: '+p.candidates.length+'. Добавить '+p.addedNodeIds.length+', исключить '+p.removedNodeIds.length+'. Канон останется прежним.';
+ if(k==='set_preparation_decisions')return 'Решений: '+p.decisions.length+'. Нерешённых старых связей: '+p.unresolvedOldEdgeIds.length+'.';
+ if(k==='cancel_preparation')return 'Подготовка будет отменена. Исходник и черновики сохранятся.';
+ if(k==='apply_preparation')return 'Принять '+p.acceptedNodeIds.length+' событий и '+p.promoteEdgeIds.length+
+  ' внутренних стрелок. Старые связи: переподключить '+p.rewiredEdges.length+', отказаться от '+p.droppedEdgeIds.length+
+  '. Неиспользованных черновиков останется '+p.retainedDraftIds.length+'. Исходник сохранится в истории.';
+ return 'Только явное подтверждение изменяет сюжет.';
+}
+function cwShowPrepReview(){
+ const r=cwPrepReview;if(!r)return;
+ const titles={create_preparation:'Подготовить замену?',set_preparation_candidates:'Использовать черновики?',
+  set_preparation_decisions:'Сохранить решения по связям?',apply_preparation:'Применить замену?',
+  cancel_preparation:'Отменить подготовку?'};
+ modalOpen=true;
+ $('modal-host').innerHTML='<div class="backdrop"><form class="modal" id="cw-prep-review">'+
+  '<h2>'+esc(titles[r.command.kind])+'</h2><p>'+cwPrepReviewDescription(r)+'</p>'+
+  '<p class="muted">Проверено для ревизии '+r.revision+'. При изменении проекта потребуется новая проверка.</p>'+
+  '<div class="buttons"><button type="button" id="cw-prep-back">Назад</button>'+
+  '<button class="primary" type="submit" id="cw-prep-confirm">'+
+   (r.command.kind==='apply_preparation'?'Применить':'Подтвердить')+'</button></div></form></div>';
+ $('cw-prep-back').onclick=cwClosePrepReview;
+ $('cw-prep-review').onsubmit=e=>{e.preventDefault();void cwConfirmPrepReview()};
+}
+async function cwReviewPrep(command){
+ if(!cwCleanForOperation()||modalOpen||cwPrepReview)return note('Дождитесь синхронизации проекта');
+ const projectId=activeProjectId,revision=remote.revision;
+ cwAcceptanceBusy=true;
+ try{
+  const response=await cwWorkflowRequest(projectId,'preview',{expectedRevision:revision,command});
+  if(activeProjectId!==projectId||remote.revision!==revision||remote.dirty||remote.blocked||
+     response.kind!==command.kind||!response.preview)throw Error('Проект изменился во время проверки');
+  cwPrepReview={command,plan:response.preview,projectId,revision,operationId:crypto.randomUUID()};
+  cwShowPrepReview();
+ }catch(err){note('Не удалось проверить подготовку: '+err.message)}
+ finally{cwAcceptanceBusy=false}
+}
+function cwPrepReadback(r,receipt,latest){
+ if(receipt?.operationId!==r.operationId||receipt.kind!==r.command.kind||
+   !Number.isSafeInteger(receipt.revision)||latest.revision<receipt.revision)return false;
+ const p=latest.graph?.replacementPreparations?.find(p=>p.id===r.command.preparationId);
+ if(!p)return false;
+ const k=r.command.kind;
+ if(k==='create_preparation')return p.state==='open'&&p.sourceNodeId===r.command.sourceNodeId&&
+   JSON.stringify(p.incidentEdges.map(e=>e.id))===JSON.stringify(r.plan.incidentEdges.map(e=>e.id));
+ if(k==='set_preparation_candidates')return p.state==='open'&&
+   JSON.stringify(p.candidateSelections)===JSON.stringify(r.command.candidates);
+ if(k==='set_preparation_decisions')return p.state==='open'&&
+   JSON.stringify(p.edgeDecisions)===JSON.stringify(r.command.decisions);
+ if(k==='cancel_preparation')return p.state==='cancelled';
+ if(k==='apply_preparation'){
+  const nodes=new Map(latest.graph.nodes.map(n=>[n.id,n]));
+  const edges=new Map(latest.graph.edges.map(e=>[e.id,e]));
+  return p.state==='applied'&&nodes.has(p.sourceNodeId)&&
+   r.plan.acceptedNodeIds.every(id=>nodes.has(id)&&!nodes.get(id).workspaceId)&&
+   r.plan.originalEdgeIds.every(id=>edges.has(id))&&
+   r.plan.rewiredEdges.every(e=>{const n=edges.get(e.id);return n&&n.from===e.from&&n.to===e.to&&n.type===e.type&&!n.workspaceId})&&
+   r.plan.retainedDraftIds.every(id=>nodes.get(id)?.workspaceId);
+ }
+ return false;
+}
+async function cwConfirmPrepReview(){
+ const r=cwPrepReview;
+ if(!r||cwAcceptanceBusy||!cwCleanForOperation()||activeProjectId!==r.projectId||
+    remote.revision!==r.revision)return note('Проект изменился. Повторите проверку');
+ cwAcceptanceBusy=true;
+ if($('cw-prep-confirm'))$('cw-prep-confirm').disabled=true;
+ try{
+  const receipt=await cwWorkflowRequest(r.projectId,'apply',{
+   expectedRevision:r.revision,operationId:r.operationId,
+   command:{...r.command,expectedPreview:r.plan}
+  });
+  const latest=await apiRequest('/api/projects/'+encodeURIComponent(r.projectId));
+  if(activeProjectId!==r.projectId||remote.dirty||remote.blocked||
+     !cwPrepReadback(r,receipt,latest))throw Error('Серверный результат не подтверждён');
+  state=validateImported(latest.graph);remote.revision=latest.revision;remote.dirty=false;
+  history=[];selectedNodeIds.clear();linkFrom=null;cwClearDraftSelection();
+  selected={type:'preparation',id:r.command.preparationId};
+  cwPrepReview=null;modalOpen=false;$('modal-host').innerHTML='';
+  recomputeFieldTags();save(false);render();
+  $('saved').textContent='✓ Сохранено локально · '+remote.revision;
+  note(r.command.kind==='apply_preparation'?'Замена применена и подтверждена':'Подготовка сохранена');
+ }catch(err){
+  // Keep operationId for an ambiguous network/readback result.
+  if(['REVISION_CONFLICT','PREVIEW_STALE','OPERATION_ID_REUSED','PREPARATION_STALE'].includes(err.code)){
+   cwPrepReview=null;modalOpen=false;$('modal-host').innerHTML='';
+   note('Ревизия изменилась; повторите предпросмотр');
+  }else{note('Изменение не подтверждено: '+err.message);if($('cw-prep-confirm'))$('cw-prep-confirm').disabled=false}
+ }finally{cwAcceptanceBusy=false}
+}
+function cwStartPrep(nodeId){
+ if(!visible().some(n=>n.id===nodeId))return note('Нужно действующее событие');
+ const old=cwPrepForSource(nodeId);if(old)return cwOpenPrep(old.id);
+ void cwReviewPrep({kind:'create_preparation',preparationId:'prep-'+crypto.randomUUID(),sourceNodeId:nodeId});
+}
+
 let cwReplacementStartReview=null;
 const cwReplacementEdgeLabels={precedes:'Следом',causes:'Причина',enables:'Делает возможным',hinders:'Препятствует'};
 function cwCloseReplacementStartReview(){
