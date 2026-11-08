@@ -144,6 +144,66 @@ export function validateCreativeWorkflowGraph(graph){
         ||(!owned.has(original.to)&&newEdge.to!==original.to))fail('EXTERNAL_ENDPOINT_CHANGED',result.edgeId);
     }
   }
+  // New canon-neutral replacement preparations are independent of legacy
+  // replacements[], which retire the original immediately.
+  const preparations=graph.replacementPreparations??[];
+  if(!Array.isArray(preparations)||preparations.length>100)
+    fail('PREPARATIONS_INVALID','bounded preparation array required');
+  const pids=new Set(),openSources=new Set(),openOldEdges=new Set();
+  for(const p of preparations){
+    if(!obj(p)||!id(p.id)||pids.has(p.id)||
+      !['open','cancelled','applied'].includes(p.state)||
+      !id(p.sourceNodeId)||!Number.isSafeInteger(p.sourceRevision)||
+      p.sourceRevision<0||!obj(p.sourceSnapshot)||
+      p.sourceSnapshot.id!==p.sourceNodeId||
+      !Array.isArray(p.incidentEdges)||p.incidentEdges.length>15000||
+      !Array.isArray(p.candidateSelections)||p.candidateSelections.length>80||
+      !Array.isArray(p.edgeDecisions)||p.edgeDecisions.length>15000||
+      Object.keys(p).some(k=>!['id','state','sourceNodeId','sourceRevision','sourceSnapshot',
+       'incidentEdges','candidateSelections','edgeDecisions'].includes(k)))
+      fail('PREPARATIONS_INVALID','invalid preparation record');
+    pids.add(p.id);
+    const oldEdges=new Set();
+    for(const e of p.incidentEdges){
+      if(!obj(e)||!id(e.id)||oldEdges.has(e.id)||!id(e.from)||!id(e.to)||
+         !['precedes','causes','enables','hinders'].includes(e.type)||
+         e.from!==p.sourceNodeId&&e.to!==p.sourceNodeId||
+         workspaceOf(e)!==null)
+        fail('PREPARATIONS_INVALID',p.id+' invalid incident edge snapshot');
+      oldEdges.add(e.id);
+    }
+    const candidateIds=new Set();
+    for(const c of p.candidateSelections){
+      if(!obj(c)||Object.keys(c).sort().join(',')!=='nodeId,workspaceId'||
+         !id(c.workspaceId)||!id(c.nodeId)||candidateIds.has(c.nodeId))
+        fail('PREPARATIONS_INVALID',p.id+' invalid candidate');
+      candidateIds.add(c.nodeId);
+    }
+    const decided=new Set();
+    for(const d of p.edgeDecisions){
+      if(!obj(d)||!id(d.edgeId)||!oldEdges.has(d.edgeId)||decided.has(d.edgeId)||
+         !['rewire','drop'].includes(d.decision))
+        fail('PREPARATIONS_INVALID',p.id+' invalid edge decision');
+      decided.add(d.edgeId);
+    }
+    if(p.state==='open'){
+      if(openSources.has(p.sourceNodeId))
+        fail('PREPARATION_CONFLICT','duplicate open preparation for original');
+      openSources.add(p.sourceNodeId);
+      // A live preparation may become stale after an ordinary edit, but its
+      // source must remain addressable: deleting it is a protected operation.
+      if(!nodes.has(p.sourceNodeId)||workspaceOf(nodes.get(p.sourceNodeId))!==null)
+        fail('PREPARATION_SOURCE_MISSING',p.sourceNodeId);
+      for(const e of p.incidentEdges){
+        if(openOldEdges.has(e.id))fail('PREPARATION_CONFLICT','shared incident edge');
+        openOldEdges.add(e.id);
+      }
+      for(const r of replacements)if(r.state!=='restored'&&(
+        r.sourceNodeIds.includes(p.sourceNodeId)||
+        r.suspendedEdgeIds.some(id=>oldEdges.has(id))))
+        fail('PREPARATION_LEGACY_CONFLICT',p.id);
+    }
+  }
   return graph;
 }
 
@@ -238,6 +298,11 @@ export function previewStartReplacement(graph,sourceNodeIds){
   const active=new Set(canonicalProjection(graph).nodes.map(n=>n.id));
   for(const id of sourceNodeIds)if(!active.has(id))fail('SOURCE_INVALID',id);
   const chosen=new Set(sourceNodeIds);
+  const allIncident=new Set(graph.edges.filter(e=>workspaceOf(e)===null&&
+    (chosen.has(e.from)||chosen.has(e.to))).map(e=>e.id));
+  if((graph.replacementPreparations??[]).some(p=>p.state==='open'&&
+    (chosen.has(p.sourceNodeId)||p.incidentEdges.some(e=>allIncident.has(e.id)))))
+    fail('PREPARATION_CONFLICT','legacy start conflicts with active preparation');
   const suspendedEdgeIds=graph.edges.filter(e=>workspaceOf(e)===null&&(chosen.has(e.from)||chosen.has(e.to))).map(e=>e.id);
   const alreadySuspended=new Set((graph.replacements??[]).flatMap(r=>r.suspendedEdgeIds));
   if(suspendedEdgeIds.some(id=>alreadySuspended.has(id)))fail('REPLACEMENT_CONFLICT','shared old boundary edge');
