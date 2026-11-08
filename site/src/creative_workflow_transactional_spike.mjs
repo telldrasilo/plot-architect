@@ -28,6 +28,7 @@ import {
   applyStartReplacement
 } from './creative_workflow_contract.mjs';
 import {previewReplacementReconnection,applyReplacementReconnection} from './creative_workflow_reconnection.mjs';
+import {previewCreatePreparation,applyCreatePreparation,previewCancelPreparation,applyCancelPreparation} from './creative_workflow_preparation.mjs';
 import {previewLinkReplacementCandidates,applyLinkReplacementCandidates} from './creative_workflow_replacement_candidates.mjs';
 import {previewPostCanonReview,applyPostCanonReview} from './creative_workflow_postcanon_review.mjs';
 import {
@@ -52,6 +53,8 @@ const fields={
   rewire_draft_edge:['workspaceId','edgeId','to','expectedPreview'],
   set_draft_edge_type:['workspaceId','edgeId','newType','expectedPreview'],
   accept_draft:['workspaceId','nodeIds','placements','expectedPreview'],
+  create_preparation:['preparationId','sourceNodeId','expectedPreview'],
+  cancel_preparation:['preparationId','expectedPreview'],
   start_replacement:['replacementId','sourceNodeIds','expectedPreview'],
   reconnect:['replacementId','decisions','expectedPreview'],
   link_replacement_candidates:['replacementId','nodeIds','expectedPreview'],
@@ -104,6 +107,8 @@ async function runDomain(db,projectId,graph,expectedRevision,command){
     case 'rewire_draft_edge':return applyRewireDraftEdge(graph,args);
     case 'set_draft_edge_type':return applySetDraftEdgeType(graph,args);
     case 'accept_draft':return applyDraftAcceptance(graph,args);
+    case 'create_preparation':return applyCreatePreparation(graph,args);
+    case 'cancel_preparation':return applyCancelPreparation(graph,args);
     case 'start_replacement':return applyStartReplacement(graph,args);
     case 'reconnect':return applyReplacementReconnection(graph,args);
     case 'link_replacement_candidates':{
@@ -245,6 +250,8 @@ export async function previewWorkflowCommand(db,{projectId,expectedRevision,comm
     case 'rewire_draft_edge': preview=previewRewireDraftEdge(graph,command);break;
     case 'set_draft_edge_type': preview=previewSetDraftEdgeType(graph,command);break;
     case 'accept_draft': preview=previewDraftAcceptance(graph,command);break;
+    case 'create_preparation': preview=previewCreatePreparation(graph,command);break;
+    case 'cancel_preparation': preview=previewCancelPreparation(graph,command);break;
     case 'start_replacement': preview=previewReplacementStart(graph,command.sourceNodeIds);break;
     case 'reconnect': preview=previewReplacementReconnection(graph,command);break;
     case 'link_replacement_candidates':{

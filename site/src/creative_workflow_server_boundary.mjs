@@ -86,10 +86,19 @@ export function canonicalReadGraph(input){
  */
 export function assertOrdinaryGraphWrite(previousRaw,nextRaw){
   const previous=validateServerGraph(previousRaw),next=validateServerGraph(nextRaw);
+  if(!exact(previous.replacementPreparations??[],next.replacementPreparations??[]))
+    fail('EXPLICIT_WORKFLOW_COMMAND_REQUIRED','replacement preparations require a guarded workflow command');
   if(!exact(previous.workspaces??[],next.workspaces??[])||
      !exact(previous.replacements??[],next.replacements??[]))
     fail('EXPLICIT_WORKFLOW_COMMAND_REQUIRED','working areas and replacements are read-only to generic PUT');
 
+  // Once a preparation exists its original must remain addressable until
+  // the explicit guarded apply/cancel command. Ordinary edits to its text or
+  // incident arrows may occur and will be detected as stale at apply time.
+  for(const p of previous.replacementPreparations??[]){
+    if(p.state==='open'&&!next.nodes.some(n=>n.id===p.sourceNodeId&&scopeOf(n)===null))
+      fail('PREPARATION_SOURCE_REMOVED',p.sourceNodeId);
+  }
   const oldNodes=byId(previous.nodes),oldEdges=byId(previous.edges);
   const archivedCandidates=new Set((previous.replacements??[]).flatMap(r=>
     ((r.postCanonReviews??[]).at(-1)?.candidateDecisions??[])
@@ -147,7 +156,8 @@ export function assertOrdinaryGraphWrite(previousRaw,nextRaw){
 /** Creating or restoring a whole project may not bypass explicit CW commands. */
 export function assertOrdinaryGraphCreation(graphRaw){
   const graph=validateServerGraph(graphRaw);
-  if((graph.workspaces??[]).length||(graph.replacements??[]).length||
+  if((graph.replacementPreparations??[]).length||
+    (graph.workspaces??[]).length||(graph.replacements??[]).length||
     graph.nodes.some(n=>scopeOf(n)!==null)||
     graph.edges.some(e=>scopeOf(e)!==null))
     fail('EXPLICIT_WORKFLOW_COMMAND_REQUIRED','new projects cannot import isolated drafts by ordinary POST');
