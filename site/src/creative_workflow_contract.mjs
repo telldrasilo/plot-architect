@@ -212,6 +212,7 @@ export function canonicalProjection(graph){
   validateCreativeWorkflowGraph(graph);
   const retired=new Set((graph.replacements??[]).flatMap(r=>
     r.state==='restored'?[]:r.sourceNodeIds));
+  for(const p of graph.replacementPreparations??[])if(p.state==='applied')retired.add(p.sourceNodeId);
   for(const r of graph.replacements??[]){
     const recent=(r.postCanonReviews??[]).at(-1);
     for(const c of recent?.candidateDecisions??[])if(c.decision==='archive')retired.add(c.nodeId);
@@ -221,6 +222,8 @@ export function canonicalProjection(graph){
     const allowed=new Set(reviewed?.edgeDecisions.filter(d=>d.decision==='restore').map(d=>d.edgeId)??[]);
     return r.suspendedEdgeIds.filter(id=>!allowed.has(id));
   }));
+  for(const p of graph.replacementPreparations??[])if(p.state==='applied')
+    for(const e of p.incidentEdges)suspended.add(e.id);
   const nodes=graph.nodes.filter(n=>workspaceOf(n)===null&&!retired.has(n.id));
   const ids=new Set(nodes.map(n=>n.id));
   const edges=graph.edges.filter(e=>workspaceOf(e)===null&&!suspended.has(e.id)&&ids.has(e.from)&&ids.has(e.to));
