@@ -5808,6 +5808,9 @@ document.addEventListener('keydown',e=>{
   if(cwReplacementDecisionReview&&!cwAcceptanceBusy){
    e.preventDefault();cwCloseReplacementDecisionReview();return;
   }
+  if(cwPrepReview&&!cwAcceptanceBusy){
+   e.preventDefault();cwClosePrepReview();return;
+  }
   if(cwReplacementStartReview&&!cwAcceptanceBusy){
    e.preventDefault();cwCloseReplacementStartReview();return;
   }
