@@ -198,6 +198,20 @@ export async function commitWorkflowCommand(db,{
   }
   if(results?.[1]?.meta?.changes!==1||results?.[2]?.meta?.changes!==1)
     fail('BATCH_INVARIANT','history and receipt must be written with graph');
+  // The new local replacement must not report success merely because CAS
+  // advanced the row. Confirm the EXACT persisted result and receipt.
+  // If this readback is interrupted, the same operationId safely replays.
+  if(command.kind==='apply_preparation'){
+    const saved=await db.prepare(
+      'SELECT revision,graph_json FROM plot_projects WHERE id=? AND deleted_at IS NULL'
+    ).bind(projectId).first();
+    const receipt=await readReceipt(db,projectId,operationId);
+    if(!saved||saved.revision!==nextRevision||
+       JSON.stringify(canonical(verifiedGraph(JSON.parse(saved.graph_json),nextRevision)))!==JSON.stringify(canonical(updated))||
+       !receipt||receipt.request_hash!==requestHash||
+       JSON.stringify(canonical(JSON.parse(receipt.response_json)))!==JSON.stringify(canonical(response)))
+      fail('WORKFLOW_READBACK_UNVERIFIED','atomic replacement result or receipt could not be confirmed');
+  }
   return {...response,replayed:false};
 }
 
