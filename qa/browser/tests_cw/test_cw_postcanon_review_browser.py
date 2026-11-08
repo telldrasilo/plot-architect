@@ -172,6 +172,31 @@ def main():
     page.locator("#cw-review-replacement").click()
     page.locator("#cw-postcanon-choices").wait_for(state="visible")
     assert page.locator("#cw-postcanon-choices select").count()==5
+    # UX regression: section heading and first item must not merge onto one line.
+    dialog=page.locator("#cw-postcanon-choices")
+    assert dialog.locator(".cw-postcanon-section>h3").all_text_contents()==[
+      "1 · Оригинал","2 · Новые события (2)","3 · Исходные связи (2)"
+    ]
+    assert [section.locator(".cw-postcanon-item").count()
+      for section in dialog.locator(".cw-postcanon-section").all()]==[1,2,2]
+    for section in dialog.locator(".cw-postcanon-section").all():
+      heading=section.locator("h3").bounding_box()
+      first=section.locator(".cw-postcanon-item").first.bounding_box()
+      assert heading and first and first["y"]>=heading["y"]+heading["height"]+6,(
+        "section header overlaps first choice"
+      )
+      rows=section.locator(".cw-postcanon-item").all()
+      for upper,lower in zip(rows,rows[1:]):
+        a=upper.bounding_box();b=lower.bounding_box()
+        assert a and b and b["y"]>=a["y"]+a["height"]+8,(
+          "two independent author decisions visually overlap"
+        )
+    page.set_viewport_size({"width":980,"height":760})
+    dialog.wait_for(state="visible")
+    assert dialog.evaluate("(e)=>e.scrollWidth<=e.clientWidth+1"),(
+      "review form must scroll vertically without horizontal clipping"
+    )
+    page.set_viewport_size({"width":1600,"height":1000})
     page.keyboard.press("Escape")
     assert page.locator("#cw-postcanon-choices").count()==0
     assert db["applies"]==0
