@@ -237,3 +237,92 @@ test('receipt insertion failure rolls back the entire preparation apply',async()
  assert.deepEqual(counts(sqlite),{revision:0,history:1,receipts:0});
  assert.equal(stored(sqlite).replacementPreparations[0].state,'open');
 });
+
+import {previewSetPreparationCandidates,applySetPreparationCandidates,
+        previewSetPreparationDecisions,applySetPreparationDecisions} from '../src/creative_workflow_preparation_edit.mjs';
+import {previewDraftAcceptance} from '../src/creative_workflow_contract.mjs';
+import {previewDiscardDraftNodes} from '../src/creative_workflow_draft_discard.mjs';
+
+const reviewCandidates=(g,candidates)=>applySetPreparationCandidates(g,{
+ preparationId:'p1',candidates,expectedRevision:g.revision,
+ expectedPreview:previewSetPreparationCandidates(g,{preparationId:'p1',candidates})
+}).graph;
+const reviewDecisions=(g,decisions)=>applySetPreparationDecisions(g,{
+ preparationId:'p1',decisions,expectedRevision:g.revision,
+ expectedPreview:previewSetPreparationDecisions(g,{preparationId:'p1',decisions})
+}).graph;
+test('selection is explicit, persistent, canon-neutral and independent of original taskId',()=>{
+ const prepared=readyGraph(),p=prepared.replacementPreparations[0];
+ p.candidateSelections=[];p.edgeDecisions=[];
+ const candidates=[{workspaceId:'w1',nodeId:'X'},{workspaceId:'w1',nodeId:'Y'}];
+ const before=canonicalProjection(prepared);
+ const selected=reviewCandidates(prepared,candidates);
+ assert.deepEqual(selected.replacementPreparations[0].candidateSelections,candidates);
+ assert.deepEqual(canonicalProjection(selected),before);
+ assert.deepEqual(prepared.replacementPreparations[0].candidateSelections,[]);
+ reject(()=>assertOrdinaryGraphWrite(prepared,selected),'EXPLICIT_WORKFLOW_COMMAND_REQUIRED');
+ reject(()=>previewDraftAcceptance(selected,{workspaceId:'w1',nodeIds:['X']}),'PREPARATION_CANDIDATE_RESERVED');
+ reject(()=>previewDiscardDraftNodes(selected,{workspaceId:'w1',nodeIds:['X']}),'PREPARATION_CANDIDATE_RESERVED');
+ assert.deepEqual(previewDraftAcceptance(selected,{workspaceId:'w1',nodeIds:['Z']}).acceptNodeIds,['Z']);
+});
+test('decisions are explicit and partial: unresolved always blocks final apply',()=>{
+ const initial=readyGraph(),p=initial.replacementPreparations[0];
+ p.edgeDecisions=[];
+ const partial=reviewDecisions(initial,[{edgeId:'out',decision:'drop'}]);
+ assert.deepEqual(partial.replacementPreparations[0].edgeDecisions,[{edgeId:'out',decision:'drop'}]);
+ reject(()=>previewApplyPreparation(partial,{preparationId:'p1'}),'PREPARATION_UNRESOLVED');
+ const decisions=[
+  {edgeId:'in',decision:'rewire',newEdge:{id:'fresh-in',from:'A',to:'X',type:'precedes'}},
+  {edgeId:'out',decision:'drop'}
+ ];
+ const next=reviewDecisions(partial,decisions);
+ assert.deepEqual(previewApplyPreparation(next,{preparationId:'p1'}).rewiredEdges.map(e=>e.id),['fresh-in']);
+ const invalid=[{edgeId:'in',decision:'rewire',newEdge:{id:'bad',from:'A',to:'C',type:'precedes'}}];
+ reject(()=>previewSetPreparationDecisions(next,{preparationId:'p1',decisions:invalid}),'PREPARATION_DECISION_ENDPOINT');
+ const less=[{workspaceId:'w1',nodeId:'Y'}];
+ reject(()=>previewSetPreparationCandidates(next,{preparationId:'p1',candidates:less}),'PREPARATION_DECISION_CONFLICT');
+});
+test('candidate ownership is enforced across existing workspaces',()=>{
+ const g=readyGraph();g.nodes.push({id:'D',title:'Отдельное',x:900,y:0});
+ g.nodes.push({id:'Q',title:'Альтернатива из другого задания',x:900,y:300,workspaceId:'w2'});
+ g.workspaces.push({id:'w2',taskId:'another-task',x:850,y:250,width:400,height:300});
+ const p=previewCreatePreparation(g,{sourceNodeId:'D'});
+ const other=applyCreatePreparation(g,{preparationId:'p2',sourceNodeId:'D',expectedRevision:0,expectedPreview:p}).graph;
+ reject(()=>previewSetPreparationCandidates(other,{preparationId:'p2',
+   candidates:[{workspaceId:'w1',nodeId:'X'}]}),'PREPARATION_CANDIDATE_CONFLICT');
+ const expanded=reviewCandidates(other,[
+  {workspaceId:'w1',nodeId:'X'},
+  {workspaceId:'w1',nodeId:'Y'},
+  {workspaceId:'w2',nodeId:'Q'}]);
+ assert.equal(expanded.replacementPreparations[0].candidateSelections.length,3);
+ assert.equal(expanded.replacementPreparations[0].candidateSelections.at(-1).workspaceId,'w2');
+ assert.equal(expanded.nodes.find(n=>n.id==='Q').workspaceId,'w2');
+});
+test('SQLite review commands persist selection then decisions without changing canon',async()=>{
+ const {db,sqlite}=sqliteDb(),g=readyGraph();
+ g.replacementPreparations[0].candidateSelections=[];
+ g.replacementPreparations[0].edgeDecisions=[];
+ sqlite.prepare('UPDATE plot_projects SET graph_json=? WHERE id=?').run(JSON.stringify(g),'project-1');
+ const before=canonicalProjection(stored(sqlite));
+ const candidates=[{workspaceId:'w1',nodeId:'X'},{workspaceId:'w1',nodeId:'Y'}];
+ const select={kind:'set_preparation_candidates',preparationId:'p1',candidates};
+ const p1=await previewWorkflowCommand(db,{projectId:'project-1',expectedRevision:0,command:select});
+ await commitWorkflowCommand(db,{projectId:'project-1',operationId:'select-1',expectedRevision:0,
+   command:{...select,expectedPreview:p1.preview}});
+ assert.deepEqual(canonicalProjection(stored(sqlite)),before);
+ const decisions=[
+  {edgeId:'in',decision:'rewire',newEdge:{id:'new-in',from:'A',to:'X',type:'precedes'}},
+  {edgeId:'out',decision:'drop'}
+ ];
+ const decide={kind:'set_preparation_decisions',preparationId:'p1',decisions};
+ const p2=await previewWorkflowCommand(db,{projectId:'project-1',expectedRevision:1,command:decide});
+ await commitWorkflowCommand(db,{projectId:'project-1',operationId:'decide-1',expectedRevision:1,
+   command:{...decide,expectedPreview:p2.preview}});
+ assert.deepEqual(canonicalProjection(stored(sqlite)),before);
+ const commit={kind:'apply_preparation',preparationId:'p1'};
+ const p3=await previewWorkflowCommand(db,{projectId:'project-1',expectedRevision:2,command:commit});
+ await commitWorkflowCommand(db,{projectId:'project-1',operationId:'commit-1',expectedRevision:2,
+   command:{...commit,expectedPreview:p3.preview}});
+ assert.deepEqual(counts(sqlite),{revision:3,history:4,receipts:3});
+ assert.deepEqual(canonicalProjection(stored(sqlite)).nodes.map(n=>n.id),['A','C','X','Y']);
+});

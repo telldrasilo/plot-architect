@@ -32,6 +32,9 @@ export function previewDiscardDraftNodes(graph,{workspaceId,nodeIds}={}){
     if(nodes.get(key)?.workspaceId!==workspaceId)
       fail('DISCARD_TARGET_INVALID',key);
   const discarded=new Set(nodeIds);
+  if((graph.replacementPreparations??[]).some(p=>p.state==='open'&&
+     p.candidateSelections.some(c=>discarded.has(c.nodeId))))
+    fail('PREPARATION_CANDIDATE_RESERVED','cancel or deselect preparation before discarding');
   if((graph.eventRewrites??[]).some(x=>discarded.has(x.nodeId))||
      (graph.fields??[]).some(x=>discarded.has(x.parent))||
      graph.nodes.some(x=>discarded.has(x.parent)))

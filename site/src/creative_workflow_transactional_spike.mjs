@@ -30,6 +30,7 @@ import {
 import {previewReplacementReconnection,applyReplacementReconnection} from './creative_workflow_reconnection.mjs';
 import {previewCreatePreparation,applyCreatePreparation,previewCancelPreparation,applyCancelPreparation} from './creative_workflow_preparation.mjs';
 import {previewApplyPreparation,applyPreparation} from './creative_workflow_preparation_apply.mjs';
+import {previewSetPreparationCandidates,applySetPreparationCandidates,previewSetPreparationDecisions,applySetPreparationDecisions} from './creative_workflow_preparation_edit.mjs';
 import {previewLinkReplacementCandidates,applyLinkReplacementCandidates} from './creative_workflow_replacement_candidates.mjs';
 import {previewPostCanonReview,applyPostCanonReview} from './creative_workflow_postcanon_review.mjs';
 import {
@@ -57,6 +58,8 @@ const fields={
   create_preparation:['preparationId','sourceNodeId','expectedPreview'],
   cancel_preparation:['preparationId','expectedPreview'],
   apply_preparation:['preparationId','expectedPreview'],
+  set_preparation_candidates:['preparationId','candidates','expectedPreview'],
+  set_preparation_decisions:['preparationId','decisions','expectedPreview'],
   start_replacement:['replacementId','sourceNodeIds','expectedPreview'],
   reconnect:['replacementId','decisions','expectedPreview'],
   link_replacement_candidates:['replacementId','nodeIds','expectedPreview'],
@@ -112,6 +115,8 @@ async function runDomain(db,projectId,graph,expectedRevision,command){
     case 'create_preparation':return applyCreatePreparation(graph,args);
     case 'cancel_preparation':return applyCancelPreparation(graph,args);
     case 'apply_preparation':return applyPreparation(graph,args);
+    case 'set_preparation_candidates':return applySetPreparationCandidates(graph,args);
+    case 'set_preparation_decisions':return applySetPreparationDecisions(graph,args);
     case 'start_replacement':return applyStartReplacement(graph,args);
     case 'reconnect':return applyReplacementReconnection(graph,args);
     case 'link_replacement_candidates':{
@@ -270,6 +275,8 @@ export async function previewWorkflowCommand(db,{projectId,expectedRevision,comm
     case 'create_preparation': preview=previewCreatePreparation(graph,command);break;
     case 'cancel_preparation': preview=previewCancelPreparation(graph,command);break;
     case 'apply_preparation': preview=previewApplyPreparation(graph,command);break;
+    case 'set_preparation_candidates': preview=previewSetPreparationCandidates(graph,command);break;
+    case 'set_preparation_decisions': preview=previewSetPreparationDecisions(graph,command);break;
     case 'start_replacement': preview=previewReplacementStart(graph,command.sourceNodeIds);break;
     case 'reconnect': preview=previewReplacementReconnection(graph,command);break;
     case 'link_replacement_candidates':{
