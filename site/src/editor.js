@@ -3909,16 +3909,17 @@ function cwOpenReplacementHistory(){
   const titles=(r.sourceNodeIds||[]).map(id=>nby(id)?.title||id);
   const resolved=(r.edgeResolutions||[]).length;
   return '<li><button type="button" data-cw-history-id="'+esc(r.id)+'">'+
-   '<strong>'+esc(titles.join(', '))+'</strong> · '+
+   '<strong class="cw-history-title">'+esc(titles.join(', '))+'</strong>'+
+   '<span class="cw-history-state">'+
    (r.state==='restored'?'Восстановлена':r.state==='completed'?'Завершена':'На замене')+
-   '<small>Прежние связи: '+resolved+' из '+(r.suspendedEdgeIds||[]).length+
+   '</span><small class="cw-history-meta">Прежние связи: '+resolved+' из '+(r.suspendedEdgeIds||[]).length+
    ' решены. Пересмотров: '+(r.postCanonReviews||[]).length+
    '. Оригинал и исходные отношения сохранены.</small></button></li>';
  }).join('');
  $('modal-host').innerHTML='<div class="backdrop"><section class="modal" role="dialog" aria-modal="true" id="cw-replacement-history-dialog" aria-labelledby="cw-history-title">'+
   '<h2 id="cw-history-title">История замен</h2>'+
   '<p>Исходники не удаляются. Завершённые скрыты с полотна; явно восстановленные видны в каноне, но защищены от обычного редактирования.</p>'+
-  '<ol class="cw-relations-list">'+records+'</ol>'+
+  '<ol class="cw-relations-list cw-history-list">'+records+'</ol>'+
   '<p class="muted">Просмотр не восстанавливает события и не изменяет прежние решения о связях.</p>'+
   '<div class="buttons"><button type="button" id="cw-history-close">Закрыть</button></div></section></div>';
  $('cw-history-close').onclick=cwCloseReplacementHistory;

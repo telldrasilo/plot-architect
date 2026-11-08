@@ -120,6 +120,33 @@ def main():
                 "&&!__graphite.getRemote().busy&&!__graphite.getRemote().dirty")
         page.goto(ORIGIN+"/")
         ready()
+        def check_history_row(expected_state):
+            item=page.locator('[data-cw-history-id="r1"]')
+            title=item.locator(".cw-history-title")
+            status=item.locator(".cw-history-state")
+            meta=item.locator(".cw-history-meta")
+            assert title.count()==status.count()==meta.count()==1
+            assert status.inner_text().strip()==expected_state
+            assert "Прежние связи:" in meta.inner_text()
+            # Force an unusually long Russian heading without modifying server data.
+            title.evaluate("(el)=>el.textContent='04-V · Очень длинное название исходного события для проверки переноса текста в истории замен'")
+            for width,height in ((1450,980),(420,740)):
+                page.set_viewport_size({"width":width,"height":height})
+                rows=[x.bounding_box() for x in (title,status,meta)]
+                assert all(rows),rows
+                assert rows[0]["y"]+rows[0]["height"]<=rows[1]["y"]+0.5,rows
+                assert rows[1]["y"]+rows[1]["height"]<=rows[2]["y"]+0.5,rows
+                assert item.evaluate("(el)=>el.scrollWidth <= el.clientWidth + 1")
+            page.set_viewport_size({"width":1450,"height":980})
+        # An open replacement must be equally readable and history must be read-only.
+        page.locator("#tools-more").click()
+        page.locator("#cw-replacement-history").click()
+        history=page.locator("#cw-replacement-history-dialog")
+        history.wait_for()
+        check_history_row("На замене")
+        assert db["previews"]==db["applies"]==db["generic"]==0
+        page.keyboard.press("Escape")
+        assert history.count()==0
         original=copy.deepcopy(db["graph"]["nodes"][1])
         old_edges=copy.deepcopy(db["graph"]["edges"])
         page.locator('[data-cw-original="b"]').click()
@@ -183,6 +210,7 @@ def main():
         history.wait_for()
         assert "Original scene" in history.inner_text()
         assert "2 из 2 решены" in history.inner_text()
+        check_history_row("Завершена")
         assert db["applies"]==2 and db["generic"]==0
         page.keyboard.press("Escape")
         assert history.count()==0 and db["applies"]==2
