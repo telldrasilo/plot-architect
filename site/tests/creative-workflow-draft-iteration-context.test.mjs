@@ -17,8 +17,7 @@ const graph=()=>{
    {id:'canon',from:'A',to:'B',type:'causes'},
    {id:'yz',from:'y',to:'z',type:'precedes',workspaceId:'w1',draftRelation:'internal'},
    {id:'zu',from:'z',to:'u',type:'hinders',workspaceId:'w1',draftRelation:'internal'},
-   {id:'ya',from:'y',to:'A',type:'enables',workspaceId:'w1',draftRelation:'boundary-proposal'},
-   {id:'ux',from:'u',to:'x',type:'causes',workspaceId:'w1',draftRelation:'boundary-proposal'}
+   {id:'ya',from:'y',to:'A',type:'enables',workspaceId:'w1',draftRelation:'boundary-proposal'}
   ],
   fields:[],lanes:[],workspaces:[
    {id:'w1',taskId:'old-task-consumed',x:0,y:150,width:740,height:350},
