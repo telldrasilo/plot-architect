@@ -255,6 +255,11 @@ def main():
         relations.locator("#cw-prep-apply").click()
         review.wait_for()
         assert "Принять 2 событий" in review.inner_text()
+        assert "Сейчас" in review.inner_text()
+        assert "После" in review.inner_text()
+        assert "Начало → Старый поворот" in review.inner_text()
+        assert "Начало → Новый поворот" in review.inner_text()
+        assert "Старый поворот → Последствие" in review.inner_text()
         assert page.locator('[data-node="b"]').count() == 1
         page.locator("#cw-prep-confirm").click()
         page.wait_for_function(
@@ -279,6 +284,19 @@ def main():
         assert page.locator('[data-node="b"]').count() == 0
         assert page.locator('[data-node="x"]').count() == 1
         assert page.locator('[data-edge="ab"]').count() == 0
+        # Applied original is discoverable for read-only audit after reload.
+        page.locator("#tools-more").click()
+        page.locator("#cw-replacement-history").click()
+        history = page.locator("#cw-replacement-history-dialog")
+        history.wait_for()
+        assert "Старый поворот" in history.inner_text()
+        assert "Применена" in history.inner_text()
+        history.locator('[data-cw-prep-history-id]').click()
+        inspector = page.locator("#inspector")
+        assert "Применено" in inspector.inner_text()
+        assert "Переподключено" in inspector.inner_text()
+        assert "Не использовать" in inspector.inner_text()
+        assert page.locator('[data-edge="bc"]').count() == 0
         assert db["generic"] == 0
         assert not errors, errors
         context.close()
