@@ -4,9 +4,10 @@ Private plot-structure editor. **GitHub `main` is the development source, not a 
 
 ## Where to start
 
+- **Author workflow (canvas → ChatGPT → canvas):** create a task note on the canvas (including a note about an existing event), then ask **Graphite Local** in ChatGPT to find the pending task. ChatGPT reads its scoped context, prepares a reviewed result, and saves drafts only after approval; the author returns to the canvas to inspect them and decide what enters the plot. See [the existing local workflow](docs/NODE_LOCAL_DEVELOPMENT.md), §4. Do not silently substitute the separate hosted **Graphite** store.
 - **Code and tests:** `site/`, `qa/`; start with [AGENTS.md](AGENTS.md) and the [chat-first development workflow](docs/CHAT_DEVELOPMENT_WORKFLOW.md).
 - **Design:** Library `/Планировщик сюжета/Development/UX_DESIGN_STANDARD.md` (consult relevant sections, not the entire history).
-- **Published Site:** query Sites for actual current version and access when the task concerns hosting; latest recorded v4 release evidence: [docs/PA_RELEASE_A_V4_RELEASE_RESULT.md](docs/PA_RELEASE_A_V4_RELEASE_RESULT.md).
+- **Published Site:** query Sites for its actual current version and access when hosting is in scope. [Earlier v4 release evidence](docs/PA_RELEASE_A_V4_RELEASE_RESULT.md) is historical, not a current Graphite release instruction.
 - **Releasing:** [docs/RELEASE_POLICY.md](docs/RELEASE_POLICY.md), **only** when a Site/MCP/D1/Plugin release is in scope.
 
 ## Development
