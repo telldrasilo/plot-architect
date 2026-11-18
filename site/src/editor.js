@@ -4553,10 +4553,89 @@ async function cwConfirmReplacementLifecycle(){
 // UX-RPL-GESTURE-01: server-owned preparation of one event. This editor
 // performs no raw graph mutation for the protected replacement plan.
 let cwPrepReview=null;
+let cwPrepTypePopover=null; // one transient semantic choice, never a graph write
 const cwPrepById=id=>(state.replacementPreparations||[]).find(p=>p.id===id);
 const cwPrepForSource=id=>(state.replacementPreparations||[]).find(p=>
  p.state==='open'&&p.sourceNodeId===id);
 function cwOpenPrep(id){if(!cwPrepById(id))return note('Подготовка не найдена');selected={type:'preparation',id};render()}
+function cwActivePrepForEdge(edge){
+ const p=selected?.type==='preparation'?cwPrepById(selected.id):null;
+ return p?.state==='open'&&(edge.from===p.sourceNodeId||edge.to===p.sourceNodeId)?p:null;
+}
+function cwPrepInspectorHasUnsavedEdits(p){
+ const rows=document.querySelectorAll('[data-prep-old-edge]');
+ if(selected?.type!=='preparation'||selected.id!==p.id)return false;
+ for(const row of rows){
+  const edge=p.incidentEdges.find(e=>e.id===row.dataset.prepOldEdge);
+  if(!edge)continue;
+  const saved=p.edgeDecisions.find(d=>d.edgeId===edge.id),mode=saved?.decision||'later';
+  if(row.querySelector('[data-prep-mode]').value!==mode)return true;
+  if(mode==='rewire'){
+   const target=edge.from===p.sourceNodeId?saved.newEdge.from:saved.newEdge.to;
+   if(row.querySelector('[data-prep-target-node]').value!==target||
+      row.querySelector('[data-prep-target-type]').value!==saved.newEdge.type)return true;
+  }
+ }
+ return false;
+}
+function cwClosePrepTypePopover(){
+ if(!cwPrepTypePopover)return;
+ document.removeEventListener('pointerdown',cwPrepTypePopover.outside,true);
+ cwPrepTypePopover.node.remove();cwPrepTypePopover=null;
+}
+function cwOpenPrepTypePopover(p,edge,nodeId,x,y){
+ cwClosePrepTypePopover();
+ if(selected?.type!=='preparation'||selected.id!==p.id||
+    !p.candidateSelections.some(c=>c.nodeId===nodeId))return;
+ const node=nby(nodeId),from=edge.from===p.sourceNodeId?node:nby(edge.from);
+ const to=edge.to===p.sourceNodeId?node:nby(edge.to);
+ const panel=document.createElement('section');
+ panel.className='cw-prep-type-popover';panel.dataset.prepTypeEdge=edge.id;
+ panel.setAttribute('role','group');panel.setAttribute('aria-label','Смысл переподключённой стрелки');
+ const title=document.createElement('strong');title.textContent='Смысл новой связи';
+ const detail=document.createElement('p');detail.textContent=
+  (from?.title||edge.from)+' → '+(to?.title||edge.to)+
+  ' · прежний смысл: '+(cwReplacementEdgeLabels[edge.type]||edge.type);
+ const buttons=document.createElement('div');buttons.className='cw-prep-type-options';
+ for(const [type,label] of Object.entries(cwReplacementEdgeLabels)){
+  const button=document.createElement('button');button.type='button';
+  button.dataset.prepTypeChoice=type;
+  button.textContent=type===edge.type?'Сохранить: '+label:label;
+  if(type===edge.type)button.classList.add('cw-prep-type-original');
+  button.addEventListener('click',event=>{
+   event.stopPropagation();
+   if(cwAcceptanceBusy||!cwCleanForOperation()||
+      selected?.type!=='preparation'||selected.id!==p.id)return;
+   const current=cwPrepById(p.id),old=current?.incidentEdges.find(e=>e.id===edge.id);
+   if(!current||current.state!=='open'||!old||
+      !current.candidateSelections.some(c=>c.nodeId===nodeId))return;
+   const prior=current.edgeDecisions.find(d=>d.edgeId===edge.id);
+   const decision={edgeId:edge.id,decision:'rewire',newEdge:{
+    id:prior?.decision==='rewire'?prior.newEdge.id:'pre-'+crypto.randomUUID(),
+    from:old.from===current.sourceNodeId?nodeId:old.from,
+    to:old.to===current.sourceNodeId?nodeId:old.to,type}};
+   const decisions=current.edgeDecisions.some(d=>d.edgeId===edge.id)
+    ?current.edgeDecisions.map(d=>d.edgeId===edge.id?decision:d)
+    :[...current.edgeDecisions,decision];
+   cwClosePrepTypePopover();
+   void cwReviewPrep({kind:'set_preparation_decisions',preparationId:current.id,decisions});
+  });
+  buttons.append(button);
+ }
+ const cancel=document.createElement('button');cancel.type='button';
+ cancel.textContent='Отмена';cancel.addEventListener('click',event=>{
+  event.stopPropagation();cwClosePrepTypePopover();
+ });
+ panel.addEventListener('pointerdown',event=>event.stopPropagation());
+ panel.append(title,detail,buttons,cancel);document.body.append(panel);
+ const rect=panel.getBoundingClientRect();
+ panel.style.left=Math.max(10,Math.min(window.innerWidth-rect.width-10,x+8))+'px';
+ panel.style.top=Math.max(10,Math.min(window.innerHeight-rect.height-10,y+8))+'px';
+ const outside=event=>{if(!panel.contains(event.target))cwClosePrepTypePopover()};
+ cwPrepTypePopover={node:panel,outside};
+ document.addEventListener('pointerdown',outside,true);
+ panel.querySelector('.cw-prep-type-original')?.focus({preventScroll:true});
+}
 function cwClosePrepReview(){if(cwAcceptanceBusy)return;cwPrepReview=null;modalOpen=false;$('modal-host').innerHTML=''}
 function cwPrepReviewDescription(r){
  const p=r.plan,k=r.command.kind;
@@ -4804,6 +4883,11 @@ function cwRenderPrepInspector(el,id){
    (isOpen?'<button id="cw-prep-pick" type="button">Использовать черновики…</button>':'')+'</div>'+
    '<div class="cw-relations-panel"><b>Прежние стрелки · '+solved+' из '+
    p.incidentEdges.length+' решены</b>'+
+   (isOpen?'<p class="muted" data-prep-drag-hint>'+
+     (p.candidateSelections.length?
+      'Перетащите гнездо старой стрелки у исходного события на выбранный черновик. Затем укажите смысл новой связи. Исходный сюжет не изменится.':
+      'Сначала выберите черновики, затем сможете переподключать стрелки прямо на холсте.')+
+     '</p>':'')+
    (isOpen?'<ol class="cw-relations-list">'+oldRows+'</ol>':
     '<ol class="cw-relations-list">'+p.incidentEdges.map(e=>{
       const d=decisions.get(e.id);
@@ -5120,9 +5204,9 @@ function cwClearLinkTarget(){
 }
 // A socket is the control: the visually hidden hit surface sits exactly on
 // each target port. No selection or extra square is required before dragging.
-function cwHighlightCanonicalPort(edgeId,active){
+function cwHighlightCanonicalPort(edgeId,active,role='target'){
  for(const dot of $('edges').querySelectorAll('[data-edge-socket]'))
-  if(dot.dataset.edgeSocket===socketKey(edgeId,'target'))
+  if(dot.dataset.edgeSocket===socketKey(edgeId,role))
    dot.classList.toggle('edge-socket-hover',active);
 }
 function cwPositionRewireHandles(edges){
@@ -5131,26 +5215,113 @@ function cwPositionRewireHandles(edges){
  if(!cwCanonicalSocketLayout||semanticZoomLevel()!=='full'||!remote.connected
    ||remote.blocked)return;
  for(const edge of edges){
-  const port=cwCanonicalSocketLayout.ports.get(socketKey(edge.id,'target'));
+  const preparation=cwActivePrepForEdge(edge);
+  // B-side means the source socket of B→C, but the target socket of A→B.
+  const role=preparation&&edge.from===preparation.sourceNodeId?'source':'target';
+  const port=cwCanonicalSocketLayout.ports.get(socketKey(edge.id,role));
   if(!port)continue;
   const handle=document.createElement('button');
-  handle.type='button';handle.className='cw-rewire-handle';
+  handle.type='button';handle.className='cw-rewire-handle'+
+   (preparation?' cw-prep-rewire-handle':'');
   handle.dataset.canonEdgePort=edge.id;
   handle.dataset.rewireEdge=edge.id;
+  if(preparation)handle.dataset.prepEdge=edge.id;
   const from=nby(edge.from),to=nby(edge.to);
-  handle.setAttribute('aria-label','Перенести конец связи «'+(from?.title||edge.from)+
+  handle.setAttribute('aria-label',(preparation?'Подготовить переподключение связи «':
+   'Перенести конец связи «')+(from?.title||edge.from)+
    '» — «'+(to?.title||edge.to)+'»');
-  handle.title='Перетащите конец стрелки к другому событию';
+  handle.title=preparation?'Перетащите от исходного события к выбранному черновику':
+   'Перетащите конец стрелки к другому событию';
   handle.style.left=port.x+'px';handle.style.top=port.y+'px';
   cwSizeSocketControl(handle,port,cwCanonicalSocketLayout);
-  handle.addEventListener('pointerenter',()=>cwHighlightCanonicalPort(edge.id,true));
-  handle.addEventListener('pointerleave',()=>cwHighlightCanonicalPort(edge.id,false));
-  handle.addEventListener('focus',()=>cwHighlightCanonicalPort(edge.id,true));
-  handle.addEventListener('blur',()=>cwHighlightCanonicalPort(edge.id,false));
-  handle.addEventListener('pointerdown',cwBeginCanonicalRewire);
+  handle.addEventListener('pointerenter',()=>cwHighlightCanonicalPort(edge.id,true,role));
+  handle.addEventListener('pointerleave',()=>cwHighlightCanonicalPort(edge.id,false,role));
+  handle.addEventListener('focus',()=>cwHighlightCanonicalPort(edge.id,true,role));
+  handle.addEventListener('blur',()=>cwHighlightCanonicalPort(edge.id,false,role));
+  handle.addEventListener('pointerdown',preparation?cwBeginPrepArrowDrag:cwBeginCanonicalRewire);
   handle.addEventListener('click',event=>event.stopPropagation());
   world.append(handle);
  }
+}
+function cwPrepCandidateAt(clientX,clientY,p){
+ const card=document.elementFromPoint(clientX,clientY)?.closest?.('[data-cw-node]');
+ const id=card?.dataset.cwNode;
+ return p.candidateSelections.some(c=>c.nodeId===id)?id:null;
+}
+function cwPrepCandidatePort(nodeId,role){
+ const card=[...document.querySelectorAll('[data-cw-node]')]
+  .find(el=>el.dataset.cwNode===nodeId);
+ if(!card)return null;
+ const rect=card.getBoundingClientRect();
+ return pointerToWorld(role==='source'?rect.right:rect.left,rect.top+rect.height/2);
+}
+function cwClearPrepLinkTarget(){
+ for(const node of document.querySelectorAll('.cw-prep-link-target'))
+  node.classList.remove('cw-prep-link-target');
+}
+function cwBeginPrepArrowDrag(event){
+ if(event.button!==0||event.ctrlKey||event.metaKey)return;
+ event.preventDefault();event.stopPropagation();
+ const handle=event.currentTarget;
+ const edge=currentEdges().find(e=>e.id===handle.dataset.prepEdge);
+ const preparation=edge&&cwActivePrepForEdge(edge);
+ if(!preparation||!cwCleanForOperation()||cwAcceptanceBusy||cwDraftMoveEdits.size||
+    cwActiveLinkGesture||cwPrepTypePopover){
+  note('Дождитесь завершения текущей операции');return;
+ }
+ if(!preparation.candidateSelections.length){
+  note('Сначала выберите черновики для замены');return;
+ }
+ if(cwPrepInspectorHasUnsavedEdits(preparation)){
+  note('Сначала сохраните несохранённые решения в списке стрелок');return;
+ }
+ const replacingSource=edge.from===preparation.sourceNodeId;
+ const fixed=cwCanonicalSocketLayout?.ports.get(socketKey(edge.id,
+  replacingSource?'target':'source'));
+ if(!fixed)return;
+ cwCloseDisconnectPrompt();
+ const startX=event.clientX,startY=event.clientY;
+ let moved=false,targetId=null;
+ const cleanup=()=>{
+  handle.removeEventListener('pointermove',move);
+  handle.removeEventListener('pointerup',end);
+  handle.removeEventListener('pointercancel',cancel);
+  cwActiveLinkGesture=null;cwHideLinkOverlay();cwClearPrepLinkTarget();
+  delete cwLinkOverlay().dataset.preparation;
+ };
+ const update=(e)=>{
+  targetId=cwPrepCandidateAt(e.clientX,e.clientY,preparation);
+  cwClearPrepLinkTarget();
+  if(targetId)document.querySelector('[data-cw-node="'+targetId+'"]')
+   ?.classList.add('cw-prep-link-target');
+  const candidate=targetId?cwPrepCandidatePort(targetId,
+   replacingSource?'source':'target'):null;
+  const point=candidate||pointerToWorld(e.clientX,e.clientY);
+  const svg=cwLinkOverlay();svg.dataset.preparation='true';
+  cwDrawLinkOverlay(replacingSource?point:fixed,replacingSource?fixed:point,!!targetId);
+ };
+ const move=e=>{
+  e.preventDefault();e.stopPropagation();
+  if(!moved&&Math.hypot(e.clientX-startX,e.clientY-startY)<5)return;
+  moved=true;update(e);
+ };
+ const end=e=>{
+  e.preventDefault();e.stopPropagation();
+  if(moved)targetId=cwPrepCandidateAt(e.clientX,e.clientY,preparation);
+  cleanup();
+  if(!moved){
+   document.querySelector('[data-prep-old-edge="'+edge.id+'"]')
+    ?.scrollIntoView({block:'nearest',behavior:'smooth'});
+   return;
+  }
+  if(targetId)cwOpenPrepTypePopover(preparation,edge,targetId,e.clientX,e.clientY);
+ };
+ const cancel=e=>{e?.stopPropagation();cleanup()};
+ cwActiveLinkGesture={cancel};
+ handle.setPointerCapture(event.pointerId);
+ handle.addEventListener('pointermove',move);
+ handle.addEventListener('pointerup',end);
+ handle.addEventListener('pointercancel',cancel);
 }
 function cwBeginCanonicalRewire(event){
  if(event.button!==0)return;
@@ -5854,6 +6025,9 @@ document.addEventListener('keydown',e=>{
   if(cwActiveLinkGesture){
    e.preventDefault();cwActiveLinkGesture.cancel();return;
   }
+  if(cwPrepTypePopover){
+   e.preventDefault();cwClosePrepTypePopover();return;
+  }
   if(cwActiveDraftDragCancel){
    e.preventDefault();cwActiveDraftDragCancel();return;
   }
@@ -5905,6 +6079,7 @@ window.addEventListener('blur',()=>{
  spacePan=false;document.body.classList.remove('pa-multi-modifier');
  if(cwActiveDraftLinkGesture)cwActiveDraftLinkGesture.cancel();
  if(cwActiveLinkGesture)cwActiveLinkGesture.cancel();
+ cwClosePrepTypePopover();
  if(cwActiveDraftDragCancel)cwActiveDraftDragCancel();
  if(interaction)cancelGesture();
 });

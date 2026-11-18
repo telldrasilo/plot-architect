@@ -233,11 +233,87 @@ def main():
 
         relations = page.locator("#inspector")
         assert relations.locator("[data-prep-old-edge]").count() == 2
+        assert page.locator('[data-prep-edge="ab"]').count() == 1
+        assert page.locator('[data-prep-edge="bc"]').count() == 1
+        assert page.locator('[data-canon-edge-port="bc"]').get_attribute("title") == (
+            "Перетащите от исходного события к выбранному черновику")
+
+        def center(locator):
+            rect = locator.bounding_box()
+            assert rect, "socket or draft must be visible"
+            return rect["x"] + rect["width"] / 2, rect["y"] + rect["height"] / 2
+
+        def drag_prepared_arrow(old_edge, draft_id, cancel=False):
+            x0, y0 = center(page.locator(f'[data-prep-edge="{old_edge}"]'))
+            x1, y1 = center(page.locator(f'[data-cw-node="{draft_id}"]'))
+            page.mouse.move(x0, y0)
+            page.mouse.down()
+            page.mouse.move(x1, y1, steps=12)
+            if cancel:
+                assert page.locator("#cw-link-overlay").get_attribute("data-preparation") == "true"
+                page.keyboard.press("Escape")
+            page.mouse.up()
+
+        # Unselected draft and Esc are cancellations, never graph writes.
+        drag_prepared_arrow("ab", "z")
+        assert page.locator(".cw-prep-type-popover").count() == 0
+        drag_prepared_arrow("ab", "x", cancel=True)
+        assert page.locator(".cw-prep-type-popover").count() == 0
+        assert db["graph"]["replacementPreparations"][0]["edgeDecisions"] == []
+        assert db["applies"] == ["create_preparation", "set_preparation_candidates"]
+
+        # Incoming A→B: move B's target socket to selected X, then explicitly
+        # choose semantics (the old type is offered, never silently inherited).
+        drag_prepared_arrow("ab", "x")
+        popup = page.locator(".cw-prep-type-popover")
+        popup.wait_for()
+        assert "Начало → Новый поворот" in popup.inner_text()
+        assert popup.locator('[data-prep-type-choice="precedes"]').inner_text() == "Сохранить: Следом"
+        assert db["graph"]["replacementPreparations"][0]["edgeDecisions"] == []
+        popup.locator('[data-prep-type-choice="precedes"]').click()
+        page.wait_for_function(
+            "()=>__graphite.getState().replacementPreparations[0].edgeDecisions.length===1"
+            "&&!__graphite.getRemote().busy")
+        first_decision = db["graph"]["replacementPreparations"][0]["edgeDecisions"][0]
+        assert first_decision["edgeId"] == "ab"
+        assert first_decision["newEdge"]["from"] == "a"
+        assert first_decision["newEdge"]["to"] == "x"
+        assert first_decision["newEdge"]["type"] == "precedes"
+        assert page.locator('[data-edge="ab"]').count() == 1
+
+        # A transient inspector edit must not be silently overwritten by drag.
+        second = relations.locator('[data-prep-old-edge="bc"]')
+        second.locator('[data-prep-mode]').select_option("drop")
+        drag_prepared_arrow("bc", "y")
+        assert page.locator(".cw-prep-type-popover").count() == 0
+        assert len(db["graph"]["replacementPreparations"][0]["edgeDecisions"]) == 1
+        second.locator('[data-prep-mode]').select_option("later")
+
+        # Outgoing B→C: moving B's source socket to selected Y must preserve
+        # the earlier AB decision and allow an independent type choice.
+        drag_prepared_arrow("bc", "y")
+        popup.wait_for()
+        assert "Развитие → Последствие" in popup.inner_text()
+        popup.locator('[data-prep-type-choice="hinders"]').click()
+        page.wait_for_function(
+            "()=>__graphite.getState().replacementPreparations[0].edgeDecisions.length===2"
+            "&&!__graphite.getRemote().busy")
+        staged = db["graph"]["replacementPreparations"][0]["edgeDecisions"]
+        assert {d["edgeId"] for d in staged} == {"ab", "bc"}
+        outgoing = next(d for d in staged if d["edgeId"] == "bc")
+        assert (outgoing["newEdge"]["from"], outgoing["newEdge"]["to"],
+                outgoing["newEdge"]["type"]) == ("y", "c", "hinders")
+        assert page.locator('[data-edge="bc"]').count() == 1
+        assert all(not preview["plan"]["canonicalChanged"]
+                   for preview in db["previews"])
+
+        # The inspector remains a complete accessible fallback; switching BC
+        # to drop must retain the existing AB plan.
         first = relations.locator('[data-prep-old-edge="ab"]')
         second = relations.locator('[data-prep-old-edge="bc"]')
-        first.locator('[data-prep-mode]').select_option("rewire")
-        first.locator('[data-prep-target-node]').select_option("x")
-        first.locator('[data-prep-target-type]').select_option("precedes")
+        assert first.locator('[data-prep-mode]').input_value() == "rewire"
+        assert first.locator('[data-prep-target-node]').input_value() == "x"
+        assert first.locator('[data-prep-target-type]').input_value() == "precedes"
         second.locator('[data-prep-mode]').select_option("drop")
         relations.locator("#cw-prep-save-decisions").click()
         page.wait_for_function(
@@ -247,6 +323,7 @@ def main():
         assert page.locator('[data-edge="bc"]').count() == 1
         assert db["applies"] == [
             "create_preparation", "set_preparation_candidates",
+            "set_preparation_decisions", "set_preparation_decisions",
             "set_preparation_decisions"
         ]
 
@@ -302,7 +379,9 @@ def main():
     print(json.dumps({"result": "PASS", "operations": db["applies"],
                       "checks": ["canon unchanged before apply", "no redundant staging confirmations",
                                  "Esc cancellation of existing plan",
-                                 "explicit candidates", "old edge decisions",
+                                 "explicit candidates", "both B-side socket directions",
+                                 "type choice", "unselected/Esc cancellation",
+                                 "inspector fallback", "old edge decisions",
                                  "atomic apply", "historical originals",
                                  "unselected draft boundary", "reload"]},
                      ensure_ascii=False))
