@@ -317,7 +317,8 @@ def main():
         second.locator('[data-prep-mode]').select_option("drop")
         relations.locator("#cw-prep-save-decisions").click()
         page.wait_for_function(
-            "()=>__graphite.getState().replacementPreparations[0].edgeDecisions.length===2"
+            "()=>__graphite.getState().replacementPreparations[0].edgeDecisions.some("
+            "d=>d.edgeId==='bc'&&d.decision==='drop')"
             "&&!__graphite.getRemote().busy")
         assert review.count() == 0
         assert page.locator('[data-edge="bc"]').count() == 1
