@@ -4,6 +4,7 @@
 Build the private Plot Architect project; do not change unrelated projects. **Documentation serves development, not the reverse.**
 - GitHub `main` is the development source, not a byte-identical copy of the deployed ChatGPT Site. Check current `main` before code changes.
 - Read only documentation relevant to the task. For design, use the approved UX decisions in Library `/Планировщик сюжета/Development/UX_DESIGN_STANDARD.md`; for a Site release, use [docs/RELEASE_POLICY.md](docs/RELEASE_POLICY.md). Historical `PA_RELEASE_A_*`, `site/docs/`, ZIP files and ledgers are references, **not instructions for new work**.
+- **Route by intent:** the author's already implemented everyday flow is **canvas task note → ChatGPT with Graphite Local → reviewed saved drafts → canvas**, described in [docs/NODE_LOCAL_DEVELOPMENT.md](docs/NODE_LOCAL_DEVELOPMENT.md) §4. For «есть задание», find pending notes with the Local MCP rather than asking the author to copy text/IDs or entering the separate structural replacement UI. Do not silently fall back to hosted Graphite. Distinguish this flow from explicit, guarded replacement of canonical events.
 - Direct recent decisions by the owner take precedence over historical drafts. Ask only when there is a real unresolved product or safety choice.
 
 ## Work proportionately
