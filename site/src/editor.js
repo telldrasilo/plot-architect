@@ -4618,15 +4618,21 @@ function cwShowPrepReview(){
 async function cwReviewPrep(command){
  if(!cwCleanForOperation()||modalOpen||cwPrepReview)return note('Дождитесь синхронизации проекта');
  const projectId=activeProjectId,revision=remote.revision;
+ // Staging a plan, choosing drafts and recording edge decisions do not alter
+ // canon. Keep server preview/CAS/receipt/readback, but reserve the review
+ // dialog for the actual replacement or cancellation of an existing plan.
+ const stageOnly=['create_preparation','set_preparation_candidates','set_preparation_decisions']
+  .includes(command.kind);
  cwAcceptanceBusy=true;
  try{
   const response=await cwWorkflowRequest(projectId,'preview',{expectedRevision:revision,command});
   if(activeProjectId!==projectId||remote.revision!==revision||remote.dirty||remote.blocked||
      response.kind!==command.kind||!response.preview)throw Error('Проект изменился во время проверки');
   cwPrepReview={command,plan:response.preview,projectId,revision,operationId:crypto.randomUUID()};
-  cwShowPrepReview();
+  if(!stageOnly)cwShowPrepReview();
  }catch(err){note('Не удалось проверить подготовку: '+err.message)}
  finally{cwAcceptanceBusy=false}
+ if(stageOnly&&cwPrepReview?.command===command)void cwConfirmPrepReview();
 }
 function cwPrepReadback(r,receipt,latest){
  if(receipt?.operationId!==r.operationId||receipt.kind!==r.command.kind||
@@ -4678,7 +4684,13 @@ async function cwConfirmPrepReview(){
   if(['REVISION_CONFLICT','PREVIEW_STALE','OPERATION_ID_REUSED','PREPARATION_STALE'].includes(err.code)){
    cwPrepReview=null;modalOpen=false;$('modal-host').innerHTML='';
    note('Ревизия изменилась; повторите предпросмотр');
-  }else{note('Изменение не подтверждено: '+err.message);if($('cw-prep-confirm'))$('cw-prep-confirm').disabled=false}
+  }else{
+   // An ambiguous response must not silently get a new operationId.
+   // Offer an explicit same-operation retry if the automatic staging failed.
+   if(!modalOpen)cwShowPrepReview();
+   note('Изменение не подтверждено: '+err.message);
+   if($('cw-prep-confirm'))$('cw-prep-confirm').disabled=false;
+  }
  }finally{cwAcceptanceBusy=false}
 }
 function cwStartPrep(nodeId){
@@ -4711,7 +4723,7 @@ function cwOpenPrepCandidateDialog(preparationId=null,extraIds=[]){
   '<label>Исходное событие<select id="cw-prep-target">'+options+'</select></label>'+
   '<div style="max-height:45vh;overflow:auto">'+rows+'</div>'+
   '<div class="buttons"><button type="button" id="cw-prep-candidate-back">Назад</button>'+
-  '<button type="submit" class="primary">Проверить выбор</button></div></form></div>';
+  '<button type="submit" class="primary">Использовать выбранные</button></div></form></div>';
  const close=()=>{modalOpen=false;$('modal-host').innerHTML=''};
  $('cw-prep-candidate-back').onclick=close;
  $('cw-prep-target').onchange=()=>{
@@ -4805,7 +4817,7 @@ function cwRenderPrepInspector(el,id){
       return '<li>'+prev+' · '+esc(cwReplacementEdgeLabels[e.type]||e.type)+
         '<p class="muted">'+result+'</p></li>';
     }).join('')+'</ol>')+
-   (isOpen?'<button id="cw-prep-save-decisions" type="button">Проверить решения</button>':'')+'</div>'+
+   (isOpen?'<button id="cw-prep-save-decisions" type="button">Сохранить решения</button>':'')+'</div>'+
    (isOpen?'<div class="inspect-actions"><button id="cw-prep-apply" type="button"'+
      (solved!==p.incidentEdges.length||!p.candidateSelections.length?' disabled':'')+
      '>Проверить результат…</button><button id="cw-prep-postpone" type="button">Отложить</button>'+
