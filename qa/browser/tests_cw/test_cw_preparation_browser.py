@@ -6,6 +6,7 @@ site/tests/creative-workflow-preparation.test.mjs with temporary SQLite.
 """
 import copy
 import json
+import os
 from pathlib import Path
 from urllib.parse import urlsplit
 from playwright.sync_api import sync_playwright
@@ -184,6 +185,8 @@ def main():
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True,
+                                    **({"executable_path": os.environ["CHROMIUM_BIN"]}
+                                       if os.getenv("CHROMIUM_BIN") else {}),
                                     args=["--no-sandbox", "--disable-dev-shm-usage"])
         context = browser.new_context(viewport={"width": 1450, "height": 1050})
         context.route(ORIGIN + "/**", serve)
@@ -198,26 +201,23 @@ def main():
         page.locator('[data-node="b"]').click()
         page.locator("#i-prepare-replacement").click()
         review = page.locator("#cw-prep-review")
-        review.wait_for()
-        assert "останутся действующими" in review.inner_text()
-        assert db["graph"] == original
-        assert db["generic"] == len(db["applies"]) == 0
-        # Canceling a preview cannot make B disappear.
-        page.keyboard.press("Escape")
-        assert review.count() == 0
-        assert page.locator('[data-node="b"]').count() == 1
-        assert page.locator('[data-edge="ab"]').count() == 1
-        page.locator("#i-prepare-replacement").click()
-        review.wait_for()
-        page.locator("#cw-prep-confirm").click()
         page.wait_for_function(
             "()=>__graphite.getState().replacementPreparations?.[0]?.state==='open'"
             "&&!__graphite.getRemote().busy&&!__graphite.getRemote().dirty")
         assert db["applies"] == ["create_preparation"]
+        assert db["previews"][0]["plan"]["canonicalChanged"] is False
+        assert review.count() == 0  # no preliminary modal for staging
         assert page.locator('[data-node="b"]').count() == 1
         assert page.locator('[data-edge="ab"]').count() == 1
         assert page.locator('[data-edge="bc"]').count() == 1
         assert page.locator("#inspector").locator("#cw-prep-pick").count() == 1
+        # Cancelling an existing plan still deserves explicit confirmation.
+        page.locator("#cw-prep-cancel").click()
+        review.wait_for()
+        assert "Исходник и черновики сохранятся" in review.inner_text()
+        page.keyboard.press("Escape")
+        assert review.count() == 0
+        assert db["applies"] == ["create_preparation"]
 
         page.locator("#cw-prep-pick").click()
         dialog = page.locator("#cw-prep-candidate-form")
@@ -225,11 +225,10 @@ def main():
         dialog.locator('[data-prep-candidate="x"]').check()
         dialog.locator('[data-prep-candidate="y"]').check()
         dialog.locator("button[type=submit]").click()
-        review.wait_for()
-        assert "Выбрано черновиков: 2" in review.inner_text()
-        page.locator("#cw-prep-confirm").click()
         page.wait_for_function(
-            "()=>__graphite.getState().replacementPreparations[0].candidateSelections.length===2")
+            "()=>__graphite.getState().replacementPreparations[0].candidateSelections.length===2"
+            "&&!__graphite.getRemote().busy")
+        assert review.count() == 0
         assert page.locator('[data-node="b"]').count() == 1
 
         relations = page.locator("#inspector")
@@ -241,11 +240,10 @@ def main():
         first.locator('[data-prep-target-type]').select_option("precedes")
         second.locator('[data-prep-mode]').select_option("drop")
         relations.locator("#cw-prep-save-decisions").click()
-        review.wait_for()
-        assert "Нерешённых старых связей: 0" in review.inner_text()
-        page.locator("#cw-prep-confirm").click()
         page.wait_for_function(
-            "()=>__graphite.getState().replacementPreparations[0].edgeDecisions.length===2")
+            "()=>__graphite.getState().replacementPreparations[0].edgeDecisions.length===2"
+            "&&!__graphite.getRemote().busy")
+        assert review.count() == 0
         assert page.locator('[data-edge="bc"]').count() == 1
         assert db["applies"] == [
             "create_preparation", "set_preparation_candidates",
@@ -302,7 +300,8 @@ def main():
         context.close()
         browser.close()
     print(json.dumps({"result": "PASS", "operations": db["applies"],
-                      "checks": ["canon unchanged before apply", "Esc cancellation",
+                      "checks": ["canon unchanged before apply", "no redundant staging confirmations",
+                                 "Esc cancellation of existing plan",
                                  "explicit candidates", "old edge decisions",
                                  "atomic apply", "historical originals",
                                  "unselected draft boundary", "reload"]},
